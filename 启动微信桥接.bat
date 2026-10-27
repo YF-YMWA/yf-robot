@@ -45,7 +45,35 @@ if not exist "%PY%" (
 
 set "WHALE_BOT_URL=http://127.0.0.1:8899/api/wechat"
 cd /d "%BRIDGE%"
+set "TRIES=0"
+:restart
 "%PY%" wechatauto_bridge.py
+set "RC=%errorlevel%"
 
+REM 退出码 0 = 正常退出（含「已有实例在跑」「用户 Ctrl+C」），不重启
+if "%RC%"=="0" goto bridge_done
+
+set /a TRIES+=1
+echo.
+echo ============================================
+echo   桥接异常退出（代码 %RC%）
+echo   5 秒后自动重启（第 %TRIES%/8 次）
+echo   崩溃现场：bridge_wg\data\bridge-crash.log
+echo ============================================
+echo.
+if %TRIES% GEQ 8 goto bridge_gaveup
+timeout /t 5 /nobreak >nul
+goto restart
+
+:bridge_gaveup
+echo.
+echo [supervisor] 连续异常退出 8 次，停止自动重启。
+echo 请把 bridge_wg\data\bridge-crash.log 最后一段发出来。
+echo.
 pause
+goto bridge_done
+
+:bridge_done
+pause
+
 endlocal

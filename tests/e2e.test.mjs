@@ -4,10 +4,31 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { ChatEngine } from '../core/engine.mjs';
 import { WebChannel } from '../channels/web.mjs';
 import { loadConfig } from '../core/config.mjs';
 import { loadPersona, PERSONA_DEFAULTS } from '../core/persona.mjs';
+
+/**
+ * 测试专用数据目录。
+ *
+ * 绝对不能让测试往真实 data/ 里写东西 —— 以前 e2e 用 18083 起通道，
+ * 把 actual-port.txt 覆盖成了 18083，导致下次双击鲸鲸.bat 时
+ * 启动脚本打开一个死链接（用户看到「突然无法运行」）。
+ *
+ * 放在工作区内的 .tmp（本机沙箱不允许 node 写系统临时目录）。
+ */
+const TEST_DATA_DIR = fs.mkdtempSync(
+  path.join(process.cwd(), '.tmp', 'e2e-'),
+);
+process.on('exit', () => {
+  try {
+    fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+  } catch {}
+});
 
 /** 构造一个假的 fetch，模拟 OpenAI 流式响应。 */
 function mockFetch(replyText, { failTimes = 0 } = {}) {
@@ -224,7 +245,7 @@ test('网页通道：SSE 返回 done 事件', async () => {
     fetchImpl: mockFetch('测试回复'),
   });
 
-  const web = new WebChannel({ engine, config, logger: { error() {} } });
+  const web = new WebChannel({ engine, config, logger: { error() {} }, dataDir: TEST_DATA_DIR });
   const url = await web.start();
 
   try {
@@ -250,7 +271,7 @@ test('网页通道：status 接口', async () => {
     logger: { error() {}, warn() {}, info() {} },
     fetchImpl: mockFetch('ok'),
   });
-  const web = new WebChannel({ engine, config, logger: { error() {} } });
+  const web = new WebChannel({ engine, config, logger: { error() {} }, dataDir: TEST_DATA_DIR });
   const url = await web.start();
   try {
     const s = await (await fetch(`${url}/api/status`)).json();
@@ -269,7 +290,7 @@ test('网页通道：重置会话', async () => {
     logger: { error() {}, warn() {}, info() {} },
     fetchImpl: mockFetch('ok'),
   });
-  const web = new WebChannel({ engine, config, logger: { error() {} } });
+  const web = new WebChannel({ engine, config, logger: { error() {} }, dataDir: TEST_DATA_DIR });
   const url = await web.start();
   try {
     await engine.handle({ sessionId: 'r1', text: '你好' });

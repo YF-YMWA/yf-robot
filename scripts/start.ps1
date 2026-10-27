@@ -131,6 +131,23 @@ $openJob = {
     } catch { }
   }
 
+  # 端口文件可能是「别人留下的」：以前跑测试的实例会把 18083 之类写进来，
+  # 服务其实在 8899，结果浏览器打开一个死链接，用户看到「无法运行」。
+  # 所以读到之后必须验证它真的能应答，答不上来就当没读到。
+  if ($realPort -gt 0) {
+    $probeOk = $false
+    for ($i = 0; $i -lt 12; $i++) {
+      try {
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$realPort/api/status" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+        if ($r.StatusCode -eq 200) { $probeOk = $true; break }
+      } catch { Start-Sleep -Milliseconds 400 }
+    }
+    if (-not $probeOk) {
+      Write-Host ("  [提示] 端口文件写着 " + $realPort + " 但那里没有服务，改为自动探测") -ForegroundColor DarkGray
+      $realPort = 0
+    }
+  }
+
   # 拿不到端口文件才退回探测（老版本兼容）
   if ($realPort -eq 0) {
     for ($i = 0; $i -lt 20; $i++) {
@@ -154,11 +171,21 @@ $openJob = {
   $url = "http://127.0.0.1:$realPort/console"
 
   # 等页面真能访问
+  $reachable = $false
   for ($i = 0; $i -lt 30; $i++) {
     try {
       $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-      if ($r.StatusCode -eq 200) { break }
+      if ($r.StatusCode -eq 200) { $reachable = $true; break }
     } catch { Start-Sleep -Milliseconds 400 }
+  }
+
+  # 打不开就别开浏览器 —— 弹一个 404/拒绝连接的窗口只会让人以为坏了
+  if (-not $reachable) {
+    Write-Host ''
+    Write-Host "  [提示] 服务没在这个地址应答，先不自动打开浏览器。" -ForegroundColor Yellow
+    Write-Host ("         手动试一下： " + $url) -ForegroundColor DarkGray
+    Write-Host ''
+    return
   }
 
   Start-Sleep -Milliseconds 400

@@ -24,7 +24,7 @@ export class WebChannel {
    * @param {object} opts.config 完整配置
    * @param {object} [opts.logger]
    */
-  constructor({ engine, config, logger = console, admin = null }) {
+  constructor({ engine, config, logger = console, admin = null, dataDir = null }) {
     this.engine = engine;
     this.config = config;
     this.log = logger;
@@ -32,11 +32,21 @@ export class WebChannel {
     this.server = null;
     this.name = 'web';
 
+    /**
+     * 数据目录。
+     *
+     * 默认是项目里的 data/，但**测试必须能改**：
+     * 之前 e2e 测试用 18083 起通道，它把 actual-port.txt 写进了真实 data/，
+     * 于是下次双击鲸鲸.bat 时启动脚本读到 18083、打开一个死链接 ——
+     * 用户看到的就是「突然无法运行」。
+     */
+    this.dataDir = dataDir || path.join(__dirname, '..', 'data');
+
     // 本地访问令牌：防止同机其他程序（含恶意网页）调用管理接口。
     // 设 authToken = false 可关闭（不建议）。
     this.token = config.server?.authToken === false
       ? ''
-      : ensureToken(path.join(__dirname, '..', 'data'));
+      : ensureToken(this.dataDir);
 
     /**
      * 控制台页面在线表：pageId → 最后一次 ping 的时间戳。
@@ -197,9 +207,13 @@ export class WebChannel {
         // 新实例实际在 8900，用户看着就是「解压出来的这份不能用」。
         // 写个文件最省事，启动脚本直接读，不用猜。
         try {
-          const f = path.join(__dirname, '..', 'data', 'actual-port.txt');
+          const f = path.join(this.dataDir, 'actual-port.txt');
           mkdirSync(path.dirname(f), { recursive: true });
           writeFileSync(f, String(p), 'utf8');
+          // 注意：这里**故意不在退出时删这个文件**。
+          // 试过删，结果有竞态：重启时新实例刚写进去，旧实例退出时又把它删了，
+          // 启动脚本拿不到端口。反正 start.ps1 会验证端口是否真的能应答，
+          // 留个过期文件也不会打开死链接。
         } catch (e) {
           this.log.warn?.(`[web] 端口文件写入失败: ${e.message}`);
         }
