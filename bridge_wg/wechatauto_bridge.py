@@ -2534,17 +2534,18 @@ def main():
             return None
 
     def crop_to_main_blob(img):
-        """从一段截图里裁出最大的那块内容（只留表情包本身）。
+        """从截图里裁出真正有内容的那块（只留表情包本身）。
 
         为什么需要：
-            表情包截图是按「消息行」截的。用户引用/回复过一张图时，
-            这一行里会同时出现引用缩略图和表情包。整行存进素材库后，
-            视觉模型会描述成「这张图片包含两个部分」——
-            结果是没有情绪标签，按语气挑图永远挑不中，
-            用户看到的就是「收进来了但不能正常用」。
+            表情包截图是按「消息行」截的，但这一行里可能混着：
+              · 引用/回复的缩略图（并排在旁边）
+              · 窗口标题栏、会话头部（矩形定位偏上时）
+            整块存进素材库后，视觉模型会描述成「这张图片分为几个部分」，
+            情绪标签抽不出来，按语气永远挑不中。
+            实测还存进过带微信标题栏（最小化/关闭按钮）的截图。
 
-        做法：按列统计「和背景色不同的像素数」，
-        找出连续有内容的列段，取最宽的一段。
+        做法：先按列找连续有内容的段（去掉并排的小图），
+        再按行裁掉上下的空白/纯色条（去掉标题栏之类）。
 
         @returns 裁好的图；不适用时原样返回
         """
@@ -2553,10 +2554,6 @@ def main():
 
             w, h = img.size
             if w < 60 or h < 20:
-                return img
-            # 只在「横向很宽」时处理 —— 说明很可能并排着两个东西。
-            # 正常表情包接近方形，不该被裁。
-            if w / max(1, h) < 1.6:
                 return img
 
             g = img.convert("L")
@@ -2567,48 +2564,69 @@ def main():
             bg = corners[len(corners) // 2]
             tol = 14
 
-            cols = []
-            for x in range(w):
-                ink = 0
-                for y in range(0, h, 2):
+            def ink_cols(im_w, im_h, get):
+                out = []
+                for x in range(im_w):
+                    n = 0
+                    for y in range(0, im_h, 2):
+                        if abs(get(x, y) - bg) > tol:
+                            n += 1
+                    out.append(n)
+                return out
+
+            # ---- 第一遍：按列去掉旁边并排的内容 ----
+            if w / max(1, h) >= 1.6:
+                cols = ink_cols(w, h, lambda x, y: px[x, y])
+                thresh = max(2, int((h / 2) * 0.06))
+
+                runs = []
+                start = None
+                for x, v in enumerate(cols):
+                    if v > thresh:
+                        if start is None:
+                            start = x
+                    elif start is not None:
+                        runs.append((start, x - 1))
+                        start = None
+                if start is not None:
+                    runs.append((start, w - 1))
+
+                merged = []
+                for a, b in runs:
+                    if merged and a - merged[-1][1] <= 8:
+                        merged[-1] = (merged[-1][0], b)
+                    else:
+                        merged.append((a, b))
+
+                if len(merged) >= 2:
+                    a, b = max(merged, key=lambda r: r[1] - r[0])
+                    if b - a >= 40:
+                        pad = 2
+                        img = img.crop((max(0, a - pad), 0, min(w, b + 1 + pad), h))
+                        g = img.convert("L")
+                        px = g.load()
+                        w, h = img.size
+
+            # ---- 第二遍：按行去掉上下的大片空白/纯色条 ----
+            rows = []
+            for y in range(h):
+                n = 0
+                for x in range(0, w, 2):
                     if abs(px[x, y] - bg) > tol:
-                        ink += 1
-                cols.append(ink)
+                        n += 1
+                rows.append(n)
 
-            # 噪声阈值：一列里至少 6% 的行有内容
-            thresh = max(2, int((h / 2) * 0.06))
-            runs = []
-            start = None
-            for x, v in enumerate(cols):
-                if v > thresh:
-                    if start is None:
-                        start = x
-                elif start is not None:
-                    runs.append((start, x - 1))
-                    start = None
-            if start is not None:
-                runs.append((start, w - 1))
+            rth = max(2, int((w / 2) * 0.06))
+            ys = [y for y, v in enumerate(rows) if v > rth]
+            if ys:
+                y0, y1 = ys[0], ys[-1]
+                # 只有明显能切掉一截时才动（避免把留白正常的图裁得太紧）
+                if (y0 > h * 0.08) or (y1 < h * 0.92):
+                    pad = 2
+                    img = img.crop((0, max(0, y0 - pad), w, min(h, y1 + 1 + pad)))
+                    log("表情包裁剪：纵向 %d→%d（去掉标题栏/空白）" % (y0, y1))
 
-            # 合并靠得很近的段（表情包内部可能有细缝）
-            merged = []
-            for a, b in runs:
-                if merged and a - merged[-1][1] <= 8:
-                    merged[-1] = (merged[-1][0], b)
-                else:
-                    merged.append((a, b))
-
-            if len(merged) < 2:
-                return img
-
-            a, b = max(merged, key=lambda r: r[1] - r[0])
-            if b - a < 40:
-                return img
-
-            pad = 2
-            cropped = img.crop((max(0, a - pad), 0, min(w, b + 1 + pad), h))
-            log("表情包裁剪：%dx%d → %dx%d（去掉旁边的小图）" % (
-                w, h, cropped.width, cropped.height))
-            return cropped
+            return img
         except Exception as e:                      # noqa: BLE001
             log("表情包裁剪跳过：%r" % (e,))
             return img
@@ -2704,14 +2722,16 @@ def main():
 
             # 比例离谱的不要。
             #
-            # 表情包基本是方形/接近方形。如果截出来是 1682x234 这种长条，
-            # 说明截的不是表情包，而是整个窗口的一条（实测存进过
-            # 「一张 Steam 页面的截图」，1682x234，宽高比 7.19）。
-            # 这种图存进素材库只会占位，而且看着能用实际毫无意义。
+            # 表情包基本是方形/接近方形。截出来是长条的，基本可以断定
+            # 截的不是表情包本身，而是「窗口的一条」——实测存进过：
+            #   · 1682x234（宽高比 7.19）一张 Steam 页面
+            #   · 841x213（宽高比 3.95）带微信标题栏的截图，表情包只剩底部一条还被切了
+            # 这种图存进素材库只会占位，看着能用实际毫无意义，
+            # 所以宁可这次不收，也不要污染库。
             try:
                 bw, bh = shot.size
                 ratio = bw / max(1, bh)
-                if ratio > 4.0 or ratio < 0.25:
+                if ratio > 2.8 or ratio < 0.25:
                     log("表情包截图：比例异常（%dx%d，宽高比 %.2f），判定截歪，放弃" % (
                         bw, bh, ratio))
                     return b"", b""
