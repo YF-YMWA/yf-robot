@@ -171,6 +171,7 @@ function printMenu(st) {
   console.log(`   ${col('cyan', '6')}  查看详细状态`);
   console.log(`   ${col('cyan', '7')}  停止全部`);
   console.log(`   ${col('cyan', '8')}  开机自启说明`);
+  console.log(`   ${col('cyan', '9')}  关掉「关网页即停服务」  ${col('dim', '应急用，不依赖服务在跑')}`);
   console.log(`   ${col('cyan', '0')}  退出`);
   console.log('');
 }
@@ -401,6 +402,57 @@ async function autostartHelp() {
 
 // ===== 主循环 =====
 
+/**
+ * 应急：关掉「关网页即停服务」。
+ *
+ * 为什么要单独放一个菜单项：
+ *   那个开关一开，关掉网页服务就退出了 —— 万一碰上问题，
+ *   网页打不开就没法去界面上关它。这里直接改 config.json，
+ *   不依赖服务是否在跑，属于最后一道退路。
+ */
+async function resetAutoStop() {
+  const cfgFile = path.join(ROOT, 'config.json');
+  console.log('  ' + col('bold', '关掉「关网页即停服务」'));
+  console.log('');
+
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
+  } catch (e) {
+    console.log(col('red', `  ✗ 读不到 config.json: ${e.message}`));
+    return;
+  }
+
+  cfg.server = cfg.server || {};
+  const was = cfg.server.stopWhenNoConsole === true;
+
+  if (!was) {
+    console.log(col('green', '  ✓ 它本来就是关着的，不用改'));
+  } else {
+    cfg.server.stopWhenNoConsole = false;
+    try {
+      fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2), 'utf8');
+      console.log(col('green', '  ✓ 已关掉：关网页不会再停服务了'));
+    } catch (e) {
+      console.log(col('red', `  ✗ 写不进去: ${e.message}`));
+      return;
+    }
+  }
+
+  // 顺手放一个 keep-alive 标记，双保险
+  try {
+    const flag = path.join(ROOT, 'data', 'keep-alive');
+    fs.mkdirSync(path.dirname(flag), { recursive: true });
+    if (!fs.existsSync(flag)) {
+      fs.writeFileSync(flag, '存在这个文件时，「关网页即停服务」一律不生效\n', 'utf8');
+      console.log(col('dim', '  （顺手建了 data/keep-alive，双保险）'));
+    }
+  } catch {}
+
+  console.log('');
+  console.log(col('dim', '  服务如果正在跑，需要重启才生效；没跑就下次启动生效。'));
+}
+
 async function main() {
   try {
     process.stdout.write('\x1b[2J\x1b[H');
@@ -441,12 +493,15 @@ async function main() {
       case '8':
         await autostartHelp();
         break;
+      case '9':
+        await resetAutoStop();
+        break;
       case '0':
         closeRl();
         console.log(col('dim', '  再见'));
         return;
       default:
-        console.log(col('dim', '  请输入 0-8'));
+        console.log(col('dim', '  请输入 0-9'));
     }
 
     console.log('');

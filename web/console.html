@@ -328,6 +328,55 @@
         点「重启服务」会关掉当前实例并重新启动一个，页面会自动刷新。
       </div>
     </div>
+
+    <!-- 后台运行：关网页即停服务 -->
+    <div class="card">
+      <h2>后台运行
+        <span class="sp"></span>
+        <span class="chip" id="autoStopChip">读取中</span>
+      </h2>
+      <div class="hint" style="margin-bottom:12px">
+        默认情况下，服务是<strong>独立后台进程</strong>，关掉网页它照样跑（微信才能一直在线）。<br>
+        如果你只在电脑前用、不想让它偷偷常驻，可以打开下面这个开关。
+      </div>
+
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:8px">关掉网页就停服务</label>
+        <div class="ctl" style="flex-direction:column;align-items:stretch;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="switch" id="swAutoStop" onclick="toggleSw('swAutoStop')"></div>
+            <span class="hint" id="autoStopDesc">读取中…</span>
+          </div>
+          <div class="hint" style="color:var(--warn)">
+            ⚠ 开着它接微信时：一关网页，服务 15 秒后就退出，微信那边立刻不回话了。<br>
+            只在自己电脑上用、不用微信时才建议开。
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:8px">应急：保持运行</label>
+        <div class="ctl" style="flex-direction:column;align-items:stretch;gap:8px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="switch" id="swKeepAlive" onclick="toggleSw('swKeepAlive')"></div>
+            <span class="hint" id="keepAliveDesc">读取中…</span>
+          </div>
+          <div class="hint">
+            勾上这个，就算上面那个开关开着，服务也<strong>不会</strong>因为关网页而退出。<br>
+            <span style="color:var(--dim)">
+              万一开了「关网页即停」又收不了场，随时回来勾这个；<br>
+              网页也打不开的话：双击 <code>鲸鲸.bat</code> 选「关掉『关网页即停服务』」，
+              或者直接删掉 <code>data\keep-alive</code> 反过来。
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+        <button onclick="saveServerMode()">保存</button>
+        <span class="hint" id="serverModeHint"></span>
+      </div>
+    </div>
   </div>
 
   <div class="page" id="page-chat">
@@ -2341,6 +2390,125 @@ async function saveGroup() {
   } catch (e) {
     if (hint) hint.textContent = '✗ ' + e.message;
   }
+}
+
+/** 保存后台运行设置。 */
+async function saveServerMode() {
+  const hint = $('serverModeHint');
+  if (hint) hint.textContent = '保存中…';
+
+  const stopWhenNoConsole = $('swAutoStop').classList.contains('on');
+  const keepAlive = $('swKeepAlive').classList.contains('on');
+
+  // 打开「关网页即停」时再确认一次 —— 这个开关一开，微信就会跟着停
+  if (stopWhenNoConsole && !keepAlive) {
+    const ok = confirm(
+      '开启后：关掉所有控制台页面约 15 秒，服务会自动退出。\n\n' +
+        '如果你在用微信，微信那边也会立刻不回话。\n\n' +
+        '确定要开吗？（随时可以用「保持运行」或鲸鲸.bat 关掉）',
+    );
+    if (!ok) {
+      if (hint) hint.textContent = '已取消';
+      return;
+    }
+  }
+
+  try {
+    const j = await api('config', {
+      method: 'POST',
+      body: { server: { stopWhenNoConsole, keepAlive } },
+    });
+    if (j.ok) {
+      if (hint) hint.textContent = '✓ 已保存，立即生效';
+      toast('后台运行设置已保存');
+      await loadServerMode();
+    } else {
+      if (hint) hint.textContent = '✗ ' + (j.error || '保存失败');
+    }
+  } catch (e) {
+    if (hint) hint.textContent = '✗ ' + e.message;
+  }
+}
+
+/** 读后台运行设置并渲染。 */
+async function loadServerMode() {
+  try {
+    const c = await api('config');
+    const s = c.server || {};
+    const on = s.stopWhenNoConsole === true;
+    const keep = s.keepAliveFile === true;
+
+    setSw('swAutoStop', on);
+    setSw('swKeepAlive', keep);
+
+    const chip = $('autoStopChip');
+    if (chip) {
+      if (!on) {
+        chip.textContent = '后台常驻';
+        chip.className = 'chip on';
+      } else if (keep) {
+        chip.textContent = '已开但被压制';
+        chip.className = 'chip warn';
+      } else {
+        chip.textContent = '关网页即停';
+        chip.className = 'chip off';
+      }
+    }
+
+    const desc = $('autoStopDesc');
+    if (desc) {
+      desc.textContent = on
+        ? '已开启：关掉所有控制台页面约 15 秒后，服务自动退出'
+        : '已关闭：关掉网页后服务继续在后台跑（推荐接微信时这样）';
+    }
+
+    const kd = $('keepAliveDesc');
+    if (kd) {
+      kd.textContent = keep
+        ? '已勾选：不会因为关网页而退出（data/keep-alive 存在）'
+        : '未勾选';
+    }
+  } catch (e) {
+    toast('读取后台运行设置失败: ' + e.message, 'err');
+  }
+}
+
+/**
+ * 控制台页面心跳。
+ *
+ * 「关网页即停服务」靠它判断页面还在不在：
+ *   · 每 4 秒报一次「我还开着」
+ *   · 关页面/刷新时用 sendBeacon 报一声拜拜（sendBeacon 在 unload 时也能发出去）
+ * 刷新会先拜拜再 ping，服务端有 15 秒宽限，不会把自己刷没。
+ */
+const CONSOLE_PAGE_ID = 'pg-' + Math.random().toString(36).slice(2, 12) + '-' + Date.now().toString(36);
+
+function pingConsole() {
+  try {
+    fetch('/api/console/ping', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pageId: CONSOLE_PAGE_ID }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {}
+}
+
+function startConsolePing() {
+  pingConsole();
+  setInterval(pingConsole, 4000);
+
+  const bye = () => {
+    try {
+      const blob = new Blob([JSON.stringify({ pageId: CONSOLE_PAGE_ID })], {
+        type: 'application/json',
+      });
+      navigator.sendBeacon('/api/console/bye', blob);
+    } catch {}
+  };
+
+  window.addEventListener('pagehide', bye);
+  window.addEventListener('beforeunload', bye);
 }
 
 async function loadActive() {
@@ -4936,11 +5104,14 @@ async function loadAll() {
     loadMemory(),
     loadImagegen(),
     loadBridge(),
+    loadServerMode(),
   ]);
 }
 
 loadAll();
 setInterval(loadStatus, 10000);
+// 让服务知道这个页面还开着（「关网页即停服务」靠它判断）
+startConsolePing();
 </script>
 </body>
 </html>

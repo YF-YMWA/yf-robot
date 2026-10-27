@@ -239,10 +239,55 @@ function healKeysFromBackup(config) {
 
   if (!healed.length) return config;
 
+  /**
+   * 先把「磁盘上到底有没有」单独读一遍，再决定这条消息该说什么。
+   *
+   * 之前只有一句「检测到 Key 丢失」，很容易让人以为 Key 真没了 ——
+   * 实际上控制台里一直好好显示着。区别很重要：
+   *   · 磁盘上确实没有 → 真的丢了（只是被自动补回来）
+   *   · 磁盘上有、内存里没有 → 加载阶段出的问题（并发写/解析），
+   *     Key 其实一直在，功能也没受影响，只是这次启动读岔了
+   */
+  let diskView = null;
+  let diskWhy = '';
+  try {
+    diskView = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
+  } catch (e) {
+    diskWhy = e.message;
+  }
+
+  const rebuilt = [];
+  const mismatched = [];
+  for (const k of SECTIONS) {
+    if (!healed.some((h) => h.startsWith(k))) continue;
+    const onDisk = diskView?.[k]?.apiKey ? diskView[k].apiKey.length : 0;
+    (onDisk ? mismatched : rebuilt).push(`${k}(磁盘${onDisk}字符)`);
+  }
+
   console.warn('========================================');
-  console.warn('[!] 检测到 Key 丢失，已从备份自动恢复：');
+  if (mismatched.length) {
+    console.warn('[i] 启动自检：内存里读到的 Key 比磁盘上少，已按磁盘/归档补齐');
+    console.warn('    ' + mismatched.join('；'));
+    console.warn('    → Key 没有真丢，功能不受影响；只是这次启动读岔了。');
+    if (diskWhy) console.warn('    （直接读磁盘失败：' + diskWhy + '）');
+  } else {
+    console.warn('[!] 检测到 Key 丢失，已从备份自动恢复：');
+  }
   for (const h of healed) console.warn('    ' + h);
   console.warn('');
+
+  // 记进审计文件，下次再出现能对着时间点查
+  try {
+    const auditDir = path.join(ROOT, 'data');
+    fs.mkdirSync(auditDir, { recursive: true });
+    fs.appendFileSync(
+      path.join(auditDir, 'key-audit.log'),
+      `${new Date().toISOString()} by=startup-heal ` +
+        `${healed.join('，')} ` +
+        `disk=${mismatched.length ? 'has-key' : 'missing'}${diskWhy ? ` diskErr=${diskWhy}` : ''}\n`,
+      'utf8',
+    );
+  } catch {}
 
   try {
     // 恢复前先存一份当前的，免得把什么改坏了回不去

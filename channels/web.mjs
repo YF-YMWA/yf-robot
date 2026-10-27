@@ -8,6 +8,7 @@
  *   GET  /api/status    运行状态
  */
 import http from 'node:http';
+import fs from 'node:fs';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,98 @@ export class WebChannel {
     this.token = config.server?.authToken === false
       ? ''
       : ensureToken(path.join(__dirname, '..', 'data'));
+
+    /**
+     * 控制台页面在线表：pageId → 最后一次 ping 的时间戳。
+     *
+     * 用来支持「关掉网页就停服务」这个可选开关。
+     * 只有「本次运行中确实有页面连上来过」之后才会自动停 ——
+     * 开机自启 / 双击 bat 直接起的服务，没人开页面也不会莫名其妙自杀。
+     */
+    this.consolePages = new Map();
+    this.sawConsolePage = false;
+    this.stopTimer = null;
+    /** 连续多久没收到任何页面的 ping 就算「页面都关了」 */
+    this.idleMs = 15000;
+    /** 判定一个页面「还活着」的窗口 */
+    this.pageTtlMs = 12000;
+  }
+
+  /** 「关网页即停服务」现在生效吗（开关 + 未被 keep-alive 压制）。 */
+  #autoStopWanted() {
+    if (this.config.server?.stopWhenNoConsole !== true) return false;
+    // 硬退路：这个文件存在就一律不停，方便出问题时一行命令救回来
+    try {
+      if (fs.existsSync(path.join(__dirname, '..', 'data', 'keep-alive'))) return false;
+    } catch {}
+    return true;
+  }
+
+  /** 清掉过期页面。@returns 还活着的页面数 */
+  #livePages() {
+    const now = Date.now();
+    for (const [id, at] of this.consolePages) {
+      if (now - at > this.pageTtlMs) this.consolePages.delete(id);
+    }
+    return this.consolePages.size;
+  }
+
+  /** 记录一次页面心跳。 */
+  touchPage(pageId) {
+    const id = String(pageId || '').slice(0, 64) || 'anonymous';
+    this.consolePages.set(id, Date.now());
+    this.sawConsolePage = true;
+    if (this.stopTimer) {
+      clearTimeout(this.stopTimer);
+      this.stopTimer = null;
+      this.log.info?.('[web] 控制台又连上了，取消自动停止');
+    }
+  }
+
+  /** 页面主动说拜拜（关闭/刷新时）。 */
+  pageClosed(pageId) {
+    const id = String(pageId || '').slice(0, 64) || 'anonymous';
+    this.consolePages.delete(id);
+  }
+
+  /**
+   * 定期检查：开关开着 + 页面都关了 → 停服务。
+   *
+   * 为什么要等一会：刷新页面会先关再开，立刻停会把自己弄没。
+   * 15 秒足够覆盖刷新，也不会让人等太久。
+   */
+  startPresenceWatch() {
+    if (this.presenceTimer) return;
+    this.presenceTimer = setInterval(() => {
+      if (!this.#autoStopWanted()) return;
+      if (!this.sawConsolePage) return; // 从来没人开过页面 → 不动
+      if (this.#livePages() > 0) {
+        if (this.stopTimer) {
+          clearTimeout(this.stopTimer);
+          this.stopTimer = null;
+        }
+        return;
+      }
+      if (this.stopTimer) return; // 已经在倒计时了
+
+      this.log.info?.(`[web] 控制台页面已全部关闭，${Math.round(this.idleMs / 1000)} 秒后停止服务`);
+      this.stopTimer = setTimeout(() => {
+        this.stopTimer = null;
+        if (!this.#autoStopWanted()) return;
+        if (this.#livePages() > 0) return;
+        this.log.info?.('[web] 关网页即停服务已生效，正在退出');
+        try {
+          const lock = path.join(__dirname, '..', 'data', 'app.lock');
+          if (fs.existsSync(lock)) {
+            const cur = fs.readFileSync(lock, 'utf8').trim();
+            if (cur === String(process.pid)) fs.unlinkSync(lock);
+          }
+        } catch {}
+        process.exit(0);
+      }, this.idleMs);
+      this.stopTimer.unref?.();
+    }, 3000);
+    this.presenceTimer.unref?.();
   }
 
   async start() {
@@ -85,6 +178,9 @@ export class WebChannel {
         } catch (e) {
           this.log.warn?.(`[web] 端口文件写入失败: ${e.message}`);
         }
+
+        // 开始盯着控制台页面在不在（「关网页即停服务」开关用到）
+        this.startPresenceWatch();
 
         return `http://${host}:${p}`;
       } catch (e) {
@@ -198,6 +294,29 @@ export class WebChannel {
       // 同步接口：给外部桥接用，返回普通 JSON（不是 SSE）
       if (req.method === 'POST' && url.pathname === '/api/wechat') {
         return await this.#wechatSync(req, res);
+      }
+
+      // ===== 控制台页面在线状态（「关网页即停服务」用）=====
+      if (req.method === 'POST' && url.pathname === '/api/console/ping') {
+        const body = await readJson(req).catch(() => ({}));
+        this.touchPage(body.pageId);
+        return json(res, 200, { ok: true, live: this.#livePages() });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/console/bye') {
+        const body = await readJson(req).catch(() => ({}));
+        this.pageClosed(body.pageId);
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/console/presence') {
+        return json(res, 200, {
+          ok: true,
+          stopWhenNoConsole: this.config.server?.stopWhenNoConsole === true,
+          effective: this.#autoStopWanted(),
+          keepAlive: !this.#autoStopWanted() && this.config.server?.stopWhenNoConsole === true,
+          live: this.#livePages(),
+          sawPage: this.sawConsolePage,
+          idleSeconds: Math.round(this.idleMs / 1000),
+        });
       }
 
       // ===== 桥接配套接口 =====

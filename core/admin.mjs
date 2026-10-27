@@ -84,10 +84,34 @@ function backupConfig(file) {
  *   出事直接翻日志就能定位。
  */
 function writeConfig(file, cfg, tag = 'unknown', logger = console) {
+  /**
+   * 读磁盘现值。
+   *
+   * 这里必须区分「文件不存在」和「文件存在但读不出来」：
+   *   前者是首次运行，正常；
+   *   后者说明文件正被别的进程写、或者已经损坏 ——
+   *   这种情况下如果照常往下写，Key 守卫拿不到 before，会被静默跳过，
+   *   结果就是拿一份没有 Key 的对象覆盖掉真实配置。
+   *
+   * 实测 Key 反复丢失就是这个原因：整个函数最后没有兜底。
+   */
   let before = null;
-  try {
-    before = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {}
+  let beforeBroken = '';
+
+  if (fs.existsSync(file)) {
+    try {
+      before = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (e) {
+      beforeBroken = e.message;
+    }
+
+    // 读坏了就试 .bak —— writeConfig 每次写前都会留一份
+    if (!before) {
+      try {
+        before = JSON.parse(fs.readFileSync(file + '.bak', 'utf8'));
+      } catch {}
+    }
+  }
 
   const SECTIONS = ['llm', 'vision', 'voice', 'search', 'imagegen'];
 
@@ -130,16 +154,48 @@ function writeConfig(file, cfg, tag = 'unknown', logger = console) {
     }
   }
 
+  /**
+   * 兜底：文件存在却读不出内容（不是首次运行），就直接拒绝写。
+   *
+   * 宁可能这次保存失败、让用户重试，也不能拿一份没守卫过的对象
+   * 覆盖掉真实配置 —— 那等于所有 Key 一起丢。
+   */
+  if (!before && fs.existsSync(file) && guard) {
+    const msg =
+      `[config] 拒绝写入 by=${tag}：config.json 存在但读不出来` +
+      `（${beforeBroken || '内容为空'}），`.replace('，', '，') +
+      '此时写盘会丢掉所有 Key。请检查文件是否被占用或已损坏。';
+    logger.error?.(msg);
+    try {
+      fs.appendFileSync(
+        path.join(path.dirname(file), 'data', 'key-audit.log'),
+        `${new Date().toISOString()} 拒绝写入 by=${tag} reason=${beforeBroken || 'unreadable'}\n`,
+        'utf8',
+      );
+    } catch {}
+    throw new Error('config.json 读不出来，已放弃本次保存以免丢失 Key（详见 data/key-audit.log）');
+  }
+
   // 守卫字段不能写进文件
   delete cfg.__guardKeys;
   delete cfg.__clearKeys;
 
   // 备份：写前把当前文件存档
   try {
-    if (fs.existsSync(file)) fs.copyFileSync(file, file + '.bak');
+    if (fs.existsSync(file) && before) fs.copyFileSync(file, file + '.bak');
   } catch {}
 
-  fs.writeFileSync(file, JSON.stringify(cfg, null, 2), 'utf8');
+  /**
+   * 原子写：先写临时文件，再改名覆盖。
+   *
+   * 以前直接 writeFileSync 到 config.json —— 万一写到一半进程被杀、
+   * 或者另一个进程正好在读，就会留下半个 JSON。
+   * 下一次写入时 before 解析失败 → 守卫被跳过 → Key 全丢。
+   * （Key 反复消失就是这么来的）
+   */
+  const tmp = file + '.tmp-' + process.pid;
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8');
+  fs.renameSync(tmp, file);
 
   const b = keyLen(before);
   const a = keyLen(cfg);
@@ -152,6 +208,33 @@ function writeConfig(file, cfg, tag = 'unknown', logger = console) {
 
   if (changed) logger.warn?.(line);
   else logger.info?.(line);
+
+  /**
+   * Key 变更审计。
+   *
+   * 单独记一个文件，因为 Key 丢失这种问题事后要靠它定位：
+   * 哪一次写入、哪个调用方、把哪个 Key 从多长变成了多长。
+   * 光靠控制台日志翻不到（会被别的输出冲掉）。
+   */
+  try {
+    if (changed || restored.length) {
+      const ts = new Date().toISOString();
+      const detail = SECTIONS.map((k) => {
+        const o = before?.[k]?.apiKey ? before[k].apiKey.length : 0;
+        const n = cfg[k]?.apiKey ? cfg[k].apiKey.length : 0;
+        return o === n ? null : `${k}:${o}→${n}`;
+      })
+        .filter(Boolean)
+        .join(' ');
+      const auditDir = path.join(path.dirname(file), 'data');
+      fs.mkdirSync(auditDir, { recursive: true });
+      fs.appendFileSync(
+        path.join(auditDir, 'key-audit.log'),
+        `${ts} by=${tag} ${detail}${restored.length ? ` 守卫恢复=${restored.join(',')}` : ''}\n`,
+        'utf8',
+      );
+    }
+  } catch {}
 
   // 关键 Key 被清空时额外告警
   try {
@@ -172,6 +255,10 @@ function crc32(buf) {
   }
   return (c ^ 0xffffffff) >>> 0;
 }
+
+// 导出给单元测试用：Key 守卫和原子写是「丢了很难查」的那种逻辑，
+// 必须能直接测，不然只能等它出事。
+export { writeConfig };
 
 export class AdminApi {
   /**
@@ -3652,6 +3739,14 @@ print('%016x' % bits)
     const mask = (s) => (s ? s.slice(0, 4) + '****' + s.slice(-4) : '');
     const c = this.config;
     return {
+      /** 后台运行相关 */
+      server: {
+        port: c.server?.port,
+        stopWhenNoConsole: c.server?.stopWhenNoConsole === true,
+        /** data/keep-alive 存在时，上面那个开关会被压制 */
+        keepAliveFile: fs.existsSync(path.join(ROOT, 'data', 'keep-alive')),
+        pid: process.pid,
+      },
       llm: {
         baseUrl: c.llm.baseUrl,
         model: c.llm.model,
@@ -4056,6 +4151,38 @@ print('%016x' % bits)
           current.share.source.categories = src.categories.map(String).filter(Boolean).slice(0, 10);
         }
       }
+    }
+
+    /**
+     * 后台运行：关掉网页就停服务。
+     *
+     * 旁边那个 keepAlive 是应急开关 —— 万一开了收不了场，
+     * 勾上它（或直接建 data/keep-alive 空文件）就立刻失效，
+     * 不用改配置也能把服务留住。
+     */
+    if (patch.server) {
+      const s = patch.server;
+      current.server = current.server || {};
+
+      if (typeof s.stopWhenNoConsole === 'boolean') {
+        current.server.stopWhenNoConsole = s.stopWhenNoConsole;
+      }
+      if (typeof s.keepAlive === 'boolean') {
+        const flag = path.join(ROOT, 'data', 'keep-alive');
+        try {
+          if (s.keepAlive) {
+            fs.mkdirSync(path.dirname(flag), { recursive: true });
+            fs.writeFileSync(flag, '存在这个文件时，「关网页即停服务」一律不生效\n', 'utf8');
+          } else if (fs.existsSync(flag)) {
+            fs.unlinkSync(flag);
+          }
+        } catch (e) {
+          this.log.warn?.(`[admin] keep-alive 标记写入失败: ${e.message}`);
+        }
+      }
+
+      // 同步内存，热生效（在线检测每次都会读 this.config）
+      this.config.server = { ...(this.config.server || {}), ...current.server };
     }
 
     if (patch.channels) {
