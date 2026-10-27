@@ -322,11 +322,13 @@ export class WebChannel {
 
       // 素材文件（表情包 / 图片，控制台预览用）
       //
-      // 注意排除 policy / ingest：这两个是同前缀的接口，不是文件名。
-      // 不排除的话会被这里当成「读一个叫 policy 的文件」，直接 403。
+      // 注意排除 policy / pick / file：这几个是同前缀的接口，不是文件名。
+      // 不排除的话会被这里当成「读一个叫 policy 的文件」，直接 403/404。
       if (
         req.method === 'GET'
         && !url.pathname.startsWith('/api/media/policy')
+        && !url.pathname.startsWith('/api/media/pick')
+        && !url.pathname.startsWith('/api/media/file/')
         && (url.pathname.startsWith('/api/sticker/') || url.pathname.startsWith('/api/media/'))
       ) {
         if (!checkToken(req, url, this.token)) {
@@ -466,6 +468,39 @@ export class WebChannel {
           n++;
         }
         return json(res, 200, { ok: true, stored: n });
+      }
+
+      // 适配器要发图：按语气挑一张（素材库在核心，适配器那边没有图）
+      if (req.method === 'GET' && url.pathname === '/api/media/pick') {
+        const text = url.searchParams.get('text') || '';
+        const r = this.admin?.pickSticker?.(text) || { ok: false, reason: '核心未就绪' };
+        return json(res, 200, r);
+      }
+
+      // 适配器下载素材文件（给 UIA 拿去发）
+      if (req.method === 'GET' && url.pathname.startsWith('/api/media/file/')) {
+        const rest = url.pathname.slice('/api/media/file/'.length).split('/');
+        const kindMap = { stickers: 'stickers', images: 'images', generated: 'generated' };
+        const kind = kindMap[rest[0]] || 'stickers';
+        const name = decodeURIComponent(rest.slice(1).join('/'));
+
+        // 本地令牌或适配器令牌都放行 —— 适配器没有本地令牌。
+        // 核心没配 inboundToken 时同样放行（单机自用场景，和 /api/media/ingest 一致）
+        const localOk = checkToken(req, url, this.token);
+        const expect = this.config.gateway?.wechat?.inboundToken || '';
+        const got = req.headers['x-adapter-token'] || '';
+        const adapterOk = !expect || got === expect;
+        if (!localOk && !adapterOk) {
+          return json(res, 403, { ok: false, error: '未授权' });
+        }
+
+        const r = this.admin?.readMediaFile?.(kind, name) || { ok: false, error: '核心未就绪' };
+        if (!r.ok) return json(res, 404, { ok: false, error: r.error });
+        res.writeHead(200, {
+          'content-type': name.endsWith('.gif') ? 'image/gif' : 'image/jpeg',
+          'content-length': r.buf.length,
+        });
+        return res.end(r.buf);
       }
 
       // ===== 控制台页面在线状态（「关网页即停服务」用）=====

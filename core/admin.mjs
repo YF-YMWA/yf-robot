@@ -1595,6 +1595,70 @@ print('%016x' % bits)
    * @param {string} name 文件名
    * @param {string} [kind] stickers | images | generated
    */
+  /**
+   * 按语气挑一张表情包。
+   *
+   * 素材库在核心这边 —— 适配器是独立仓库，它自己的 data/ 里没有图。
+   * 适配器要发图时调这个拿文件名，再去 /api/media/file/ 下载字节。
+   *
+   * @param {string} text 刚回复的内容，用来判断语气
+   * @returns {{ok:boolean, name?:string, tags?:string[], mood?:string[], reason?:string}}
+   */
+  pickSticker(text = '') {
+    const dirs = this.#mediaDirs();
+    const dir = dirs.stickers;
+    if (!fs.existsSync(dir)) return { ok: false, reason: '素材库目录不存在' };
+
+    // 只发真实存在的文件（索引里可能留着已经删掉的）
+    const files = fs.readdirSync(dir).filter((n) => /\.(jpe?g|png|gif)$/i.test(n));
+    if (!files.length) return { ok: false, reason: '素材库里没有图' };
+
+    const index = this.#readStickerIndex();
+    const t = String(text || '');
+
+    // 先看这句回复是什么语气
+    const tagWords = this.#emojiTags();
+    const mood = [];
+    for (const [tag, words] of Object.entries(tagWords)) {
+      if (words.some((w) => w && t.includes(w))) mood.push(tag);
+    }
+
+    // 有语气就优先挑同标签的，没有就全池随机
+    let pool = files;
+    if (mood.length) {
+      const matched = files.filter((n) => {
+        const tags = index[n]?.tags || [];
+        return tags.some((tag) => mood.includes(tag));
+      });
+      if (matched.length) pool = matched;
+    }
+
+    const name = pool[Math.floor(Math.random() * pool.length)];
+    return { ok: true, name, tags: index[name]?.tags || [], mood };
+  }
+
+  /**
+   * 给适配器下载素材文件。
+   *
+   * @param {string} kind stickers | images | generated
+   * @param {string} name 文件名
+   * @returns {{ok:boolean, buf?:Buffer, error?:string}}
+   */
+  readMediaFile(kind, name) {
+    const dirs = this.#mediaDirs();
+    const dir = dirs[kind] || dirs.stickers;
+    if (!/^[\w.\-]{1,120}$/.test(String(name || ''))) {
+      return { ok: false, error: '非法文件名' };
+    }
+    const file = path.join(dir, name);
+    if (!fs.existsSync(file)) return { ok: false, error: '文件不存在' };
+    try {
+      return { ok: true, buf: fs.readFileSync(file) };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
   async describeMediaOne(name, kind = 'stickers') {
     if (!name) return { ok: false, error: '缺少文件名' };
     if (!this.engine?.vision?.enabled) return { ok: false, error: '视觉模型未启用' };
