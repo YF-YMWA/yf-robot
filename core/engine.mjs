@@ -691,7 +691,7 @@ export class ChatEngine {
 
     // 词库：只有启用的才会拼进来，每次随机抽取一部分（避免提示词过长）
     try {
-      const wordsDir = path.join(this.config.root || process.cwd(), 'bridge_wg', 'resources');
+      const wordsDir = path.join(this.config.root || process.cwd(), 'bridge', 'resources');
       const wordNote = renderWordBanks({
         dir: wordsDir,
         banks: this.config.words || {},

@@ -917,7 +917,7 @@ export class AdminApi {
 
   /** 词库目录。 */
   #wordsDir() {
-    return path.join(ROOT, 'bridge_wg', 'resources');
+    return path.join(ROOT, 'bridge', 'resources');
   }
 
   /** 列出词库文件。 */
@@ -1608,7 +1608,7 @@ print('%016x' % bits)
     /**
      * 这条描述是不是「截歪了」——描述的是聊天界面而不是表情包本身。
      *
-     * 和 bridge_wg 里的 looks_like_bad_desc 保持同一套判断：
+     * 和 bridge 里的 looks_like_bad_desc 保持同一套判断：
      * 两边都会写同一个 index.json，判断不一致就会出现
      * 「这边刚跳过，那边又存进去」。
      */
@@ -2070,7 +2070,7 @@ print('%016x' % bits)
       this.config.wechat = { ...(this.config.wechat || {}), ...cfg.wechat };
       // 桥接进程要读这些，写进它的配置
       try {
-        const bridgeCfg = path.join(ROOT, 'bridge_wg', 'config.json');
+        const bridgeCfg = path.join(ROOT, 'bridge', 'config.json');
         if (fs.existsSync(bridgeCfg)) {
           const bc = JSON.parse(fs.readFileSync(bridgeCfg, 'utf8'));
           bc.wechat = bc.wechat || {};
@@ -2120,7 +2120,7 @@ print('%016x' % bits)
     } catch {}
 
     // 2. 补充：从桥接日志里挖（历史记录，可能带 wxid）
-    const logFile = path.join(ROOT, 'bridge_wg', 'data', 'wechat-bridge-4x.log');
+    const logFile = path.join(ROOT, 'bridge', 'data', 'wechat-bridge-4x.log');
     try {
       if (fs.existsSync(logFile)) {
         const raw = fs.readFileSync(logFile, 'utf8');
@@ -2371,7 +2371,7 @@ print('%016x' % bits)
    * 包一个 askLlm，供学习/摘要这类「提取型任务」用。
    *
    * 关键：必须走裸 LLM，不能走 engine.handle()。
-   * 走 handle 会套上鲸鲸的人设和回复规则（气泡切分、字数限制、口头禅），
+   * 走 handle 会套上YF-Robot 的人设和回复规则（气泡切分、字数限制、口头禅），
    * 结果是模型不肯按格式输出 —— 实测「每条一行」的要求全被忽略，
    * 摘要挤成一段、词条解析失败都源于此。
    */
@@ -3528,7 +3528,7 @@ print('%016x' % bits)
       chats.set(n, cur);
     };
 
-    const logFile = path.join(ROOT, 'bridge_wg', 'data', 'wechat-bridge-4x.log');
+    const logFile = path.join(ROOT, 'bridge', 'data', 'wechat-bridge-4x.log');
     try {
       if (fs.existsSync(logFile)) {
         const raw = fs.readFileSync(logFile, 'utf8');
@@ -3593,7 +3593,7 @@ print('%016x' % bits)
     const heartbeatFresh = hb && now - hb.at < 60000;
 
     // 读日志补充账号等静态信息
-    const logFile = path.join(ROOT, 'bridge_wg', 'data', 'wechat-bridge-4x.log');
+    const logFile = path.join(ROOT, 'bridge', 'data', 'wechat-bridge-4x.log');
     let account = '';
     let lastActivity = '';
     let logHasUia = false;
@@ -4148,9 +4148,9 @@ print('%016x' % bits)
         current.wechat.collectOnlyFrom = [];
       }
 
-      // 这些参数桥接进程要读，所以同步写进 bridge_wg/config.json
+      // 这些参数桥接进程要读，所以同步写进 bridge/config.json
       try {
-        const bridgeCfg = path.join(ROOT, 'bridge_wg', 'config.json');
+        const bridgeCfg = path.join(ROOT, 'bridge', 'config.json');
         if (fs.existsSync(bridgeCfg)) {
           const bc = JSON.parse(fs.readFileSync(bridgeCfg, 'utf8'));
           bc.wechat = bc.wechat || {};

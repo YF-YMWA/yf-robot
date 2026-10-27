@@ -37,6 +37,9 @@ const INCLUDE = [
   'config.example.json',
   'persona.json',
   'README.md',
+  // 开源分发必须带上许可证和第三方声明
+  'LICENSE',
+  'NOTICE',
   'core',
   'channels',
   'web',
@@ -44,14 +47,14 @@ const INCLUDE = [
   // 不打包 tests/：单元测试是开发用的，用户不需要；
   // 而且里面有一个写死的假 Key（sk-test-mock-*），会一直被扫描器拎出来。
   'tools',
-  'bridge_wg',
-  // 启动脚本：鲸鲸.bat 会调 scripts\start.ps1，漏了就打不开
+  'bridge',
+  // 启动脚本：YF-Robot.bat 会调 scripts\start.ps1，漏了就打不开
   'scripts',
   // 所有用户入口，一个都不能漏 —— 之前漏过三个，对方拿到手上只有主菜单
-  'start.bat',
-  '鲸鲸.bat',
-  '终端控制台.bat',
-  '高级工具.bat',
+  '启动服务.bat',
+  'YF-Robot.bat',
+  '状态面板.bat',
+  '工具菜单.bat',
   '启动微信桥接.bat',
 ];
 
@@ -67,7 +70,7 @@ const EXCLUDE_PATTERNS = [
   /^credentials\//,
 
   /**
-   * bridge_wg/data/ 是桥接的运行时数据，绝对不能打包。
+   * bridge/data/ 是桥接的运行时数据，绝对不能打包。
    *
    * 里面实测有 31 个用户个人文件：收到的图片、**本人的语音消息**
    * （.silk 原始 + .wav 转码）、care/share 状态，而且文件名全都带着
@@ -75,7 +78,7 @@ const EXCLUDE_PATTERNS = [
    *
    * 之前只写了 /^data\//，管不到子目录，结果这些东西真的进了包。
    */
-  /^bridge_wg\/data\//,
+  /^bridge\/data\//,
 
   /**
    * 兜底：任何层级的 data/ 目录都不进包。
@@ -84,25 +87,25 @@ const EXCLUDE_PATTERNS = [
   /(^|\/)data\//,
 
   // 只排除根目录的 config.json。
-  // 以前写的是 /config\.json$/（末尾锚定），会把 bridge_wg/config.json 也排掉 ——
+  // 以前写的是 /config\.json$/（末尾锚定），会把 bridge/config.json 也排掉 ——
   // 结果分发出去的包桥接一启动就读不到配置，GAME_TOKENS 这类变量全空，
   // 线程直接 NameError 崩掉，用户看到的就是「解压了用不了」。
   /^config\.json$/,
   // 桥接配置不直接复制：它里面有真实的 API Key（智谱那种 xxxx.yyyy 格式），
   // 复制过去会被敏感信息扫描拦下，或者更糟 —— 漏过去真的发给别人。
   // 改成在【5】里读源文件、清空 Key 和名单之后单独写一份干净的。
-  /^bridge_wg\/config\.json$/,
+  /^bridge\/config\.json$/,
   /package-lock\.json$/,
   /\.dsh-home/,
 
-  // bridge_wg 下的调试脚本
-  /^bridge_wg\/test_/,
-  /^bridge_wg\/check_/,
-  /^bridge_wg\/diag_/,
-  /^bridge_wg\/verify_/,
+  // bridge 下的调试脚本
+  /^bridge\/test_/,
+  /^bridge\/check_/,
+  /^bridge\/diag_/,
+  /^bridge\/verify_/,
 
   // Python 单元测试也不进发行包（跟根目录的 tests/ 一样）
-  /^bridge_wg\/tests\//,
+  /^bridge\/tests\//,
 
   // 我排查问题时产生的临时文件
   /\.before-heal\.bak$/,
@@ -119,7 +122,7 @@ const EXCLUDE_PATTERNS = [
  *   白名单下新脚本默认不出去，安全方向反过来了。
  */
 const TOOLS_ALLOW = new Set([
-  'tui.mjs', // 终端控制台.bat 用
+  'tui.mjs', // 状态面板.bat 用
   'autostart.mjs', // 开机自启
   'pack.mjs', // 重新打包
   'check-all.mjs', // 自检
@@ -190,7 +193,7 @@ function scanSecrets(files) {
     /**
      * 文件名本身就带隐私的先查一遍。
      *
-     * 实测踩过：bridge_wg/data/media-cache/ 里藏着
+     * 实测踩过：bridge/data/media-cache/ 里藏着
      *   wxid_xxxxxxxxxxxx_538_h.png
      *   wxid_xxxxxxxxxxxx_633.wav   ← 本人的语音
      * 这些都是二进制，内容扫不出来，但文件名已经把 wxid 暴露了。
@@ -248,7 +251,7 @@ function scanSecrets(files) {
 // ===== 主流程 =====
 
 console.log('========================================');
-console.log('  鲸鲸 · 打包');
+console.log('  YF-Robot · 打包');
 console.log('========================================');
 console.log('');
 
@@ -400,8 +403,8 @@ if (fs.existsSync(examplePath)) {
 // 这个文件缺失会让桥接把所有开关退回默认值（GAME_TOKENS 之类），
 // 表面上还能跑，实际功能全不对。所以既不能漏，也不能带本机数据。
 // 内容从源文件读，清干净再写到 dist。
-const bridgeCfgSrc = path.join(ROOT, 'bridge_wg', 'config.json');
-const bridgeCfgPath = path.join(DIST, 'bridge_wg', 'config.json');
+const bridgeCfgSrc = path.join(ROOT, 'bridge', 'config.json');
+const bridgeCfgPath = path.join(DIST, 'bridge', 'config.json');
 if (fs.existsSync(bridgeCfgSrc)) {
   try {
     const bc = JSON.parse(fs.readFileSync(bridgeCfgSrc, 'utf8'));
@@ -453,18 +456,18 @@ if (fs.existsSync(bridgeCfgSrc)) {
     scrub(bc);
 
     fs.writeFileSync(bridgeCfgPath, JSON.stringify(bc, null, 2), 'utf8');
-    console.log(`  已清洗 bridge_wg/config.json（清空 ${cleared} 个 Key，令牌占位、名单清空）`);
+    console.log(`  已清洗 bridge/config.json（清空 ${cleared} 个 Key，令牌占位、名单清空）`);
   } catch (e) {
-    console.log(`  ✗ 清洗 bridge_wg/config.json 失败: ${e.message}`);
+    console.log(`  ✗ 清洗 bridge/config.json 失败: ${e.message}`);
   }
 } else {
-  console.log('  ✗ 包里缺 bridge_wg/config.json（桥接会用默认值，功能会不对）');
+  console.log('  ✗ 包里缺 bridge/config.json（桥接会用默认值，功能会不对）');
 }
 console.log('');
 
 // 6. 生成使用说明
 console.log('【6】生成说明文件…');
-const readme = `# 鲸鲸 · 微信 AI 助手
+const readme = `# YF-Robot · 微信 AI 助手
 
 一个能接微信的 AI 聊天助手，支持看图、联网、工具调用、主动搭话。
 
@@ -485,7 +488,7 @@ const readme = `# 鲸鲸 · 微信 AI 助手
 
 ### 2. 启动
 
-双击 \`鲸鲸.bat\`，按提示：
+双击 \`YF-Robot.bat\`，按提示：
 
 1. 选择模型服务商
 2. 粘贴 API Key
@@ -493,9 +496,11 @@ const readme = `# 鲸鲸 · 微信 AI 助手
 
 ### 3. 配置微信（可选）
 
-1. 双击 \`bridge_wg\\启动桥接.bat\`
+1. 双击 \`启动微信桥接.bat\`
 2. 弹 UAC 时点「是」（需要管理员权限读取微信）
 3. 保持微信窗口可见，不要最小化到托盘
+
+> 桥接崩了会自动重启（5 秒后，最多 8 次），不用手动盯着。
 
 ### 4. 打开控制台
 
@@ -509,41 +514,134 @@ http://127.0.0.1:8899/console
 ## 目录说明
 
 \`\`\`
-鲸鲸.bat            主菜单（推荐从这里开始）
-start.bat           直接启动服务
+YF-Robot.bat        主入口（启动服务 + 打开控制台）
+启动服务.bat        只启动服务，不开浏览器
+状态面板.bat        终端里的实时状态面板
+工具菜单.bat        命令行菜单（测试能力、开关功能）
+启动微信桥接.bat     接微信时用（需要管理员权限）
+
 app.mjs             服务入口
-core/               核心模块
-channels/           通道（网页、微信）
+core/               核心：引擎、会话、记忆、工具、学习、群聊
+channels/           通道：网页 / iLink / 微信群 / 微信 UIA
 web/                网页界面 + 控制台
 cards/              角色卡
-bridge_wg/          微信桥接（独立）
-runtime/            Node + Python 运行时
-config.json         配置文件（Key 存在这里）
+bridge/             微信桥接（独立进程，Python）
+runtime/            Node + Python 运行时（自带，不用另装）
+
+config.json         配置（API Key 存在这里）
 data/sessions/      会话记忆（重启后接着上次聊）
 data/stickers/      表情包 + 描述索引（index.json）
 data/images/        收到的图片
 data/generated/     她画的图
+data/key-archive/   Key 快照（丢了能补回）
+data/key-audit.log  Key 变更记录
 \`\`\`
 
-## 几个值得知道的功能
+## 功能详解
 
-**她会记住你。**
-会话自动落盘到 \`data/sessions/\`，关掉服务、桥接断开重连，
-下次说话她接着上次聊，不会失忆。
+### 1. 会记住你（长期记忆）
 
-**表情包按语气发。**
-素材库里的图会自动生成描述和情绪标签（\`data/stickers/index.json\`），
-她回复后按当前语气挑一张贴合的，而不是随机甩。
-控制台「素材库」页可以看/改描述，也能点「重建缺失的」。
-后台也会自己慢慢补（启动 1 分钟后开始，每 10 分钟一批）。
+- 会话自动落盘到 \`data/sessions/\`，关服务、桥接断线重连都能接着聊
+- 自动从「我叫X」「我喜欢Y」里抽事实；**问句不抽**
+  （否则「我最喜欢什么」会被记成事实）
+- **换会话不串味**：不同人、不同群各自独立
+- **群聊里按发言人分开记**：A 报过名字，B 问「我叫什么」不会答成 A 的
+- 两个人重名时她会说「分不清」，不瞎认
 
-**素材库不会越攒越乱。**
-同一张图被反复收藏时，按「看起来是否一样」判断（感知哈希），
-不是按文件大小。控制台有「检查重复 / 清理重复」。
+### 2. 定向白名单（只收谁的图 / 谁能指挥她）
 
-**她可以调 DSH 干活。**
-控制台开启后，遇到复杂任务她会调用 DeepSeek Harness，
-而且会话号会保存，DSH 那边也记得之前聊过什么。
+**收藏白名单**：控制台 →「主人设置」→ 图片收藏
+
+| 设置 | 行为 |
+|---|---|
+| 留空 | 谁发的图都收（默认） |
+| 填了 wxid | **只收这些会话/发送者发的图**，别人的图不落盘 |
+
+适合这些场景：
+- 群里人多，只想存自己和朋友的图
+- 不想让陌生人的图堆满素材库
+
+填的是 wxid（\`wxid_xxx\` 这种），**不是昵称**——昵称谁都能改。
+控制台可以从已知联系人里直接选，不用手抄。
+
+**主人识别（三级）**
+
+| 级别 | 怎么判定 | 能用工具 | 能听私事 |
+|---|---|---|---|
+| 已验证 | wxid 精确匹配 | 是 | 是 |
+| 仅昵称 | 昵称对上了，但 wxid 不对 | 否 | **否** |
+| 陌生人 | 都不匹配 | 否 | 否 |
+
+昵称谁都能改成和你一样，所以只对上昵称不给任何权限——
+被冒充时她会说「光凭昵称我认不了」。
+
+### 3. 群聊策略（她什么时候该说话）
+
+控制台 →「主动功能」→ 群聊策略
+
+| 设置 | 说明 |
+|---|---|
+| 只在 @ 时回 | 开：只有 @、叫名字、主人说话才回；关：还会低概率主动插话 |
+| 主人总是回 | 主人在群里说话，不 @ 也回 |
+| 叫她什么 | 群里叫到这些词就算在叫她（默认「鲸鲸」） |
+| 接话窗口 | 被 @ 之后这段时间内继续正常聊天（默认 8 分钟） |
+| 每小时上限 | 防止在群里刷屏 |
+| 群里的主人 | 留空 = 用「主人设置」里的名单（推荐） |
+
+群里还能用指令：\`/mute\`、\`/unmute\`、\`/reset\`、\`/who\`——
+只有主人或群管理员能用，陌生人会被拒。
+
+### 4. 角色卡（换人设，不重启）
+
+标准 Character Card V2 格式，放在 \`cards/*.json\`。
+控制台「角色卡」页可以新建 / 编辑 / 删除，**切换立即生效**（不用重启服务）。
+新建时填：角色名、怎么称呼你、身份设定、性格、行为准则、开场白。
+
+### 5. 看图 / 画图 / 语音 / 联网
+
+| 能力 | 说明 | 用什么 Key |
+|---|---|---|
+| 看图 | 收到的图自动认成文字，再当聊天内容处理 | 智谱 GLM-4V（flash 免费但较弱，想准就换 glm-4v） |
+| 画图 | 让她画图，画完能发到微信 | 智谱 CogView |
+| 语音 | 微信语音转文字 | 阿里云百炼 |
+| 联网 | 需要实时信息时自动搜（不会瞎编天气/新闻） | 博查 |
+
+### 6. 素材库（表情包 / 动图）
+
+- 收到的图、表情、动图自动收藏
+- **感知哈希去重**：同一张图截两次、转两次都不会重复入库
+- **自动打情绪标签**：开心 / 难过 / 生气 / 惊讶 / 无语 / 害羞 / 困倦 / 得意 / 安慰 / 吃饭 / 可爱
+- 回复后按语气挑图，不是随机甩
+- 动图：微信 4.x 把 GIF 存在 wxgf 容器里（一段 HEVC 视频），程序整段转成动画 GIF
+- 控制台「素材库」页可以看、删、改描述，也能点「重新识别无标签的」
+
+### 7. 后台运行
+
+默认：关掉网页，服务继续在后台跑（微信才能一直在线）。
+
+想让它「用完就退」：控制台「总览」→ 后台运行 → 打开「关掉网页就停服务」。
+
+> ⚠ 接微信时别开——一关网页，微信那边立刻不回话。
+
+三道退路（万一开了收不了场）：
+
+1. 控制台勾「应急：保持运行」
+2. \`YF-Robot.bat\` → 选 9「关掉关网页即停服务」
+3. 手改 \`config.json\`：\`server.stopWhenNoConsole = false\`
+
+### 8. Key 不会莫名其妙丢
+
+- 每次写配置前留一份 \`.bak\`
+- 单独维护 \`data/key-archive/\`（最多 50 份快照）
+- 启动时发现某个 Key 空了，自动从归档补回来
+- \`data/key-audit.log\` 记录每次 Key 变化（哪个操作、从多长变成多长）
+- 写盘是原子的（先写临时文件再改名），不会留下半个 JSON
+
+### 9. 崩了自己爬起来
+
+桥接遇到原生崩溃（UIA / COM 断开这类）会退出，
+启动脚本 5 秒后自动重启，最多连试 8 次；
+连崩 8 次就停下并提示去看 \`bridge/data/bridge-crash.log\`。
 
 ## 常见问题
 
@@ -561,7 +659,7 @@ data/generated/     她画的图
 2. 解不开就按 UIA 定位截图（同样需要管理员）
 3. 都不行就老实说「看不清」，不会瞎编
 
-如果经常出现「看不清」，看 \`bridge_wg/data/wechat-bridge-4x.log\`
+如果经常出现「看不清」，看 \`bridge/data/wechat-bridge-4x.log\`
 里的「表情包：」开头的行，会写明卡在哪一步。
 
 **Q: 图片识别失败？**
@@ -585,7 +683,7 @@ data/generated/     她画的图
 
 ---
 
-版本: 见 package.json
+版本 0.2.0
 `;
 
 fs.writeFileSync(path.join(DIST, '使用说明.md'), readme, 'utf8');
@@ -612,21 +710,21 @@ console.log('');
 console.log('【8】完整性检查…');
 
 const MUST_HAVE = [
-  ['鲸鲸.bat', '主启动入口'],
-  ['start.bat', '直接启动'],
-  ['终端控制台.bat', '终端界面入口'],
-  ['高级工具.bat', '菜单入口'],
+  ['YF-Robot.bat', '主启动入口'],
+  ['启动服务.bat', '直接启动'],
+  ['状态面板.bat', '终端界面入口'],
+  ['工具菜单.bat', '菜单入口'],
   ['启动微信桥接.bat', '桥接快捷入口'],
   ['app.mjs', '服务入口'],
   ['config.json', '配置'],
   ['使用说明.md', '说明文档'],
-  ['scripts/start.ps1', '启动脚本（鲸鲸.bat 调用）'],
+  ['scripts/start.ps1', '启动脚本（YF-Robot.bat 调用）'],
   ['web/console.html', '控制台页面'],
   ['core/engine.mjs', '引擎'],
   ['core/admin.mjs', '管理接口'],
-  ['tools/tui.mjs', '终端界面（终端控制台.bat 调用）'],
+  ['tools/tui.mjs', '终端界面（状态面板.bat 调用）'],
   // 桥接靠它读配置，缺了会静默退回默认值 —— 功能全不对但还能启动，最难查
-  ['bridge_wg/config.json', '桥接配置'],
+  ['bridge/config.json', '桥接配置'],
 ];
 
 if (WITH_RUNTIME) {
@@ -635,8 +733,8 @@ if (WITH_RUNTIME) {
   // Python 只在「带了运行时 + 没排除 Python」时才要求
   if (WITH_PYTHON) {
     MUST_HAVE.push(['runtime/python/python.exe', 'Python 运行时（接微信要用）']);
-    MUST_HAVE.push(['bridge_wg/wechatauto_bridge.py', '微信桥接主程序']);
-    MUST_HAVE.push(['bridge_wg/启动桥接.bat', '桥接启动入口']);
+    MUST_HAVE.push(['bridge/wechatauto_bridge.py', '微信桥接主程序']);
+    MUST_HAVE.push(['启动微信桥接.bat', '桥接启动入口']);
   }
 }
 

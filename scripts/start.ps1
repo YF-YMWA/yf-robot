@@ -35,7 +35,7 @@ if (-not (Test-Path $nodePath)) {
 }
 
 Write-Host ''
-Write-Host '  🐳  鲸鲸 · 微信 AI 助手' -ForegroundColor Cyan
+Write-Host '  🐳  YF-Robot · 微信 AI 助手' -ForegroundColor Cyan
 Write-Host '  ────────────────────────────────────────────'
 
 if (-not (Test-Path $nodePath)) {

@@ -159,7 +159,7 @@ async function chat() {
 async function main() {
   console.log('');
   console.log(col('cyan', '  ╔════════════════════════════════════════╗'));
-  console.log(col('cyan', '  ║') + '     鲸鲸 · 终端控制台                 ' + col('cyan', '║'));
+  console.log(col('cyan', '  ║') + '     YF-Robot · 状态面板                 ' + col('cyan', '║'));
   console.log(col('cyan', '  ╚════════════════════════════════════════╝'));
 
   while (true) {

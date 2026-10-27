@@ -391,11 +391,11 @@ async function autostartHelp() {
   console.log('  方法一（推荐）：');
   console.log(col('dim', '    1. 按 Win+R，输入 shell:startup 回车'));
   console.log(col('dim', '    2. 在打开的文件夹里，右键 → 新建 → 快捷方式'));
-  console.log(col('dim', `    3. 位置填：${path.join(ROOT, 'start.bat')}`));
+  console.log(col('dim', `    3. 位置填：${path.join(ROOT, '启动服务.bat')}`));
   console.log(col('dim', '    4. 下一步 → 完成'));
   console.log('');
   console.log('  方法二：');
-  console.log(col('dim', '    把 start.bat 直接拖进那个启动文件夹'));
+  console.log(col('dim', '    把 启动服务.bat 直接拖进那个启动文件夹'));
   console.log('');
   console.log(col('dim', `  启动文件夹位置：${startupDir}`));
 }

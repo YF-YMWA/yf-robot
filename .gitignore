@@ -73,21 +73,21 @@ tools/full_*.mjs
 tools/import_*.mjs
 tools/group_*.mjs
 tools/diag-*.py
-bridge_wg/test_*.py
-bridge_wg/check_*.py
-bridge_wg/diag_*.py
-bridge_wg/verify_*.py
-bridge_wg/diag_*.mjs
+bridge/test_*.py
+bridge/check_*.py
+bridge/diag_*.py
+bridge/verify_*.py
+bridge/diag_*.mjs
 
 # ===== 本机专属：微信个人数据 =====
-bridge_wg/data/
+bridge/data/
 
 # 桥接配置：真实文件不提交，模板要提交
-!bridge_wg/config.example.json
+!bridge/config.example.json
 
 # 本地泄露扫描脚本（读本机配置，不适合提交）
 tools/scan-leak*.py
 
 # 词库自动备份（运行时不断生成，不是源码）
 *.txt.bak
-bridge_wg/resources/*.bak
+bridge/resources/*.bak

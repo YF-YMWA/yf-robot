@@ -28,7 +28,7 @@ export const DEFAULTS = {
      *
      * 有三道退路，万一开了又想关掉：
      *   1. 控制台「总览」页的开关（服务还在跑时）
-     *   2. 鲸鲸.bat 菜单里的「关掉『关网页即停服务』」（服务已经停了也能用）
+     *   2. YF-Robot.bat 菜单里的「关掉『关网页即停服务』」（服务已经停了也能用）
      *   3. 直接改 config.json：server.stopWhenNoConsole = false
      * 另外 data/keep-alive 这个文件存在时，这个开关一律不生效。
      */

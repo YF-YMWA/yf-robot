@@ -20,6 +20,10 @@ const PATTERNS = [
     /C:[\\/]{1,2}Users[\\/]{1,2}(?!<|%|Public|username|user\b)[A-Za-z0-9_.-]{2,}/g,
   ],
   ['手机号', /(?<!\d)1[3-9]\d{9}(?!\d)/g],
+  // 打包人的个人痕迹
+  ['本机用户名', /\bjunka\b/gi],
+  ['桌面旧拷贝', /Desktop[\\/]{1,2}j\b/g],
+  ['旧目录名', /bridge_wg/g],
 ];
 
 const IGNORE = /xxxx|change-me|your|example|placeholder|mock|fake|test-key|sk-xxx|sk-your|demo/i;

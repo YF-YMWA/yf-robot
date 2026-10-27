@@ -1,9 +1,9 @@
 {
-  "name": "jingjing",
-  "version": "0.1.0",
+  "name": "yf-robot",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
-  "description": "鲸鲸 —— 人设化 AI 助手，支持微信接入、角色卡、长期记忆、看图/画图/语音/联网学习",
+  "description": "YF-Robot —— 人设化 AI 助手，支持微信接入、角色卡、长期记忆、看图/画图/语音/联网学习",
   "keywords": [
     "ai",
     "chatbot",
@@ -17,12 +17,12 @@
   "author": "jingjing contributors",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-name/jingjing.git"
+    "url": "git+https://github.com/your-name/yf-robot.git"
   },
   "bugs": {
-    "url": "https://github.com/your-name/jingjing/issues"
+    "url": "https://github.com/your-name/yf-robot/issues"
   },
-  "homepage": "https://github.com/your-name/jingjing#readme",
+  "homepage": "https://github.com/your-name/yf-robot#readme",
   "engines": {
     "node": ">=18"
   },

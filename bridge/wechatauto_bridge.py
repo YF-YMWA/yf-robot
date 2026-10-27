@@ -10,7 +10,7 @@
 前置：
   1. WeChat 4.x 已登录（建议用小号）
   2. 已装依赖：pip install wechatauto-replica requests
-  3. 鲸鲸服务已启动（双击 启动鲸鱼娘.bat）
+  3. YF-Robot 服务已启动（双击 YF-Robot.bat）
   4. config.json 里 gateway.wechat.enabled = true（脚本会读 token）
 
 用法：
@@ -45,7 +45,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import time
 
-# 独立副本：ROOT 指向本脚本所在目录（bridge_wg/），
+# 独立副本：ROOT 指向本脚本所在目录（bridge/），
 # 这样 config.json、data/ 都在自己目录下，不依赖 whale-girl。
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(ROOT, "config.json")
@@ -76,7 +76,7 @@ COLLECT_WHITELIST = set()
 # 必须先全部给个默认值，再进 try 去读 config.json。
 #
 # 为什么：这些变量原来只在 try 块里定义，一旦 config.json 读不到
-# （比如打包时分发出去少了 bridge_wg/config.json），except 把异常吞掉，
+# （比如打包时分发出去少了 bridge/config.json），except 把异常吞掉，
 # 变量就根本不存在。后面 game_running() 一引用就是
 #   NameError: name 'GAME_TOKENS' is not defined
 # 直接把这个线程打死 —— 表现就是「解压出来的版本用不了」。
@@ -99,7 +99,7 @@ MASTER_WXID = ""
 
 try:
     # 读本目录的 config.json（原版是 ../config.json，被复制成独立副本后
-    # 上一级是鲸鲸的配置，里面没有 wechat 段，会导致所有参数取默认值）
+    # 上一级是YF-Robot 的配置，里面没有 wechat 段，会导致所有参数取默认值）
     _here = os.path.dirname(os.path.abspath(__file__))
     _cfg_path = os.path.join(_here, "config.json")
 
@@ -111,7 +111,7 @@ try:
             import shutil as _shutil
             _shutil.copyfile(_example, _cfg_path)
             print(
-                "[config] 首次运行，已从 config.example.json 生成 bridge_wg/config.json",
+                "[config] 首次运行，已从 config.example.json 生成 bridge/config.json",
                 file=__import__("sys").stderr,
             )
 
@@ -149,9 +149,9 @@ except Exception as _e:                      # noqa: BLE001
     import sys as _sys
     print(
         "[config] ⚠ 读不到 %s（%r），全部设置改用默认值。\n"
-        "         如果这是分发出去的包，说明少了 bridge_wg/config.json，"
+        "         如果这是分发出去的包，说明少了 bridge/config.json，"
         "重新解压或从 config.example.json 复制一份即可。"
-        % (locals().get("_cfg_path", "bridge_wg/config.json"), _e),
+        % (locals().get("_cfg_path", "bridge/config.json"), _e),
         file=_sys.stderr,
     )
 
@@ -536,7 +536,7 @@ def build_bot_url(cfg):
     return os.environ.get("WHALE_BOT_URL", "http://127.0.0.1:%s/webhook/wechat" % port)
 
 
-# 当前使用的鲸鲸地址。main() 里会赋值；放在模块级是为了让 bot_base()
+# 当前使用的YF-Robot 地址。main() 里会赋值；放在模块级是为了让 bot_base()
 # 这类工具函数能读到（原版把 bot_url 定义在 main() 内部，导致闭包外的函数读不到）。
 CURRENT_BOT_URL = build_bot_url({}) if os.environ.get("WHALE_BOT_URL") else ""
 
@@ -544,7 +544,7 @@ CURRENT_BOT_URL = build_bot_url({}) if os.environ.get("WHALE_BOT_URL") else ""
 def bot_base():
     """从 bot_url 推出服务根地址。
 
-    原版是 bot_url.rsplit("/webhook", 1)[0]。但鲸鲸的接口是 /api/wechat，
+    原版是 bot_url.rsplit("/webhook", 1)[0]。但YF-Robot 的接口是 /api/wechat，
     里面没有 /webhook，rsplit 会原样返回整个 URL，导致后面拼出来的
     /api/vision、/api/care 变成 /api/wechat/api/vision 而 404。
 
@@ -3616,12 +3616,12 @@ def main():
                 )
                 data = r.json()
             except Exception as e:
-                log("请求鲸鲸失败：", repr(e))
+                log("请求 YF-Robot 失败：", repr(e))
                 return
 
             if data.get("action") != "reply" or not data.get("reply"):
                 if is_group and addressed:
-                    log("鲸鲸没接话：", nickname, "→", content[:20], "|", data.get("reason"))
+                    log("YF-Robot 没接话：", nickname, "→", content[:20], "|", data.get("reason"))
                 return
 
             # 演示模式（服务端没配 Key，说的是内置台词）：提醒一次，别让人以为「没 Key 也能真聊」
@@ -4234,7 +4234,7 @@ def main():
     threading.Thread(target=listener_watch, daemon=True).start()
     # 她自己维护表情包描述索引（后台慢慢补，不阻塞消息）
     threading.Thread(target=sticker_index_worker, daemon=True).start()
-    log("已启动。鲸鲸地址：", bot_url)
+    log("已启动。YF-Robot 地址：", bot_url)
 
     def self_check():
         """启动自检：告诉服务「我从哪个目录启动的、是什么版本」。

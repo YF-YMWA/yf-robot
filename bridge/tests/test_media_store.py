@@ -13,8 +13,8 @@ import sys
 import tempfile
 import unittest
 
-_HERE = os.path.dirname(os.path.abspath(__file__))          # bridge_wg/tests
-_BRIDGE = os.path.dirname(_HERE)                            # bridge_wg
+_HERE = os.path.dirname(os.path.abspath(__file__))          # bridge/tests
+_BRIDGE = os.path.dirname(_HERE)                            # bridge
 _ROOT = os.path.dirname(_BRIDGE)                            # jingjing
 sys.path.insert(0, _BRIDGE)                                 # 为了 import media_store
 sys.path.insert(0, os.path.join(_ROOT, 'runtime', 'python', 'Lib', 'site-packages'))

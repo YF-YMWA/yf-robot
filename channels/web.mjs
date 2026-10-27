@@ -37,7 +37,7 @@ export class WebChannel {
      *
      * 默认是项目里的 data/，但**测试必须能改**：
      * 之前 e2e 测试用 18083 起通道，它把 actual-port.txt 写进了真实 data/，
-     * 于是下次双击鲸鲸.bat 时启动脚本读到 18083、打开一个死链接 ——
+     * 于是下次双击YF-Robot.bat 时启动脚本读到 18083、打开一个死链接 ——
      * 用户看到的就是「突然无法运行」。
      */
     this.dataDir = dataDir || path.join(__dirname, '..', 'data');
@@ -625,7 +625,7 @@ export class WebChannel {
    * 语音转写：桥接收到语音后调这个。
    *
    * 桥接不自己实现识别，统一走这里 —— 只需在控制台配一处 Key，
-   * 也不会出现「鲸鲸能识别、桥接识别不了」的两套配置。
+   * 也不会出现「服务端能识别、桥接识别不了」的两套配置。
    */
   async #voiceApi(req, res) {
     let body;

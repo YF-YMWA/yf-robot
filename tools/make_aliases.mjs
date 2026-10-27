@@ -5,10 +5,10 @@ import path from 'node:path';
 const ROOT = path.resolve(import.meta.dirname, '..');
 
 const MAP = {
-  '启动.bat': 'start.bat',
+  '启动.bat': '启动服务.bat',
   '停止.bat': 'stop.bat',
-  '安装自启.bat': 'install_autostart.bat',
-  '取消自启.bat': 'uninstall_autostart.bat',
+  '安装自启.bat': 'install_auto启动服务.bat',
+  '取消自启.bat': 'uninstall_auto启动服务.bat',
   '设置.bat': 'setup.bat',
   '切换角色.bat': 'switch_card.bat',
   '配置扩展功能.bat': 'setup_features.bat',

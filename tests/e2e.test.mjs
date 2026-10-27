@@ -16,7 +16,7 @@ import { loadPersona, PERSONA_DEFAULTS } from '../core/persona.mjs';
  * 测试专用数据目录。
  *
  * 绝对不能让测试往真实 data/ 里写东西 —— 以前 e2e 用 18083 起通道，
- * 把 actual-port.txt 覆盖成了 18083，导致下次双击鲸鲸.bat 时
+ * 把 actual-port.txt 覆盖成了 18083，导致下次双击YF-Robot.bat 时
  * 启动脚本打开一个死链接（用户看到「突然无法运行」）。
  *
  * 放在工作区内的 .tmp（本机沙箱不允许 node 写系统临时目录）。

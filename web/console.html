@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>鲸鲸 · 控制台</title>
+<title>YF-Robot · 控制台</title>
 <style>
   :root {
     --bg: #0d1117; --panel: #161b22; --border: #30363d;
@@ -289,7 +289,7 @@
 <body>
 
 <aside>
-  <div class="brand">鲸鲸 · 控制台<small id="brandSub">加载中…</small></div>
+  <div class="brand">YF-Robot · 控制台<small id="brandSub">加载中…</small></div>
   <nav>
     <a data-page="overview" class="active">总览</a>
     <a data-page="chat">对话调试</a>
@@ -365,7 +365,7 @@
             勾上这个，就算上面那个开关开着，服务也<strong>不会</strong>因为关网页而退出。<br>
             <span style="color:var(--dim)">
               万一开了「关网页即停」又收不了场，随时回来勾这个；<br>
-              网页也打不开的话：双击 <code>鲸鲸.bat</code> 选「关掉『关网页即停服务』」，
+              网页也打不开的话：双击 <code>YF-Robot.bat</code> 选「关掉『关网页即停服务』」，
               或者直接删掉 <code>data\keep-alive</code> 反过来。
             </span>
           </div>
@@ -1623,7 +1623,7 @@
       <div class="hint" style="line-height:2">
         <p>桥接需要<b>管理员权限</b>（读取微信进程模块）。</p>
         <p>双击项目根目录的 <b>一键启动桥接.bat</b>，会自动请求提权。</p>
-        <p>桥接端口 <b>8896</b>，监听微信消息转发给鲸鲸（8899）。</p>
+        <p>桥接端口 <b>8896</b>，监听微信消息转发给 YF-Robot（8899）。</p>
       </div>
     </div>
   </div>
@@ -1827,7 +1827,7 @@ async function testAll() {
  * 关网页不会停服务，所以给一个明确入口，省得去任务管理器里翻 node.exe。
  */
 async function stopService() {
-  if (!confirm('确定停止鲸鲸服务？\n\n停止后微信不会自动回复，需要重新双击「鲸鲸.bat」启动。')) return;
+  if (!confirm('确定停止 YF-Robot 服务？\n\n停止后微信不会自动回复，需要重新双击「YF-Robot.bat」启动。')) return;
 
   try {
     await api('shutdown', { method: 'POST', body: {} });
@@ -1839,7 +1839,7 @@ async function stopService() {
     '<div style="display:flex;align-items:center;justify-content:center;height:100vh;' +
     'font-family:system-ui;font-size:15px;color:#8b949e;text-align:center;line-height:2">' +
     '<div>服务已停止<br><br>' +
-    '<span style="font-size:13px">想重新启动就双击 <b>鲸鲸.bat</b><br>' +
+    '<span style="font-size:13px">想重新启动就双击 <b>YF-Robot.bat</b><br>' +
     '可以关掉这个页面了</span></div></div>';
 }
 
@@ -1880,7 +1880,7 @@ async function restartService() {
     const hint = document.getElementById('restartHint');
     if (hint && tries > 10) {
       hint.innerHTML =
-        '服务没有自动起来。<br>请手动双击 <b>鲸鲸.bat</b> 重新启动。';
+        '服务没有自动起来。<br>请手动双击 <b>YF-Robot.bat</b> 重新启动。';
     }
     if (tries > 40) clearInterval(timer);
   }, 1000);
@@ -2409,7 +2409,7 @@ async function saveServerMode() {
     const ok = confirm(
       '开启后：关掉所有控制台页面约 15 秒，服务会自动退出。\n\n' +
         '如果你在用微信，微信那边也会立刻不回话。\n\n' +
-        '确定要开吗？（随时可以用「保持运行」或鲸鲸.bat 关掉）',
+        '确定要开吗？（随时可以用「保持运行」或YF-Robot.bat 关掉）',
     );
     if (!ok) {
       if (hint) hint.textContent = '已取消';
@@ -5022,7 +5022,7 @@ async function loadBridge() {
             <span style="color:var(--warn)">
               这样素材会存进桥接那个目录，而控制台读的是服务这边 ——
               所以「明明收藏了，素材库里却看不到」。<br>
-              解决：关掉现在的桥接窗口，改从这里启动：<code>${(bd.serverDataDir || '').replace(/[\\/]data$/, '')}\\bridge_wg\\启动桥接.bat</code>
+              解决：关掉现在的桥接窗口，改从这里启动：<code>${(bd.serverDataDir || '').replace(/[\\/]data$/, '')}\\bridge\\启动桥接.bat</code>
             </span>
           </div>
         </div>`;

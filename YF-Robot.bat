@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul 2>nul
-title 鲸鲸 · AI 助手
+title YF-Robot · AI 助手
 cd /d "%~dp0"
 
 REM 优先用 pwsh（PowerShell 7），没有就用系统自带的 powershell
@@ -12,6 +12,6 @@ where pwsh >nul 2>nul && set "PS=pwsh"
 set "CODE=%ERRORLEVEL%"
 if not "%~1"=="" exit /b %CODE%
 echo.
-echo   鲸鲸已退出。按任意键关闭窗口。
+echo   YF-Robot 已退出。按任意键关闭窗口。
 pause >nul
 exit /b %CODE%

@@ -21,7 +21,7 @@ function startupDir() {
     'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup');
 }
 
-const START_BAT = path.join(ROOT, 'start.bat');
+const START_BAT = path.join(ROOT, '启动服务.bat');
 const LINK_NAME = 'jingjing-autostart.vbs';
 const VBS = path.join(startupDir(), LINK_NAME);
 
