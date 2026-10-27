@@ -1,0 +1,25 @@
+name: 功能建议
+description: 想要一个现在没有的功能
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        说清「你想让它做什么」比说「怎么实现」更有用。
+
+  - type: textarea
+    id: want
+    attributes:
+      label: 想要什么
+      placeholder: 希望能把表情包按群分组，不同群发不同的图
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: 为什么需要
+      description: 你现在的做法是什么，哪里不方便
+    validations:
+      required: false

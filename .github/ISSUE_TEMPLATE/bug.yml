@@ -1,0 +1,76 @@
+name: 问题反馈
+description: 报告一个 bug 或者用不了的情况
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请把下面几项填一下，能省掉一半来回问的时间。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 一句话说清现象，比如「发消息没回复」「控制台打不开」
+      placeholder: 双击 YF-Robot.bat 之后浏览器打开是空白页
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 双击 XXX
+        2. 在微信里发「你好」
+        3. 没有回复
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题出在哪一块
+      options:
+        - 启动 / 打开控制台
+        - 微信收发消息
+        - 看图 / 画图 / 语音 / 联网
+        - 素材库 / 表情包 / 动图
+        - 角色卡 / 记忆
+        - 群聊
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: |
+        · 服务日志：`data/app.out.log`、`data/app.err.log`
+        · 桥接日志：`bridge/data/wechat-bridge-4x.log`
+        · 崩溃堆栈：`bridge/data/bridge-crash.log`
+        贴最后 20~30 行就行。**贴之前把 API Key、wxid 删掉。**
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 发行包文件名，或 git commit
+      placeholder: YF-Robot-v0.2.zip
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 自查
+      options:
+        - label: 我贴的日志里已经删掉了 API Key 和 wxid
+          required: true
+        - label: 微信窗口没有最小化到托盘（桥接需要操作窗口）
+          required: false

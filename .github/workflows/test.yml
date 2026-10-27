@@ -1,0 +1,96 @@
+name: 测试
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  node:
+    name: Node 单元测试
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 语法检查
+        run: |
+          node --check app.mjs
+          node --check menu.mjs
+          node --check core/admin.mjs
+          node --check core/engine.mjs
+          node --check channels/web.mjs
+
+      - name: 单元测试
+        run: node --test tests/
+
+      - name: 控制台脚本检查
+        run: |
+          node tools/check-console-js.mjs
+          node tools/check-console-fns.mjs
+
+  python:
+    name: Python 单元测试
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        # 只装单元测试需要的（Pillow 用于 dHash 和动图处理）
+        run: python -m pip install --upgrade pip Pillow
+
+      - name: 语法检查
+        run: |
+          python -m py_compile bridge/wechatauto_bridge.py
+          python -m py_compile bridge/media_store.py
+          python -m py_compile bridge/msg_route.py
+          python -m py_compile bridge/wechat_xml.py
+
+      - name: 单元测试
+        # 这几个模块不依赖 wechatauto，CI 上能单独跑
+        run: python -m unittest discover -s bridge/tests -v
+
+  leak-scan:
+    name: 敏感信息扫描
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 查有没有把 Key 提交上来
+        shell: pwsh
+        run: |
+          $patterns = @(
+            @{ name = 'sk- Key';  re = 'sk-[A-Za-z0-9_-]{24,}' },
+            @{ name = '智谱 Key'; re = '[a-f0-9]{32}\.[A-Za-z0-9]{16}' },
+            @{ name = 'wxid';     re = 'wxid_[a-z0-9]{8,}' },
+            @{ name = '本机路径';  re = 'C:\\Users\\[A-Za-z0-9_.-]{2,}' }
+          )
+          $bad = @()
+          git ls-files | Where-Object { $_ -match '\.(mjs|js|json|py|html|bat|ps1|md|txt|yml)$' } | ForEach-Object {
+            $content = Get-Content $_ -Raw -ErrorAction SilentlyContinue
+            if (-not $content) { return }
+            foreach ($p in $patterns) {
+              if ($content -match $p.re) {
+                $m = [regex]::Match($content, $p.re).Value
+                if ($m -notmatch '<|xxxx|change-me|your|example|placeholder|test|mock|fake') {
+                  $bad += "$($p.name)  $_  ->  $m"
+                }
+              }
+            }
+          }
+          if ($bad.Count -gt 0) {
+            Write-Host "发现可疑内容：" -ForegroundColor Red
+            $bad | ForEach-Object { Write-Host "  $_" }
+            exit 1
+          }
+          Write-Host "没有发现敏感信息" -ForegroundColor Green
