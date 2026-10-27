@@ -2534,6 +2534,86 @@ def main():
             log("表情包定位异常：", repr(e))
             return None
 
+    def crop_to_main_blob(img):
+        """从一段截图里裁出最大的那块内容（只留表情包本身）。
+
+        为什么需要：
+            表情包截图是按「消息行」截的。用户引用/回复过一张图时，
+            这一行里会同时出现引用缩略图和表情包。整行存进素材库后，
+            视觉模型会描述成「这张图片包含两个部分」——
+            结果是没有情绪标签，按语气挑图永远挑不中，
+            用户看到的就是「收进来了但不能正常用」。
+
+        做法：按列统计「和背景色不同的像素数」，
+        找出连续有内容的列段，取最宽的一段。
+
+        @returns 裁好的图；不适用时原样返回
+        """
+        try:
+            from PIL import Image  # noqa: F401
+
+            w, h = img.size
+            if w < 60 or h < 20:
+                return img
+            # 只在「横向很宽」时处理 —— 说明很可能并排着两个东西。
+            # 正常表情包接近方形，不该被裁。
+            if w / max(1, h) < 1.6:
+                return img
+
+            g = img.convert("L")
+            px = g.load()
+
+            # 背景色：取四角的中位数（聊天背景是均匀的浅色）
+            corners = sorted([px[0, 0], px[w - 1, 0], px[0, h - 1], px[w - 1, h - 1]])
+            bg = corners[len(corners) // 2]
+            tol = 14
+
+            cols = []
+            for x in range(w):
+                ink = 0
+                for y in range(0, h, 2):
+                    if abs(px[x, y] - bg) > tol:
+                        ink += 1
+                cols.append(ink)
+
+            # 噪声阈值：一列里至少 6% 的行有内容
+            thresh = max(2, int((h / 2) * 0.06))
+            runs = []
+            start = None
+            for x, v in enumerate(cols):
+                if v > thresh:
+                    if start is None:
+                        start = x
+                elif start is not None:
+                    runs.append((start, x - 1))
+                    start = None
+            if start is not None:
+                runs.append((start, w - 1))
+
+            # 合并靠得很近的段（表情包内部可能有细缝）
+            merged = []
+            for a, b in runs:
+                if merged and a - merged[-1][1] <= 8:
+                    merged[-1] = (merged[-1][0], b)
+                else:
+                    merged.append((a, b))
+
+            if len(merged) < 2:
+                return img
+
+            a, b = max(merged, key=lambda r: r[1] - r[0])
+            if b - a < 40:
+                return img
+
+            pad = 2
+            cropped = img.crop((max(0, a - pad), 0, min(w, b + 1 + pad), h))
+            log("表情包裁剪：%dx%d → %dx%d（去掉旁边的小图）" % (
+                w, h, cropped.width, cropped.height))
+            return cropped
+        except Exception as e:                      # noqa: BLE001
+            log("表情包裁剪跳过：%r" % (e,))
+            return img
+
     def capture_sticker_frames(who, count=8, interval=0.12):
         """连续截同一块区域，用来还原动图表情。
 
@@ -2581,6 +2661,9 @@ def main():
                     shot = cropped
             except Exception:
                 pass
+
+            # 引用过图片时这一行会并排两个东西，只留最大那块
+            shot = crop_to_main_blob(shot)
 
             frames.append(shot)
             if i < count - 1:
@@ -2709,10 +2792,18 @@ def main():
                     "image": base64.b64encode(data).decode(),
                     "mime": "image/jpeg",
                     "prompt": (
-                        "这是微信表情包/图片的消息区域截图，画面主体就是那个表情包。\n"
-                        "描述画面内容：人物或动物是什么、什么表情、什么颜色、什么风格、"
-                        "画面里有没有文字（有就照抄）。\n"
-                        "如果确实看不清，只回答「看不清」。不要罗列历史消息。"
+                        "这是一张微信表情包截图。画面里可能混进了聊天界面元素：\n"
+                        "旁边的小头像、引用的缩略图、气泡边框、空白。\n"
+                        "\n"
+                        "请只看**最大、最居中**的那个主体 —— 那才是表情包本身。\n"
+                        "忽略旁边的小图、头像、引用缩略图和界面边框，"
+                        "不要把画面说成「分成几个部分」。\n"
+                        "\n"
+                        "用一句话回答（不要分点、不要换行）：\n"
+                        "「<主体是什么>，<表情或动作>，<主色调>，<风格>」\n"
+                        "如果画面里有文字，在最后补「，文字：xxx」。\n"
+                        "\n"
+                        "如果确实看不清，只回答「看不清」。"
                     ),
                 },
                 timeout=60,
@@ -2965,6 +3056,24 @@ def main():
                 gui = WeChatGUI()
 
             is_gif = str(path).lower().endswith(".gif")
+
+            # ===== 快速路径：目标会话本来就开着，就别再去搜索框 =====
+            #
+            # send_image(who=...) 会走 _open_chat_and_settle → open_chat，
+            # 那里面要：置顶窗口 → 点搜索栏 → 打字 → 等下拉 → 点联系人 → 等渲染。
+            # 发文字的时候会话其实已经是打开状态，再走一遍纯属浪费，
+            # 而且每次都要抢焦点 —— 群聊里连着发几张图，等于把界面反复折腾。
+            #
+            # _chat_is_open 只读一下 UIA 里输入框的 Name（当前聊天对象），
+            # 不点任何东西，很便宜。确认是同一个会话就把 _current_chat 设上，
+            # send_image 内部的判断会直接跳过 open_chat，而 who 照样保留
+            # （verify 校验还要靠它定位会话）。
+            try:
+                if gui._chat_is_open(chat_display_name):
+                    gui._current_chat = chat_display_name
+                    log("发送表情包：会话已打开，跳过搜索（%s）" % chat_display_name)
+            except Exception as _e:                   # noqa: BLE001
+                log("会话状态检查跳过：%r" % (_e,))
 
             def _do_send(p):
                 # GIF 要校验：微信有可能不把它当图片，而是当**文件**发出去
