@@ -459,7 +459,25 @@ export class AdminApi {
         return { code: 200, body: this.#deleteMedia('stickers', body?.name) };
       }
       // 上传图片
-      if (method === 'POST' && pathname === '/api/admin/media/upload') {        return { code: 200, body: this.#uploadMedia(body) };
+      if (method === 'POST' && pathname === '/api/admin/media/upload') {
+        return { code: 200, body: this.#uploadMedia(body) };
+      }
+
+      // ===== 知识库 =====
+      if (method === 'GET' && pathname === '/api/admin/kb') {
+        return {
+          code: 200,
+          body: {
+            docs: this.engine.kbList?.() || [],
+            enabled: this.config.kb?.enabled !== false,
+          },
+        };
+      }
+      if (method === 'POST' && pathname === '/api/admin/kb/upload') {
+        return { code: 200, body: await this.#kbUpload(body) };
+      }
+      if (method === 'POST' && pathname === '/api/admin/kb/delete') {
+        return { code: 200, body: this.#kbDelete(body) };
       }
       // 从免费源下载
       if (method === 'POST' && pathname === '/api/admin/media/fetch') {
@@ -1657,6 +1675,63 @@ print('%016x' % bits)
     } catch (e) {
       return { ok: false, error: e.message };
     }
+  }
+
+  /**
+   * 上传文档到知识库。
+   *
+   * body: { name, data(base64) }
+   * 前端读文件成 base64 传上来；这里落盘到 data/kb/src/ 再解析入库。
+   */
+  async #kbUpload(body = {}) {
+    const name = String(body.name || '').trim();
+    const raw = String(body.data || '');
+    if (!name || !raw) return { ok: false, error: '缺少文件名或内容' };
+
+    const ext = path.extname(name).toLowerCase();
+    const { SUPPORTED } = await import('./kb.mjs');
+    if (!SUPPORTED.includes(ext)) {
+      return {
+        ok: false,
+        error: `不支持的格式 ${ext}。支持：${SUPPORTED.join(' / ')}` +
+          (ext === '.pdf' ? '（PDF 请先转成 docx 或 txt）' : ''),
+      };
+    }
+
+    let buf;
+    try {
+      buf = Buffer.from(raw, 'base64');
+    } catch {
+      return { ok: false, error: 'base64 解不开' };
+    }
+    if (!buf.length) return { ok: false, error: '文件是空的' };
+    if (buf.length > 30 * 1024 * 1024) return { ok: false, error: '文件太大（上限 30MB）' };
+
+    // 落盘（保留原文件，方便以后重新导入）
+    const dir = path.join(this.root, 'data', 'kb', 'src');
+    let file;
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      file = path.join(dir, `${Date.now()}_${path.basename(name)}`);
+      fs.writeFileSync(file, buf);
+    } catch (e) {
+      return { ok: false, error: `存文件失败：${e.message}` };
+    }
+
+    const r = await this.engine.addKbFile?.(file);
+    if (!r) return { ok: false, error: '引擎还没提供知识库接口' };
+    if (!r.ok) return r;
+    this.log.info?.(`[kb] 已导入 ${r.name}（${r.chunks} 块）`);
+    return r;
+  }
+
+  /** 从知识库删一份文档 */
+  #kbDelete(body = {}) {
+    const id = String(body.id || '').trim();
+    if (!id) return { ok: false, error: '缺少 id' };
+    const r = this.engine.removeKbFile?.(id) || { ok: false, error: '引擎还没提供接口' };
+    if (r.ok) this.log.info?.(`[kb] 已删除 ${id}`);
+    return r;
   }
 
   async describeMediaOne(name, kind = 'stickers') {

@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import { LlmClient, inspectOutput, LlmError } from './llm.mjs';
 import { SessionStore, extractFacts, isEcho } from './session.mjs';
 import { MemoryStore, extractPreferences } from './memory.mjs';
+import { KnowledgeBase } from './kb.mjs';
 import { renderSystemPrompt } from './persona.mjs';
 import { renderWordBanks } from './words.mjs';
 import { OwnerService } from './owner.mjs';
@@ -229,6 +230,49 @@ export class ChatEngine {
     return this.imagegen.status();
   }
 
+  /**
+   * 知识库（懒加载）。
+   *
+   * 只有真的配了文档才建实例；没文档时完全不产生开销。
+   */
+  #kb() {
+    if (!this._kb) {
+      this._kb = new KnowledgeBase({
+        root: this.config.root || process.cwd(),
+        config: this.config,
+        log: (m) => this.log.info?.(m),
+      });
+    }
+    return this._kb;
+  }
+
+  /** 导入一份文档到知识库（admin 调用） */
+  async addKbFile(filePath) {
+    try {
+      return await this.#kb().addFile(filePath);
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
+  /** 从知识库删除一份文档 */
+  removeKbFile(id) {
+    try {
+      return this.#kb().remove(id);
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
+  /** 给控制台用的知识库清单 */
+  kbList() {
+    try {
+      return this.#kb().list();
+    } catch {
+      return [];
+    }
+  }
+
   /** 取某会话的主动画图状态（跨天自动清零）。 */
   #drawStateOf(sessionId) {
     const today = new Date().toISOString().slice(0, 10);
@@ -407,6 +451,27 @@ export class ChatEngine {
         this.log.warn?.(`[draw] 判断失败: ${e.message}`);
       }
 
+      /**
+       * 知识库检索：在拼提示词之前做一次。
+       *
+       * 只在「开启 + 有文档」时才走，失败不影响正常回复
+       * （知识库挂了不能让她连话都不会说）。
+       */
+      let kbNote = '';
+      if (this.config.kb?.enabled !== false) {
+        try {
+          const hits = await this.#kb().search(userText);
+          if (hits.length) {
+            kbNote = KnowledgeBase.render(hits);
+            this.log.info?.(
+              `[kb] 命中 ${hits.length} 段（最高 ${hits[0].score.toFixed(2)}，来自 ${hits[0].doc}）`,
+            );
+          }
+        } catch (e) {
+          this.log.warn?.(`[kb] 检索失败（不影响回复）：${e.message}`);
+        }
+      }
+
       const messages = this.#buildMessages(
         session,
         userText,
@@ -417,6 +482,7 @@ export class ChatEngine {
         proactiveDraw,
         input.speakerId || '',
         input.groupNote || '',
+        kbNote,
       );
 
       let raw = '';
@@ -650,6 +716,7 @@ export class ChatEngine {
     proactiveDraw = false,
     speakerId = '',
     groupNote = '',
+    kbNote = '',
   ) {
     const system = renderSystemPrompt(this.persona, {
       ownerName: speakerName || this.persona.ownerName,
@@ -694,6 +761,9 @@ export class ChatEngine {
     } catch (e) {
       this.log.warn?.(`[engine] 长期记忆加载失败: ${e.message}`);
     }
+
+    // 知识库资料：从用户导入的文档里检索出来的相关片段
+    if (kbNote) parts.push(kbNote);
 
     // 防编造：模型很容易顺着对方编一段「你上次说过」的假回忆
     parts.push(

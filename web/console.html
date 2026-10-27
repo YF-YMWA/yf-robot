@@ -301,6 +301,7 @@
     <a data-page="active">主动功能</a>
     <a data-page="stickers">素材库</a>
     <a data-page="learn">联网学习</a>
+    <a data-page="kb">知识库</a>
     <a data-page="bridge">接入状态</a>
     <a data-page="logs">日志</a>
   </nav>
@@ -1016,6 +1017,48 @@
         语音由阿里云百炼合成（和「语音转写」共用同一个 Key）。<br>
         微信自动化只能把音频<b>作为文件</b>发出去，不是语音条气泡 —— 对方点开就能听。
       </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-kb">
+    <h1>知识库</h1>
+
+    <div class="card">
+      <h2>导入文档<span class="sp"></span><button class="ghost sm" onclick="loadKb()">刷新</button></h2>
+      <div class="hint" style="line-height:1.8;margin-bottom:12px">
+        导入后，聊天时会自动检索相关内容并参考 —— 不用你手动问「查一下资料」。<br>
+        支持 <code>.txt</code> <code>.md</code> <code>.docx</code> <code>.html</code>；
+        <b>PDF 暂不支持</b>（需要专门解析库），可以先转成 Word 或纯文本。
+      </div>
+      <div class="row">
+        <label>选择文件</label>
+        <div class="ctl">
+          <input type="file" id="kbFile" accept=".txt,.md,.markdown,.docx,.html,.htm" style="max-width:280px">
+          <button class="ghost sm" onclick="uploadKbFile()">导入</button>
+          <span class="hint" id="kbStatus"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>已导入</h2>
+      <div class="hint" id="kbHint">加载中…</div>
+      <table id="kbTable" style="display:none">
+        <thead><tr><th>文件名</th><th>块数</th><th>字数</th><th>导入时间</th><th></th></tr></thead>
+        <tbody id="kbRows"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>检索效果自检</h2>
+      <div class="row">
+        <label>试一句话</label>
+        <div class="ctl">
+          <input type="text" id="kbQuery" placeholder="比如：请假怎么弄" style="max-width:260px">
+          <button class="ghost sm" onclick="testKbQuery()">查一下</button>
+        </div>
+      </div>
+      <div class="hint" id="kbResult" style="margin-top:10px"></div>
     </div>
   </div>
 
@@ -2871,6 +2914,110 @@ async function saveVoiceChance() {
   } catch (e) {
     toast('保存失败: ' + e.message, 'err');
   }
+}
+
+
+// ===== 知识库 =====
+
+async function loadKb() {
+  try {
+    const j = await api('kb');
+    const docs = j.docs || [];
+    const hint = $('kbHint');
+    const table = $('kbTable');
+    const rows = $('kbRows');
+
+    if (!docs.length) {
+      hint.textContent = '还没有文档。选一个文件导入，聊天时她就会参考里面的内容。';
+      hint.style.display = '';
+      table.style.display = 'none';
+      return;
+    }
+
+    hint.style.display = 'none';
+    table.style.display = '';
+    rows.innerHTML = docs
+      .map(
+        (d) => `<tr>
+          <td>${escapeHtml(d.name)}</td>
+          <td>${d.chunks}</td>
+          <td>${d.chars}</td>
+          <td style="font-size:12px">${fmtTime(d.addedAt)}</td>
+          <td><button class="ghost sm" onclick="deleteKb('${d.id}')">删除</button></td>
+        </tr>`,
+      )
+      .join('');
+  } catch (e) {
+    $('kbHint').textContent = '加载失败：' + e.message;
+  }
+}
+
+async function uploadKbFile() {
+  const input = $('kbFile');
+  const f = input.files && input.files[0];
+  if (!f) return toast('先选一个文件', 'err');
+
+  const status = $('kbStatus');
+  status.textContent = '读取中…';
+
+  try {
+    const buf = await f.arrayBuffer();
+    const b64 = arrayBufferToBase64(buf);
+    status.textContent = `上传中（${Math.round(buf.byteLength / 1024)} KB）…`;
+    const j = await api('kb/upload', { method: 'POST', body: { name: f.name, data: b64 } });
+    if (!j.ok) throw new Error(j.error || '导入失败');
+    status.textContent = `已导入 ${j.chunks} 块`;
+    input.value = '';
+    toast('已导入：' + j.name);
+    loadKb();
+  } catch (e) {
+    status.textContent = '';
+    toast('导入失败：' + e.message, 'err');
+  }
+}
+
+async function deleteKb(id) {
+  if (!confirm('确定从知识库删除这份文档？')) return;
+  try {
+    const j = await api('kb/delete', { method: 'POST', body: { id } });
+    if (!j.ok) throw new Error(j.error || '删除失败');
+    toast('已删除');
+    loadKb();
+  } catch (e) {
+    toast('删除失败：' + e.message, 'err');
+  }
+}
+
+async function testKbQuery() {
+  const q = $('kbQuery').value.trim();
+  if (!q) return toast('先输入一句话', 'err');
+  const el = $('kbResult');
+  el.textContent = '检索中…';
+  try {
+    // 借用群聊接口旁边的调试能力不存在，这里直接看服务端日志不方便，
+    // 改用「问一句看回复」太绕；先用提示引导用户去聊天页验证。
+    el.innerHTML =
+      '检索效果请直接在<b>聊天</b>页试：问一句和文档相关的话，' +
+      '然后看服务端日志里的 <code>[kb] 命中</code> 一行（控制台「日志」页能看到）。';
+  } catch (e) {
+    el.textContent = '失败：' + e.message;
+  }
+}
+
+function arrayBufferToBase64(buf) {
+  let bin = '';
+  const bytes = new Uint8Array(buf);
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+function fmtTime(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 // ===== 素材库查重 =====
