@@ -178,7 +178,16 @@ export class WeChatGroupChannel {
     });
     group.addEvent(event);
 
-    const isOwner = (this.cfg.ownerIds || []).includes(from);
+    /**
+     * 主人识别。
+     *
+     * 以前只看 group.ownerIds —— 那个默认是空的，于是：
+     *   · 主人在群里说话不被当成主人（masterAlwaysReply 不生效）
+     *   · 主人执行 /mute 被拒（"这个我说了不算"）
+     * 现在回退到全局主人配置（owner.wxids / persona.master.wxids），
+     * 群里和私聊认的是同一个人。
+     */
+    const isOwner = this.#isOwnerWxid(from);
 
     // 策略判断
     const decision = group.shouldReply({
@@ -216,7 +225,11 @@ export class WeChatGroupChannel {
       sessionId: `grp:${groupId}`,
       text: userContent,
       speakerName: msg.name || '群友',
+      // 群聊里按发言人记事实要用到，私聊不看这个字段
+      speakerId: from,
       isOwner,
+      // 重名提醒（见 duplicatedNames 的说明）
+      groupNote: this.#buildGroupNote(group),
       images: msg.images,
       audio: msg.audio,
     });
@@ -243,6 +256,64 @@ export class WeChatGroupChannel {
     return { reply: true, bubbles: result.bubbles, reason: decision.reason };
   }
 
+  /**
+   * 这个 wxid 是不是主人。
+   *
+   * 查找顺序：
+   *   1. group.ownerIds（群聊专用名单，优先）
+   *   2. owner.wxids（控制台「主人设置」里填的）
+   *   3. persona.master.wxids（老配置位置，兼容用）
+   *
+   * @param {string} wxid
+   * @returns {boolean}
+   */
+  #isOwnerWxid(wxid) {
+    const id = String(wxid || '').trim();
+    if (!id) return false;
+
+    if ((this.cfg.ownerIds || []).includes(id)) return true;
+
+    const global = this.config?.owner?.wxids || this.config?.persona?.master?.wxids || [];
+    return Array.isArray(global) && global.includes(id);
+  }
+
+  /**
+   * 拼群聊专用的提示词补充。
+   *
+   * 两个作用：
+   *   1. **始终**提醒「发言人编号才是身份，名字不是」——
+   *      群聊历史里 Alice 说过「我叫小美」，Bob 问「我叫什么」时，
+   *      模型有相当概率直接把小美安到 Bob 头上。加了这条规则能显著降下来。
+   *   2. 有重名时额外点名说清楚。
+   *
+   * @param {GroupSession} group
+   * @returns {string}
+   */
+  #buildGroupNote(group) {
+    try {
+      const parts = [
+        '【群聊规则】上面的聊天记录里，每条都有「（参与者N）」。' +
+          '**N 不同就是不同的人**，哪怕名字完全一样。' +
+          '回答「我叫什么」「我喜欢什么」这类关于对方自己的问题时，' +
+          '只认当前发言人那一条，别把别人（别的参与者编号）说过的内容安到他头上。' +
+          '分不清就直说「我不确定是谁说的」。',
+      ];
+
+      const dups = group.duplicatedNames?.() || [];
+      if (dups.length) {
+        const list = dups.map((d) => `「${d.name}」有 ${d.count} 个不同的人`).join('；');
+        parts.push(
+          `【注意】这个群里有重名：${list}。` +
+            '他们是不同的人，不要因为名字一样就把 A 说过的事算到 B 头上。',
+        );
+      }
+
+      return parts.join('\n');
+    } catch {
+      return '';
+    }
+  }
+
   /** 处理群管理指令。 */
   #handleCommand(msg, group) {
     const text = String(msg.text || '').trim();
@@ -253,7 +324,7 @@ export class WeChatGroupChannel {
     const arg = (m[2] || '').trim();
 
     // 权限：主人或群管理员
-    const isOwner = (this.cfg.ownerIds || []).includes(msg.from);
+    const isOwner = this.#isOwnerWxid(msg.from);
     const allowed = isOwner || msg.isGroupAdmin;
     if (!allowed) {
       return { reply: true, bubbles: ['这个我说了不算，得主人或者管理员来。'], reason: 'command_denied' };

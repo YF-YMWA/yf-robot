@@ -83,3 +83,7 @@ bridge_wg/data/
 
 # 本地泄露扫描脚本（读本机配置，不适合提交）
 tools/scan-leak*.py
+
+# 词库自动备份（运行时不断生成，不是源码）
+*.txt.bak
+bridge_wg/resources/*.bak

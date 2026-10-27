@@ -766,6 +766,62 @@
         <button onclick="saveActive()">保存</button>
       </div>
     </div>
+
+    <!-- 群聊策略 -->
+    <div class="card">
+      <h2>群聊策略 <span class="chip" id="groupChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        群里什么时候该接话、谁能指挥她。<br>
+        <span style="color:var(--dim)">
+          群聊里每个人的记忆是分开的 —— A 报过名字，B 问「我叫什么」她不会答 A 的。
+          重名的人她会说「分不清」，不会乱认。
+        </span>
+      </div>
+
+      <div class="row"><label>只在 @ 时回</label><div class="ctl">
+        <div class="switch" id="swGroupRequireAt" onclick="toggleSw('swGroupRequireAt')"></div>
+        <span class="hint">
+          开：只有 @她、叫她名字、或主人说话才回。<br>
+          关：还会低概率主动插话（配合下面的「主动插话概率」）。
+        </span>
+      </div></div>
+
+      <div class="row"><label>主人总是回</label><div class="ctl">
+        <div class="switch" id="swGroupMasterAlways" onclick="toggleSw('swGroupMasterAlways')"></div>
+        <span class="hint">主人在群里说话，不管有没有 @ 都回</span>
+      </div></div>
+
+      <div class="row"><label>叫她什么</label><div class="ctl">
+        <input type="text" id="groupAliases" placeholder="鲸鲸, 小鲸（逗号分隔）" style="max-width:320px">
+        <span class="hint">群里叫到这些词就算在叫她</span>
+      </div></div>
+
+      <div class="row"><label>接话窗口</label><div class="ctl">
+        <input type="number" id="groupEngaged" min="1" max="120" style="max-width:90px">
+        <span class="hint">分钟。被 @ 之后这段时间内继续正常聊天</span>
+      </div></div>
+
+      <div class="row"><label>每小时上限</label><div class="ctl">
+        <input type="number" id="groupMaxPerHour" min="1" max="10000" style="max-width:100px">
+        <span class="hint">次。防止在群里刷屏</span>
+      </div></div>
+
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:8px">群里的主人</label>
+        <div class="ctl" style="flex-direction:column;align-items:stretch;gap:6px">
+          <input type="text" id="groupOwnerIds" placeholder="wxid_xxx, wxid_yyy（逗号分隔）">
+          <span class="hint">
+            留空 = 用「主人设置」里的名单（推荐）。<br>
+            <span style="color:var(--warn)">只在某个群额外加人时才需要填这里。</span>
+          </span>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+        <button onclick="saveGroup()">保存</button>
+        <span class="hint" id="groupSaveHint"></span>
+      </div>
+    </div>
   </div>
 
   <div class="page" id="page-stickers">
@@ -2241,11 +2297,67 @@ function onSourceChange() {
   }
 }
 
+/** 保存群聊策略。 */
+async function saveGroup() {
+  const hint = $('groupSaveHint');
+  if (hint) hint.textContent = '保存中…';
+
+  const splitList = (v) =>
+    String(v || '')
+      .split(/[,，\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  try {
+    const j = await api('config', {
+      method: 'POST',
+      body: {
+        group: {
+          requireAt: $('swGroupRequireAt').classList.contains('on'),
+          masterAlwaysReply: $('swGroupMasterAlways').classList.contains('on'),
+          aliases: splitList($('groupAliases').value).slice(0, 10),
+          engagedMinutes: Number($('groupEngaged').value) || 8,
+          maxRepliesPerHour: Number($('groupMaxPerHour').value) || 1000,
+          ownerIds: splitList($('groupOwnerIds').value).slice(0, 50),
+        },
+      },
+    });
+
+    if (j.ok) {
+      if (hint) hint.textContent = '✓ 已保存';
+      toast('群聊策略已保存');
+      // 通道是启动时读配置的，这里提示一下
+      toast('群聊通道需要重启服务才生效');
+      await loadActive();
+    } else {
+      if (hint) hint.textContent = '✗ ' + (j.error || '失败');
+    }
+  } catch (e) {
+    if (hint) hint.textContent = '✗ ' + e.message;
+  }
+}
+
 async function loadActive() {
   try {
     const c = await api('config');
     const care = c.care || {};
     const share = c.share || {};
+
+    // ===== 群聊策略 =====
+    const g = c.group || {};
+    setSw('swGroupRequireAt', g.requireAt !== false);
+    setSw('swGroupMasterAlways', g.masterAlwaysReply !== false);
+    $('groupAliases').value = (g.aliases || []).join(', ');
+    $('groupEngaged').value = g.engagedMinutes ?? 8;
+    $('groupMaxPerHour').value = g.maxRepliesPerHour ?? 1000;
+    $('groupOwnerIds').value = (g.ownerIds || []).join(', ');
+
+    const gChip = $('groupChip');
+    if (gChip) {
+      const on = g.requireAt !== false;
+      gChip.textContent = on ? '只在叫到时回' : '会主动插话';
+      gChip.className = 'chip ' + (on ? 'on' : 'off');
+    }
 
     // 搭话
     setSw('swCare', care.enabled !== false);

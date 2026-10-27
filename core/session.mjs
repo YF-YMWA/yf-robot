@@ -25,13 +25,112 @@ export class Session {
     this.cfg = cfg;
     /** @type {Array<{role:'user'|'assistant', content:string, at:number}>} */
     this.history = [];
-    /** 从对话里学到的事实 */
+    /** 从对话里学到的事实（单聊用） */
     this.facts = new Map();
+
+    /**
+     * 群聊里按发言人分开存的事实：{ 发言人id: { 名字: 昵称, 事实Map } }
+     *
+     * 为什么群聊要分开：
+     *   群会话是按群分的（grp:xxx），一个群一个会话 —— 这没问题，
+     *   她本来就该知道群里在聊什么。但「事实」是**关于某个人的**，
+     *   不能说 A 报了名字，B 一问她就答 A 的名字。
+     *   实测就是这样串的：Alice 说「我叫小美」，Bob 问她「我叫什么」，
+     *   她答「你没跟我说过名字，我记了小美和她的猫团子」—— 直接把别人的信息说出去了。
+     *
+     * @type {Map<string, {name: string, facts: Map<string,string>}>}
+     */
+    this.speakerFacts = new Map();
+
     this.createdAt = Date.now();
     this.lastActive = Date.now();
     this.turns = 0;
     /** 串行队列 */
     this.queue = Promise.resolve();
+  }
+
+  /**
+   * 记一条「关于某个人」的事实（群聊用）。
+   *
+   * @param {string} speakerId 发言人 id（wxid 之类）
+   * @param {string} speakerName 发言人昵称
+   * @param {string} key 事实名
+   * @param {string} value 事实值
+   */
+  rememberAbout(speakerId, speakerName, key, value) {
+    const id = String(speakerId || '').trim();
+    if (!id || !key) return;
+
+    let rec = this.speakerFacts.get(id);
+    if (!rec) {
+      rec = { name: String(speakerName || id), facts: new Map() };
+      this.speakerFacts.set(id, rec);
+    }
+    if (speakerName) rec.name = String(speakerName);
+    rec.facts.set(String(key), String(value));
+  }
+
+  /**
+   * 拼群聊里「关于谁」的那段提示词。
+   *
+   * 默认**只给当前发言人自己的事实**，其他人的一律不注入。
+   *
+   * 为什么这么做（踩过两次）：
+   *   1. Alice 说「我叫小美」，Bob 问「我叫什么」，只给模型看
+   *      「其他人：Alice 名字=小美」，它会答「小美」—— 别人的名字被说出去。
+   *   2. 加了「当前这个人没有记录」的提醒也没用，它还是会从
+   *      「其他人」那段里捞信息，答「系统里写的是小美」。
+   *   结论：只要把别人的事实放进提示词，模型就有概率张冠李戴。
+   *   干脆不给 —— 需要共享的（比如「A 喜欢火锅」）本来也不该由她主动说出来。
+   *
+   * 想恢复群内共享，把 config.group.sharedFacts 设成 true。
+   *
+   * @param {string} speakerId 当前发言人
+   * @param {string} [speakerName] 当前发言人昵称
+   * @param {boolean} [includeOthers] 要不要带上其他人的事实（默认不带）
+   * @returns {string}
+   */
+  speakerFactsSummary(speakerId, speakerName = '', includeOthers = false) {
+    if (!this.speakerFacts.size) return '';
+
+    const sid = String(speakerId || '');
+    const me = this.speakerFacts.get(sid);
+    const myName = String(speakerName || me?.name || '').trim();
+
+    const parts = [];
+
+    if (me && me.facts.size) {
+      const lines = [...me.facts.entries()].map(([k, v]) => `- ${k}：${v}`);
+      parts.push(`【关于现在跟你说话的「${me.name}」】\n${lines.join('\n')}`);
+    } else {
+      parts.push(
+        `【关于现在跟你说话的「${myName || '当前说话的人'}」】\n` +
+          '（你还没有任何关于这个人的记录 —— 别拿别人的信息当他的。）',
+      );
+    }
+
+    if (!includeOthers) return parts.join('\n\n');
+
+    const others = [];
+    for (const [id, rec] of this.speakerFacts) {
+      if (id === sid) continue;
+      if (!rec.facts.size) continue;
+      // 同名没法区分，直接跳过
+      if (myName && String(rec.name || '').trim() === myName) continue;
+      const lines = [...rec.facts.entries()].map(([k, v]) => `${k}=${v}`);
+      others.push(`- ${rec.name}：${lines.join('，')}`);
+    }
+
+    if (others.length) {
+      parts.push(
+        '【群里其他人（这些不是当前说话的人，别混用）】\n' +
+          others.join('\n') +
+          '\n（对方问自己的事时，只能用「关于现在跟你说话的那位」；' +
+          '不要拿别人的信息回答。）',
+      );
+    }
+
+    return parts.join('\n\n');
   }
 
   /** 追加一轮对话。 */
@@ -87,10 +186,18 @@ export class Session {
 
   /** 序列化为可存储的形式。 */
   toJSON() {
+    // 群聊里按发言人存的事实也要落盘，否则重启就全忘了
+    const speakers = {};
+    for (const [id, rec] of this.speakerFacts) {
+      if (!rec.facts.size) continue;
+      speakers[id] = { name: rec.name, facts: Object.fromEntries(rec.facts) };
+    }
+
     return {
       id: this.id,
       history: this.history.slice(-40),
       facts: Object.fromEntries(this.facts),
+      speakers,
       createdAt: this.createdAt,
       lastActive: this.lastActive,
       turns: this.turns,
@@ -105,6 +212,14 @@ export class Session {
     s.createdAt = data.createdAt || Date.now();
     s.lastActive = data.lastActive || Date.now();
     s.turns = data.turns || 0;
+
+    for (const [id, rec] of Object.entries(data.speakers || {})) {
+      s.speakerFacts.set(String(id), {
+        name: String(rec?.name || id),
+        facts: new Map(Object.entries(rec?.facts || {})),
+      });
+    }
+
     return s;
   }
 }

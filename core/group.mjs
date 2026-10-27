@@ -66,11 +66,16 @@ export class GroupContextBuilder {
    * @param {GroupEvent} opts.current 当前事件
    * @returns {Array<{role:string, content:string}>}
    */
-  build({ groupId, history, current }) {
+  build({ groupId, history, current, participantNo = null }) {
     const speaker = (e) => {
       if (e.isBot) return '鲸鲸（机器人）';
-      const tag = this.participantTag(groupId, e.senderId || e.senderName);
-      return `${e.senderName}（参与者${tag}）`;
+      // 优先用会话分配的**可读序号**（参与者1、参与者2）——
+      // 模型看不懂 a1b2c3d4 这种哈希，实测会把两个人的话搞混。
+      // 没有回调时退回哈希，保证 builder 单独用也能工作。
+      const tag = typeof participantNo === 'function'
+        ? String(participantNo(e.senderId || e.senderName) || '')
+        : this.participantTag(groupId, e.senderId || e.senderName);
+      return tag ? `${e.senderName}（参与者${tag}）` : `${e.senderName}`;
     };
 
     const entries = [];
@@ -199,6 +204,17 @@ export class GroupTrigger {
 
     if (ctx.muted) return { wake: false, reason: 'muted' };
 
+    /**
+     * requireAt = true 时，只有明确叫到她（@ / 引用回复 / 叫名字）才理。
+     *
+     * 这个开关以前只在启动日志里打印一行，decide() 里根本没用 ——
+     * 结果设了「@才回」，她在群里照样被人随便一句话引出来。
+     *
+     * 注意：「被骂」和「窗口内接话」也算明确指向她，保留；
+     * 只砍掉靠运气的 free_chat。
+     */
+    const requireAt = cfg.requireAt === true;
+
     // 1. 明确 @ 或引用回复
     if (ctx.atMe || ctx.replyToBot) return { wake: true, reason: 'addressed' };
 
@@ -240,7 +256,8 @@ export class GroupTrigger {
     }
 
     // 7. 低概率主动接话
-    if (cfg.freeChat && Math.random() < (cfg.freeChatChance || 0)) {
+    //    开了 requireAt 就不许靠运气插话，否则「@才回」形同虚设
+    if (!requireAt && cfg.freeChat && Math.random() < (cfg.freeChatChance || 0)) {
       return { wake: true, reason: 'free_chat' };
     }
 

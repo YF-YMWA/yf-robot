@@ -36,12 +36,39 @@ export class GroupSession {
     /** 群成员昵称 → 出现次数 */
     this.members = new Map();
 
+    /**
+     * 发言人 id → 序号（1、2、3…，按第一次出现分配）
+     *
+     * 为什么不用哈希：原来是 `小明（参与者a1b2c3d4）` 这种，
+     * 一串随机十六进制模型根本不看 —— 实测它会把 Alice 说的
+     * 「我叫小美」直接安到 Bob 头上。
+     * 换成「参与者1」「参与者2」，一眼就能分出是两个人。
+     */
+    this.participantIndex = new Map();
+
     this.trigger = new GroupTrigger(cfg);
     this.builder = new GroupContextBuilder(cfg.context ? cfg.context : {});
   }
 
+  /**
+   * 给发言人分配一个可读序号（同一个人始终是同一个号）。
+   * @param {string} id
+   * @returns {number}
+   */
+  participantNo(id) {
+    const key = String(id || '').trim();
+    if (!key) return 0;
+    if (!this.participantIndex.has(key)) {
+      this.participantIndex.set(key, this.participantIndex.size + 1);
+    }
+    return this.participantIndex.get(key);
+  }
+
   /** 记录一条事件。 */
   addEvent(event) {
+    // 先分配序号，保证历史里显示的是稳定编号
+    if (!event.isBot && event.senderId) this.participantNo(event.senderId);
+
     this.events.push(event);
     if (event.senderName && !event.isBot) {
       this.members.set(event.senderName, (this.members.get(event.senderName) || 0) + 1);
@@ -126,7 +153,43 @@ export class GroupSession {
       groupId: this.groupId,
       history: this.events.slice(-50),
       current,
+      // 让 builder 用本会话的稳定序号，而不是哈希
+      participantNo: (id) => this.participantNo(id),
     });
+  }
+
+  /**
+   * 群里有没有重名的人。
+   *
+   * 为什么需要：两个人都叫「小明」时，上下文里虽然带了「参与者+哈希」的标签，
+   * 但模型基本不看那串哈希 —— 实测它会直接把第一个小明说过的话
+   * 安到第二个小明头上（"火锅啊！你刚说的"）。
+   * 所以要在提示词里用自然语言明说「群里有 N 个同名的人，别混」。
+   *
+   * @returns {Array<{name: string, count: number}>}
+   */
+  duplicatedNames() {
+    const byName = new Map();
+
+    for (const e of this.events) {
+      if (e.isBot) continue;
+      const name = String(e.senderName || '').trim();
+      const id = String(e.senderId || '').trim();
+      if (!name || !id) continue;
+
+      let set = byName.get(name);
+      if (!set) {
+        set = new Set();
+        byName.set(name, set);
+      }
+      set.add(id);
+    }
+
+    const out = [];
+    for (const [name, ids] of byName) {
+      if (ids.size > 1) out.push({ name, count: ids.size });
+    }
+    return out;
   }
 
   /**

@@ -3655,6 +3655,7 @@ print('%016x' % bits)
       },
       group: {
         requireAt: c.group.requireAt,
+        masterAlwaysReply: c.group.masterAlwaysReply !== false,
         engagedMinutes: c.group.engagedMinutes,
         cooldownSec: c.group.cooldownSec,
         maxRepliesPerHour: c.group.maxRepliesPerHour,
@@ -3757,6 +3758,7 @@ print('%016x' % bits)
     if (patch.group) {
       const g = patch.group;
       if (typeof g.requireAt === 'boolean') current.group.requireAt = g.requireAt;
+      if (typeof g.masterAlwaysReply === 'boolean') current.group.masterAlwaysReply = g.masterAlwaysReply;
       if (Number.isFinite(g.engagedMinutes)) current.group.engagedMinutes = clamp(g.engagedMinutes, 1, 120);
       if (Number.isFinite(g.cooldownSec)) current.group.cooldownSec = clamp(g.cooldownSec, 0, 3600);
       if (Number.isFinite(g.maxRepliesPerHour)) current.group.maxRepliesPerHour = clamp(g.maxRepliesPerHour, 1, 10000);

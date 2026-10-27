@@ -266,7 +266,6 @@ export class ChatEngine {
    */
   async handle(input) {
     const { sessionId, text, speakerName, isOwner, onDelta, images, audio, enableSearch, ownerCheck } = input;
-
     if (!sessionId) throw new Error('缺少 sessionId');
 
     // 先处理图片：把图转成文字描述，再当成普通消息走后续流程
@@ -364,9 +363,19 @@ export class ChatEngine {
       }
 
       // 记录事实（先记，本轮的提示词就能用上）
+      //
+      // 群聊（sessionId 以 grp: 开头）要按发言人分开记：
+      // 群会话是按群共享的，但「我叫什么」这种事实是关于**某个人**的，
+      // 混在一起就会出现「A 报名字，B 一问就答 A 的名字」。
+      const isGroupSession = String(sessionId).startsWith('grp:');
+
       for (const [k, v] of extractFacts(userText)) {
-        session.remember(k, v);
-        this.memory.setFact(sessionId, k, v); // 同时写长期记忆
+        if (isGroupSession && input.speakerId) {
+          session.rememberAbout(input.speakerId, speakerName, k, v);
+        } else {
+          session.remember(k, v);
+          this.memory.setFact(sessionId, k, v); // 同时写长期记忆
+        }
       }
 
       // 风格/偏好指令（"以后别用网络用语"这类，不记就丢）
@@ -406,6 +415,8 @@ export class ChatEngine {
         searchNote,
         ownerCheck,
         proactiveDraw,
+        input.speakerId || '',
+        input.groupNote || '',
       );
 
       let raw = '';
@@ -637,6 +648,8 @@ export class ChatEngine {
     searchNote = '',
     ownerCheck = null,
     proactiveDraw = false,
+    speakerId = '',
+    groupNote = '',
   ) {
     const system = renderSystemPrompt(this.persona, {
       ownerName: speakerName || this.persona.ownerName,
@@ -715,6 +728,21 @@ export class ChatEngine {
     }
 
     if (facts) parts.push(facts);
+
+    // 群聊：按发言人分开的事实（谁说的记在谁名下）
+    if (String(session.id).startsWith('grp:')) {
+      try {
+        // 默认只注入当前发言人自己的事实；想群内共享就把 group.sharedFacts 打开
+        const shareFacts = this.config.group?.sharedFacts === true;
+        const perSpeaker = session.speakerFactsSummary(speakerId, speakerName, shareFacts);
+        if (perSpeaker) parts.push(perSpeaker);
+      } catch (e) {
+        this.log.warn?.(`[engine] 群聊发言人记忆加载失败: ${e.message}`);
+      }
+
+      // 群聊专属提醒（比如重名），由群通道生成
+      if (groupNote) parts.push(groupNote);
+    }
     if (searchNote) parts.push(searchNote);
 
     // 没联网能力 / 这次没搜：明确禁止编造实时信息。
