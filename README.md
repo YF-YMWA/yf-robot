@@ -212,7 +212,7 @@ node app.mjs
 app.mjs              服务入口
 menu.mjs             主菜单（YF-Robot.bat 调它）
 core/                引擎、会话、记忆、工具、学习
-channels/            web / ilink / 微信群
+channels/            web / 群聊
 web/                 聊天页 + 控制台
 cards/               角色卡
 docs/                适配器协议说明
@@ -245,7 +245,7 @@ node tools/pack.mjs --no-runtime # 不含运行时，约 3MB
 
 ### 打包会自动做这些检查
 
-- 敏感信息扫描（Key、wxid、本机路径、iLink token）
+- 敏感信息扫描（Key、wxid、本机路径、第三方 bot token）
 - **文件名**扫描（防止 `wxid_xxx_538_h.png` 这类泄露）
 - 完整性检查（18 个关键文件缺一不可）
 - 隐私目录排除（`data/`、`credentials/`、任何层级的 `data/`）

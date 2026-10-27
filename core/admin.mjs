@@ -4335,7 +4335,7 @@ print('%016x' % bits)
 
     if (patch.channels) {
       // 通道开关需要重启才生效，这里只记录
-      for (const name of ['web', 'ilink', 'wechat-group']) {
+      for (const name of ['web', 'wechat-group']) {
         if (typeof patch.channels[name]?.enabled === 'boolean') {
           current.channels[name].enabled = patch.channels[name].enabled;
         }

@@ -446,7 +446,7 @@ YF-Robot.bat        主入口（启动服务 + 打开控制台）
 
 app.mjs             服务入口
 core/               核心：引擎、会话、记忆、工具、学习、群聊
-channels/           通道：网页 / iLink / 微信群 / 微信 UIA
+channels/           通道：网页 / 群聊
 web/                网页界面 + 控制台
 cards/              角色卡
 docs/               适配器协议说明

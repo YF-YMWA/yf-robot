@@ -103,19 +103,6 @@ async function main() {
     apiKey = 'ollama';
   }
 
-  // 问要不要开微信
-  console.log('');
-  const credFile = path.join(ROOT, 'credentials', 'ilink.json');
-  const hasCred = fs.existsSync(credFile);
-  let enableWechat = false;
-
-  if (hasCred) {
-    const ans = await ask(rl, '检测到微信凭据，要启用微信单聊吗？(y/n)', 'y');
-    enableWechat = /^y/i.test(ans);
-  } else {
-    console.log('（没有微信凭据，之后可用 扫码登录.bat 添加）');
-  }
-
   rl.close();
 
   // 写配置
@@ -198,13 +185,10 @@ async function main() {
 
     channels: {
       web: { enabled: true },
-      ilink: {
-        _说明: '微信单聊（官方通道）',
-        enabled: enableWechat,
-        credFile: 'credentials/ilink.json',
-      },
+      // 不接任何平台也能用（网页聊天）。
+      // 想接微信/QQ 等，按 docs/adapter-protocol.md 跑一个适配器。
       'wechat-group': {
-        _说明: '微信群聊。需要桥接程序，详见 README',
+        _说明: '群聊通道（由适配器把群消息转发进来）',
         enabled: false,
       },
     },

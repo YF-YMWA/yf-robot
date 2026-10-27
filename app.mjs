@@ -13,14 +13,10 @@ import { loadAnyPersona, listCards } from './core/card.mjs';
 import { ChatEngine } from './core/engine.mjs';
 import { AdminApi } from './core/admin.mjs';
 import { WebChannel } from './channels/web.mjs';
-import { ILinkChannel } from './channels/ilink.mjs';
-import { WeChatUiaChannel } from './channels/wechat-uia.mjs';
 import { WeChatGroupChannel } from './channels/wechat-group.mjs';
 
 const CHANNEL_FACTORIES = {
   web: (opts) => new WebChannel(opts),
-  ilink: (opts) => new ILinkChannel(opts),
-  'wechat-uia': (opts) => new WeChatUiaChannel(opts),
   'wechat-group': (opts) => new WeChatGroupChannel(opts),
 };
 
@@ -509,29 +505,13 @@ async function main() {
     console.log('');
   }
 
-  // B站分享调度（只在有可发送通道时启用）
-  let shareScheduler = null;
+  // B站分享调度
+  //
+  // 以前靠 ilink 通道主动推送。现在核心不直接连任何平台 ——
+  // 发送由适配器负责，适配器自己去问 /api/share/due。
+  // 所以这里不再起调度器，只留一条说明，免得有人找不到分享功能。
   if (config.share.enabled) {
-    const sendChannel = channels.find((c) => c.name === 'ilink' && typeof c.send === 'function');
-    if (sendChannel) {
-      const { BilibiliClient, ShareScheduler } = await import('./core/share.mjs');
-      const bili = new BilibiliClient(config.share);
-      shareScheduler = new ShareScheduler({
-        client: bili,
-        intervalMs: config.share.intervalHours * 3600000,
-        onShare: async (content) => {
-          // 推给自己（iLink 通道的 ownerId）
-          const to = sendChannel.ownerId;
-          if (!to) throw new Error('缺少 ownerId，无法决定分享给谁');
-          for (const chunk of content.split('\n')) {
-            if (chunk.trim()) await sendChannel.send(to, chunk.trim());
-          }
-        },
-      });
-      shareScheduler.start();
-    } else {
-      console.warn('[share] 已启用但没有可发送的通道（需要 ilink），跳过');
-    }
+    console.log('[share] 已启用；由适配器轮询 /api/share/due 触发（核心不主动推送）');
   }
 
   // 定时回收闲置会话

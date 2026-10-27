@@ -427,9 +427,7 @@ export class WebChannel {
         }
 
         // 和 /api/admin/* 不一样：适配器用的是 inboundToken，不是本地管理令牌
-        const expect = this.config.gateway?.wechat?.inboundToken
-          || this.config.channels?.ilink?.token
-          || '';
+        const expect = this.config.gateway?.wechat?.inboundToken || '';
         const got = req.headers['x-adapter-token'] || '';
         if (expect && got !== expect) {
           return json(res, 403, { ok: false, error: '适配器令牌不对' });

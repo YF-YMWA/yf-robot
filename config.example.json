@@ -53,7 +53,7 @@
     "fieldMap": null
   },
   "share": {
-    "_说明": "定时分享 B 站视频。只在 ilink 通道启用时有效",
+    "_说明": "定时分享 B 站视频（由适配器轮询 /api/share/due 触发）",
     "enabled": false,
     "intervalHours": 2,
     "count": 20,
@@ -103,17 +103,6 @@
   "channels": {
     "web": {
       "enabled": true
-    },
-    "ilink": {
-      "_说明": "微信官方单聊通道。需先扫码登录生成凭据",
-      "enabled": true,
-      "credFile": "credentials/ilink.json"
-    },
-    "wechat-uia": {
-      "_说明": "微信群聊通道。需要你自己的桥接实现，详见 channels/wechat-uia.mjs 顶部说明",
-      "enabled": false,
-      "bridgeUrl": "",
-      "ownerIds": []
     },
     "wechat-group": {
       "_说明": "微信群聊。需要桥接程序推送消息，接口见 README",

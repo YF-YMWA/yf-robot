@@ -104,7 +104,7 @@ export function guessMediaType(buf) {
  * @param {object} deps
  * @param {Buffer} deps.buffer 文件明文
  * @param {string} deps.mediaType image | file | video
- * @param {(body: object) => Promise<object>} deps.post 调 ilink 接口的函数
+ * @param {(body: object) => Promise<object>} deps.post 调适配器接口的函数
  * @param {typeof fetch} [deps.fetchImpl]
  * @returns {Promise<{encryptQueryParam: string, aesKeyB64: string, midSize: number, rawSize: number}>}
  */

@@ -207,16 +207,6 @@ export const DEFAULTS = {
   /** 通道配置 */
   channels: {
     web: { enabled: true },
-    ilink: {
-      enabled: false,
-      credFile: 'credentials/ilink.json',
-    },
-    /** UIA 通道占位，由使用者实现后启用 */
-    'wechat-uia': {
-      enabled: false,
-      /** 桥接服务地址，需自行实现协议 */
-      bridgeUrl: '',
-    },
     /** 群聊通道 */
     'wechat-group': {
       enabled: false,
@@ -324,9 +314,6 @@ export function loadConfig(opts = {}) {
     : path.join(root, cfg.personaFile);
   if (cfg.log?.file && !path.isAbsolute(cfg.log.file)) {
     cfg.log.file = path.join(root, cfg.log.file);
-  }
-  if (cfg.channels?.ilink?.credFile && !path.isAbsolute(cfg.channels.ilink.credFile)) {
-    cfg.channels.ilink.credFile = path.join(root, cfg.channels.ilink.credFile);
   }
   if (cfg.tools?.sandbox && !path.isAbsolute(cfg.tools.sandbox)) {
     cfg.tools.sandbox = path.join(root, cfg.tools.sandbox);
