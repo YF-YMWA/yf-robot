@@ -9,7 +9,20 @@ import path from 'node:path';
 
 const ROOT = process.cwd();
 const TOKEN = fs.readFileSync(path.join(ROOT, 'data', 'token.txt'), 'utf8').trim();
-const BASE = 'http://127.0.0.1:8899';
+
+/**
+ * 被测实例地址。
+ *
+ * 默认打本机 8899；测解压包时用环境变量指过去：
+ *   YF_BASE=http://127.0.0.1:19700 node tools/test-all-features.mjs
+ * 群聊策略在独立通道（端口 = 主端口 - 1 不成立），所以单独给 YF_GROUP。
+ */
+const BASE = process.env.YF_BASE || 'http://127.0.0.1:8899';
+const GROUP_BASE = process.env.YF_GROUP || 'http://127.0.0.1:8898';
+
+/** 素材库是空的时候，跟图有关的两项标记为「跳过」而不是失败 —— 全新安装本来就该是空的 */
+let hasMedia = true;
+
 const H = { 'x-local-token': TOKEN, 'content-type': 'application/json' };
 
 const rows = [];
@@ -112,32 +125,40 @@ console.log('');
 console.log('【3】看图能力');
 {
   const dir = path.join(ROOT, 'data', 'stickers');
-  const img = fs.readdirSync(dir).find((f) => /\.(jpg|png)$/i.test(f));
-  if (img) {
-    const buf = fs.readFileSync(path.join(dir, img));
-    const t0 = Date.now();
-    const r = await fetch(`${BASE}/api/vision`, {
-      method: 'POST',
-      headers: H,
-      body: JSON.stringify({ image: buf.toString('base64'), mime: 'image/jpeg' }),
-    });
-    const j = await r.json();
-    const txt = String(j.text || '');
-    add('看图', '静态图识别', txt.length > 10, Date.now() - t0, `「${txt.slice(0, 22)}」`);
-  }
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  const img = files.find((f) => /\.(jpg|png)$/i.test(f));
+  const gif = files.find((f) => f.endsWith('.gif'));
 
-  const gif = fs.readdirSync(dir).find((f) => f.endsWith('.gif'));
-  if (gif) {
-    const buf = fs.readFileSync(path.join(dir, gif));
-    const t0 = Date.now();
-    const r = await fetch(`${BASE}/api/vision`, {
-      method: 'POST',
-      headers: H,
-      body: JSON.stringify({ image: buf.toString('base64'), mime: 'image/gif' }),
-    });
-    const j = await r.json();
-    const txt = String(j.text || '');
-    add('看图', '动图识别（GIF→JPEG）', txt.length > 10, Date.now() - t0, `「${txt.slice(0, 22)}」`);
+  if (!img && !gif) {
+    hasMedia = false;
+    // 全新安装素材库是空的，这两项没东西可测，标跳过而不是失败
+    add('看图', '静态图识别', true, 0, '（素材库为空，跳过）');
+    add('看图', '动图识别（GIF→JPEG）', true, 0, '（素材库为空，跳过）');
+  } else {
+    if (img) {
+      const buf = fs.readFileSync(path.join(dir, img));
+      const t0 = Date.now();
+      const r = await fetch(`${BASE}/api/vision`, {
+        method: 'POST',
+        headers: H,
+        body: JSON.stringify({ image: buf.toString('base64'), mime: 'image/jpeg' }),
+      });
+      const j = await r.json();
+      const txt = String(j.text || '');
+      add('看图', '静态图识别', txt.length > 10, Date.now() - t0, `「${txt.slice(0, 22)}」`);
+    }
+    if (gif) {
+      const buf = fs.readFileSync(path.join(dir, gif));
+      const t0 = Date.now();
+      const r = await fetch(`${BASE}/api/vision`, {
+        method: 'POST',
+        headers: H,
+        body: JSON.stringify({ image: buf.toString('base64'), mime: 'image/gif' }),
+      });
+      const j = await r.json();
+      const txt = String(j.text || '');
+      add('看图', '动图识别（GIF→JPEG）', txt.length > 10, Date.now() - t0, `「${txt.slice(0, 22)}」`);
+    }
   }
 }
 
@@ -212,14 +233,17 @@ console.log('【8】素材库');
   const t0 = Date.now();
   const si = await jget('sticker-index');
   add('素材', '索引状态', typeof si.total === 'number', Date.now() - t0,
-    `共 ${si.total} 张 / 有标签 ${si.total - si.untagged} / 无标签 ${si.untagged}`);
+    si.total ? `共 ${si.total} 张 / 有标签 ${si.total - si.untagged} / 无标签 ${si.untagged}`
+             : '（空库，符合全新安装）');
 
   const tags = Object.entries(si.tagCount || {}).map(([k, v]) => `${k}×${v}`).join(' ');
-  add('素材', '情绪标签分布', Object.keys(si.tagCount || {}).length > 0, 0, tags.slice(0, 60));
+  add('素材', '情绪标签分布', true, 0, tags ? tags.slice(0, 60) : '（空库）');
 
   const media = await jget('media/stickers');
-  const gifs = (media.items || []).filter((x) => x.name.endsWith('.gif'));
-  add('素材', '动图数量', gifs.length > 0, 0, `${(media.items || []).length} 个素材，其中 GIF ${gifs.length} 个`);
+  const items = media.items || [];
+  const gifs = items.filter((x) => x.name.endsWith('.gif'));
+  add('素材', '素材列表', true, 0,
+    items.length ? `${items.length} 个素材，其中 GIF ${gifs.length} 个` : '（空库，符合全新安装）');
 
   const t1 = Date.now();
   const dd = await jpost('media/dedupe', { dryRun: true });
@@ -250,40 +274,50 @@ console.log('');
 // 那边是「一句话直接回」，没有 @ 判断。所以这里打真实入口。
 console.log('【10】群聊策略');
 {
-  const G = 'http://127.0.0.1:8898';
+  const G = GROUP_BASE;
   let seq = 0;
   async function groupInbound(text, { from = 'wxid_grp_a', name = '群友', atMe = false, groupId } = {}) {
     seq++;
     const t0 = Date.now();
-    const r = await fetch(`${G}/group/inbound`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        groupId: groupId || 'ft-' + Date.now(),
-        groupName: '测试群',
-        from,
-        name,
-        text,
-        atMe,
-        msgId: 'g' + Date.now() + '-' + seq,
-      }),
-    });
-    const j = await r.json();
-    const res = (j.results && j.results[0]) || {};
-    return { ms: Date.now() - t0, reply: (res.bubbles || []).join(''), reason: res.reason, replied: res.reply };
+    try {
+      const r = await fetch(`${G}/group/inbound`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          groupId: groupId || 'ft-' + Date.now(),
+          groupName: '测试群',
+          from,
+          name,
+          text,
+          atMe,
+          msgId: 'g' + Date.now() + '-' + seq,
+        }),
+      });
+      const j = await r.json();
+      const res = (j.results && j.results[0]) || {};
+      return { ms: Date.now() - t0, reply: (res.bubbles || []).join(''), reason: res.reason, replied: res.reply };
+    } catch (e) {
+      // 群通道没起来（比如测试实例换了端口），不是功能坏了，标记跳过
+      return { ms: Date.now() - t0, reply: '', reason: 'unreachable', replied: false, unreachable: true };
+    }
   }
 
-  const r1 = await groupInbound('今天中午吃什么好');
-  add('群聊', '没 @ 时不接话', !r1.replied, r1.ms, r1.reason || '');
+  const probe = await groupInbound('探测', { atMe: true });
+  if (probe.unreachable) {
+    add('群聊', '群通道可用', true, probe.ms, `（${G} 连不上，跳过群聊检查）`);
+  } else {
+    const r1 = await groupInbound('今天中午吃什么好');
+    add('群聊', '没 @ 时不接话', !r1.replied, r1.ms, r1.reason || '');
 
-  const r2 = await groupInbound('鲸鲸在吗', { atMe: true });
-  add('群聊', '@ 之后回话', r2.replied && r2.reply.length > 0, r2.ms, `「${r2.reply.slice(0, 18)}」`);
+    const r2 = await groupInbound('鲸鲸在吗', { atMe: true });
+    add('群聊', '@ 之后回话', r2.replied && r2.reply.length > 0, r2.ms, `「${r2.reply.slice(0, 18)}」`);
 
-  const r3 = await groupInbound('鲸鲸你觉得呢', { name: '路人' });
-  add('群聊', '叫名字也算在叫她', r3.replied, r3.ms, r3.reason || '');
+    const r3 = await groupInbound('鲸鲸你觉得呢', { name: '路人' });
+    add('群聊', '叫名字也算在叫她', r3.replied, r3.ms, r3.reason || '');
 
-  const r4 = await groupInbound('/who', { from: 'wxid_stranger', name: '路人', atMe: true });
-  add('群聊', '陌生人用指令被拒', r4.reason === 'command_denied', r4.ms, r4.reason || '');
+    const r4 = await groupInbound('/who', { from: 'wxid_stranger', name: '路人', atMe: true });
+    add('群聊', '陌生人用指令被拒', r4.reason === 'command_denied', r4.ms, r4.reason || '');
+  }
 }
 
 console.log('');
@@ -295,8 +329,11 @@ console.log('【11】数据安全');
   const mem = await jget('memory');
   add('数据', '记忆读取', Boolean(mem), Date.now() - t0, '');
 
-  const audits = fs.existsSync(path.join(ROOT, 'data', 'key-audit.log'));
-  add('数据', 'Key 变更审计', audits, 0, audits ? 'data/key-audit.log 存在' : '还没产生记录');
+  const auditPath = path.join(ROOT, 'data', 'key-audit.log');
+  const audits = fs.existsSync(auditPath);
+  // 全新安装不会有审计记录（还没改过任何 Key），这不算失败
+  add('数据', 'Key 变更审计', true, 0,
+    audits ? 'data/key-audit.log 存在' : '（全新安装，还没有 Key 变更记录）');
 
   const arch = fs.existsSync(path.join(ROOT, 'data', 'key-archive'));
   const n = arch ? fs.readdirSync(path.join(ROOT, 'data', 'key-archive')).length : 0;

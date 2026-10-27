@@ -14,8 +14,34 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkCareDue, composeCare } from '../core/care.mjs';
 import { ensureToken, checkToken } from '../core/token.mjs';
+import { MediaLibrary } from '../core/media-ingest.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * 这个会话/发送者发的图要不要收藏。
+ *
+ * 规则和桥接里那套一致：
+ *   1. 白名单为空 → 全收
+ *   2. 会话或发送者在白名单 → 收
+ *   3. 否则不收
+ *
+ * @param {string[]} whitelist
+ * @param {string} chatId
+ * @param {string} senderId
+ * @returns {boolean}
+ */
+export function isCollectAllowed(whitelist, chatId, senderId) {
+  const allowed = new Set(
+    (Array.isArray(whitelist) ? whitelist : [])
+      .map((x) => String(x).trim())
+      .filter(Boolean),
+  );
+  if (!allowed.size) return true;
+  if (chatId && allowed.has(String(chatId).trim())) return true;
+  if (senderId && allowed.has(String(senderId).trim())) return true;
+  return false;
+}
 
 export class WebChannel {
   /**
@@ -166,6 +192,18 @@ export class WebChannel {
     this.presenceTimer.unref?.();
   }
 
+  /** 媒体库（懒加载，第一次用到才建） */
+  #mediaLib() {
+    if (!this._mediaLib) {
+      this._mediaLib = new MediaLibrary({
+        root: path.join(__dirname, '..'),
+        ffmpeg: this.config.vision?.ffmpeg || this.config.imagegen?.ffmpeg || null,
+        log: (m) => this.log.info?.('[media] ' + m),
+      });
+    }
+    return this._mediaLib;
+  }
+
   async start() {
     const { host, port } = this.config.server;
     const autoPort = this.config.server.autoPort !== false;
@@ -283,7 +321,14 @@ export class WebChannel {
       }
 
       // 素材文件（表情包 / 图片，控制台预览用）
-      if (req.method === 'GET' && (url.pathname.startsWith('/api/sticker/') || url.pathname.startsWith('/api/media/'))) {
+      //
+      // 注意排除 policy / ingest：这两个是同前缀的接口，不是文件名。
+      // 不排除的话会被这里当成「读一个叫 policy 的文件」，直接 403。
+      if (
+        req.method === 'GET'
+        && !url.pathname.startsWith('/api/media/policy')
+        && (url.pathname.startsWith('/api/sticker/') || url.pathname.startsWith('/api/media/'))
+      ) {
         if (!checkToken(req, url, this.token)) {
           return json(res, 403, { error: '未授权' });
         }
@@ -335,6 +380,94 @@ export class WebChannel {
         return await this.#wechatSync(req, res);
       }
 
+      // ===== 适配器配套：媒体入库 + 收藏策略 =====
+      //
+      // 为什么由核心来存：
+      //   适配器是独立仓库、独立进程，它那边算出来的 data/ 不是核心的 data/。
+      //   让适配器自己写目录，结果是「收藏了但控制台看不到」。
+      //   所以统一改成：适配器把字节传过来，存哪、存不存、算不算重复，核心说了算。
+      if (req.method === 'GET' && url.pathname === '/api/media/policy') {
+        const w = this.config.wechat || {};
+        return json(res, 200, {
+          ok: true,
+          collect: w.mediaCollect !== false,
+          /** 收藏白名单：空 = 全收；填了 = 只收这些会话/发送者 */
+          collectOnlyFrom: w.collectOnlyFrom || [],
+          stickerChance: w.stickerChance ?? 0.3,
+        });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/media/ingest') {
+        const body = await readJson(req).catch(() => null);
+        if (!body || !body.data) {
+          return json(res, 400, { ok: false, error: '缺少 data（base64）' });
+        }
+
+        // 和 /api/admin/* 不一样：适配器用的是 inboundToken，不是本地管理令牌
+        const expect = this.config.gateway?.wechat?.inboundToken
+          || this.config.channels?.ilink?.token
+          || '';
+        const got = req.headers['x-adapter-token'] || '';
+        if (expect && got !== expect) {
+          return json(res, 403, { ok: false, error: '适配器令牌不对' });
+        }
+
+        const kind = body.kind === 'image' || body.kind === 'generated' ? body.kind : 'sticker';
+        const senderId = String(body.senderId || '');
+        const chatId = String(body.chatId || '');
+
+        // 收藏策略在这里判一次，适配器不用再判
+        const w = this.config.wechat || {};
+        if (w.mediaCollect === false) {
+          return json(res, 200, { ok: true, skipped: 'mediaCollect 关闭' });
+        }
+        if (!isCollectAllowed(w.collectOnlyFrom || [], chatId, senderId)) {
+          return json(res, 200, { ok: true, skipped: '不在收藏白名单' });
+        }
+
+        let buf;
+        try {
+          buf = Buffer.from(String(body.data), 'base64');
+        } catch {
+          return json(res, 400, { ok: false, error: 'base64 解不开' });
+        }
+        if (!buf.length || buf.length > 12 * 1024 * 1024) {
+          return json(res, 400, { ok: false, error: '数据为空或超过 12MB' });
+        }
+
+        const lib = this.#mediaLib();
+        const r = await lib.save({ kind, data: buf, note: `（来自 ${senderId || chatId || '适配器'}）` });
+
+        if (r.ok && r.name) {
+          // 顺手给这张图打描述（异步，不阻塞适配器）
+          this.admin?.describeMediaOne?.(r.name, kind).catch?.(() => {});
+        }
+        return json(res, 200, r);
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/adapter/contacts') {
+        // 适配器上报它知道的会话/联系人，供控制台选「搭话发给谁」和「收藏白名单」
+        const body = await readJson(req).catch(() => null);
+        const list = Array.isArray(body?.contacts) ? body.contacts : [];
+        this.engine.adapterContacts = this.engine.adapterContacts || new Map();
+
+        let n = 0;
+        for (const c of list.slice(0, 200)) {
+          const wxid = String(c?.wxid || '').trim();
+          const name = String(c?.name || '').trim();
+          if (!name && !wxid) continue;
+          this.engine.adapterContacts.set(wxid || `name:${name}`, {
+            wxid,
+            name,
+            chatName: String(c?.chatName || name).trim(),
+            isGroup: Boolean(c?.isGroup),
+            lastSeen: Date.now(),
+          });
+          n++;
+        }
+        return json(res, 200, { ok: true, stored: n });
+      }
+
       // ===== 控制台页面在线状态（「关网页即停服务」用）=====
       if (req.method === 'POST' && url.pathname === '/api/console/ping') {
         const body = await readJson(req).catch(() => ({}));
@@ -372,6 +505,11 @@ export class WebChannel {
           listener: Boolean(body.listener),
           ffmpeg: Boolean(body.ffmpeg),
           platform: body.platform || 'wechat',
+          // 适配器独立之后，核心看不到它的日志了，
+          // 所以这些信息改由心跳带上来
+          name: String(body.name || ''),
+          account: String(body.account || ''),
+          recentMessages: Number(body.recentMessages) || 0,
         };
         // 存到 engine 上，admin 接口能读到
         this.engine.bridgeHeartbeat = hb;
@@ -380,54 +518,27 @@ export class WebChannel {
       }
 
       /**
-       * 启动自检：桥接报告「我从哪个目录启动的」。
+       * 适配器报到：告诉我它是谁、什么版本、跑的哪份安装。
        *
-       * 桥接把素材存到自己所在目录的 data/ 下，控制台读的是服务这边的 data/。
-       * 两边不是同一份安装时，会出现「收藏了但控制台看不到」，且毫无报错。
-       * 这里对比一下，不一致就让桥接在日志里大声警告，控制台也能显示。
+       * 以前这里还要比对「适配器的 data 目录和核心是不是同一个」——
+       * 因为那时候适配器自己写素材库，目录不一致就「收藏了但看不到」。
+       * 现在素材统一由核心存（POST /api/media/ingest），目录不一致不影响功能，
+       * 所以这里只记录信息，不再告警。
        */
       if (req.method === 'POST' && url.pathname === '/api/bridge/hello') {
         const body = await readJson(req).catch(() => ({}));
 
-        const norm = (p) => {
-          try {
-            return path.resolve(String(p || '')).replace(/[\\/]+$/, '').toLowerCase();
-          } catch {
-            return '';
-          }
-        };
-
-        const serverRoot = path.join(__dirname, '..');
-        const serverDataDir = path.join(serverRoot, 'data');
-        const bridgeDataDir = String(body.dataDir || '');
-        const mismatch = Boolean(bridgeDataDir) && norm(bridgeDataDir) !== norm(serverDataDir);
-
         this.bridgeInfo = {
           at: Date.now(),
+          name: String(body.name || ''),
+          version: String(body.version || ''),
           root: String(body.root || ''),
-          dataDir: bridgeDataDir,
-          bridgeFile: String(body.bridgeFile || ''),
-          hasGif: Boolean(body.hasGif),
           pid: Number(body.pid) || 0,
-          dataDirMismatch: mismatch,
-          serverDataDir,
         };
         // 也挂到 engine 上，admin 接口能读到（和 bridgeHeartbeat 同一套做法）
         this.engine.bridgeInfo = this.bridgeInfo;
 
-        if (mismatch) {
-          this.log.warn?.(
-            `[bridge] ⚠ 桥接数据目录与服务不一致：桥接=${bridgeDataDir}，服务=${serverDataDir}。` +
-              '两边不是同一份安装，素材会存到桥接那边而控制台读这边。',
-          );
-        }
-
-        return json(res, 200, {
-          ok: true,
-          dataDirMismatch: mismatch,
-          serverDataDir,
-          serverRoot,
-        });
+        return json(res, 200, { ok: true, core: 'yf-robot' });
       }
 
       // 看图：桥接收到图片/表情包后调这个识别

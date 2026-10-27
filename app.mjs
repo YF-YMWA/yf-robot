@@ -567,6 +567,37 @@ async function main() {
       .catch(() => {});
   }, 30000).unref?.();
 
+  /**
+   * 后台给素材补描述。
+   *
+   * 这件事以前是桥接里的后台线程干的 —— 但适配器现在是独立仓库，
+   * 它已经不在核心目录下，也管不到核心的素材库。
+   * 描述和索引本来就属于核心能力（不接微信也能用），所以搬回核心。
+   *
+   * 节奏：启动 60 秒后跑第一轮（别和启动流程抢资源），之后每 10 分钟一批，
+   * 每批最多 6 张 —— 不把视觉接口和额度打爆。
+   */
+  if (config.sticker?.autoIndex !== false) {
+    const indexTick = async () => {
+      try {
+        const r = await admin.handle('POST', '/api/admin/sticker-index/rebuild', {
+          limit: 6,
+          mode: 'missing',
+        });
+        const b = r?.body;
+        if (b?.ok && b.done > 0) {
+          console.log(`[素材] 补了 ${b.done} 张图的描述${b.failed ? `，${b.failed} 张失败` : ''}`);
+        }
+      } catch (e) {
+        console.warn('[素材] 补描述失败：' + e.message);
+      }
+    };
+
+    setTimeout(indexTick, 60 * 1000).unref?.();
+    const indexTimer = setInterval(indexTick, 10 * 60 * 1000);
+    indexTimer.unref?.();
+  }
+
   const shutdown = async (sig) => {
     console.log(`\n[${sig}] 正在停止…`);
     clearInterval(sweeper);

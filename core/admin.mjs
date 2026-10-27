@@ -268,12 +268,22 @@ export class AdminApi {
    * @param {string[]} [opts.channels] 已启用的通道名
    * @param {object} [opts.logger]
    */
-  constructor({ engine, config, channels = [], logger = console }) {
+  constructor({ engine, config, channels = [], logger = console, root = ROOT }) {
     this.engine = engine;
     this.config = config;
     this.channels = channels;
     this.log = logger;
     this.startedAt = Date.now();
+
+    /**
+     * 数据根目录。
+     *
+     * 默认是项目根，但**测试必须能改**：
+     * 单元测试里的管理接口会用假 Key 调 /api/admin/config，
+     * 如果写盘目标是真实 ROOT，就会把用户的 config.json 覆盖掉
+     * （真实踩过：voice Key 被测试值盖掉再清空）。
+     */
+    this.root = root;
 
     // 把「自动学习」的执行器注入引擎，引擎负责调度、这里负责干活
     if (engine) {
@@ -538,7 +548,7 @@ export class AdminApi {
 
       // 人物卡列表
       if (method === 'GET' && pathname === '/api/admin/cards') {
-        return { code: 200, body: { cards: listCards(ROOT), current: this.config.card || null } };
+        return { code: 200, body: { cards: listCards(this.root), current: this.config.card || null } };
       }
 
       // 读取单张卡片完整内容
@@ -836,7 +846,7 @@ export class AdminApi {
     }
 
     // 优先用真实语音样本（能听到实际识别效果），没有就用静音探活
-    const samplePath = path.join(ROOT, 'data', 'test-media', 'speech-1.wav');
+    const samplePath = path.join(this.root, 'data', 'test-media', 'speech-1.wav');
     let buf;
     let isSilence = true;
 
@@ -917,7 +927,9 @@ export class AdminApi {
 
   /** 词库目录。 */
   #wordsDir() {
-    return path.join(ROOT, 'bridge', 'resources');
+    // 词库属于核心能力（不接微信也能用），所以放在核 resources/ 下。
+    // 以前放在 bridge/resources，两个仓库一分家就断链了。
+    return path.join(this.root, 'resources');
   }
 
   /** 列出词库文件。 */
@@ -1094,7 +1106,7 @@ export class AdminApi {
 
     const enabled = Boolean(body.enabled);
 
-    const file = path.join(ROOT, 'config.json');
+    const file = path.join(this.root, 'config.json');
     const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
 
     cfg.words = cfg.words || {};
@@ -1198,10 +1210,10 @@ export class AdminApi {
    */
   #mediaDirs() {
     return {
-      stickers: path.join(ROOT, 'data', 'stickers'),
-      images: path.join(ROOT, 'data', 'images'),
+      stickers: path.join(this.root, 'data', 'stickers'),
+      images: path.join(this.root, 'data', 'images'),
       // 她画的图
-      generated: path.join(ROOT, 'data', 'generated'),
+      generated: path.join(this.root, 'data', 'generated'),
     };
   }
 
@@ -1276,7 +1288,7 @@ export class AdminApi {
 
   /** 索引文件路径。 */
   #stickerIndexFile() {
-    return path.join(ROOT, 'data', 'stickers', 'index.json');
+    return path.join(this.root, 'data', 'stickers', 'index.json');
   }
 
   #readStickerIndex() {
@@ -1302,16 +1314,31 @@ export class AdminApi {
    *
    * 为什么不用 md5：同一张表情包截两次图，JPEG 头差几十字节，
    * md5 完全不同但人眼看是一张 —— 素材库就会越攒越多。
+   *
+   * 两条路：
+   *   1. ffmpeg（快、不用起进程池、跟 media-ingest 用的是同一套算法）
+   *   2. Python + Pillow（有些机器没装 ffmpeg，随包带的 Python 里一定有 Pillow）
+   * 两条都不通就返回空串，调用方退回「只按 md5 去重」。
    */
   async #dHashOf(file) {
+    // 优先 ffmpeg：和 media-ingest 保持同一套算法，两处算出来的指纹才能互相比
+    try {
+      const { perceptualHash } = await import('./media-ingest.mjs');
+      const buf = fs.readFileSync(file);
+      const ffmpeg = this.config.vision?.ffmpeg || this.config.imagegen?.ffmpeg || 'ffmpeg';
+      const h = await perceptualHash(buf, ffmpeg);
+      if (h) return h;
+    } catch {}
+
+    // 兜底：随包的 Python + Pillow
     try {
       const { execFile } = await import('node:child_process');
-      const py = path.join(ROOT, 'runtime', 'python', 'python.exe');
+      const py = path.join(this.root, 'runtime', 'python', 'python.exe');
       if (!fs.existsSync(py)) return '';
 
       const code = `
 import sys, json
-sys.path.insert(0, ${JSON.stringify(path.join(ROOT, 'runtime', 'python', 'Lib', 'site-packages'))})
+sys.path.insert(0, ${JSON.stringify(path.join(this.root, 'runtime', 'python', 'Lib', 'site-packages'))})
 from PIL import Image
 img = Image.open(sys.argv[1]).convert('L').resize((9, 8), Image.LANCZOS)
 px = list(img.getdata())
@@ -1321,7 +1348,7 @@ for r in range(8):
         bits = (bits << 1) | (1 if px[r*9+c] > px[r*9+c+1] else 0)
 print('%016x' % bits)
 `;
-      const tmpPy = path.join(ROOT, 'data', 'tmp', 'dhash-once.py');
+      const tmpPy = path.join(this.root, 'data', 'tmp', 'dhash-once.py');
       fs.mkdirSync(path.dirname(tmpPy), { recursive: true });
       fs.writeFileSync(tmpPy, code, 'utf8');
 
@@ -1558,6 +1585,126 @@ print('%016x' % bits)
    *
    * 一次最多处理 limit 张，避免上百张图把接口和额度打爆。
    */
+  /**
+   * 给刚入库的一张图补描述。
+   *
+   * 适配器上传图片后由 web 通道调用（异步，不阻塞上传）。
+   * 以前这件事是桥接里的后台线程干的，现在适配器独立出去了，
+   * 描述和索引归核心管，所以搬到这里。
+   *
+   * @param {string} name 文件名
+   * @param {string} [kind] stickers | images | generated
+   */
+  async describeMediaOne(name, kind = 'stickers') {
+    if (!name) return { ok: false, error: '缺少文件名' };
+    if (!this.engine?.vision?.enabled) return { ok: false, error: '视觉模型未启用' };
+
+    const dirs = this.#mediaDirs();
+    const dir = dirs[kind] || dirs.stickers;
+    const file = path.join(dir, name);
+    if (!fs.existsSync(file)) return { ok: false, error: '文件不存在' };
+
+    // 已经有带标签的描述就不用再花一次额度
+    const index = this.#readStickerIndex();
+    const old = index[name];
+    if (old?.desc && Array.isArray(old.tags) && old.tags.length) {
+      return { ok: true, skipped: true };
+    }
+
+    const PROMPT = this.#describePrompt();
+
+    try {
+      const buf = fs.readFileSync(file);
+      const r = await this.engine.vision.describe(buf, { prompt: this.#describePrompt() });
+      let desc = String(r?.description || '').trim();
+      desc = this.#cleanDesc(desc);
+
+      if (!desc || desc.includes('看不清')) return { ok: false, error: '看不清' };
+      if (this.#looksLikeBadDesc(desc)) return { ok: false, error: '描述像截歪了' };
+
+      const tags = [];
+      for (const [tag, words] of Object.entries(this.#emojiTags())) {
+        if (words.some((w) => desc.includes(w))) tags.push(tag);
+      }
+
+      const idx = this.#readStickerIndex();
+      const oldTags = idx[name]?.tags || [];
+      idx[name] = {
+        desc: desc.slice(0, 200),
+        tags: tags.length ? tags : oldTags,
+        addedAt: Math.floor(Date.now() / 1000),
+        source: 'ingest',
+      };
+      this.#writeStickerIndex(idx);
+      this.log.info?.(`[media] ${name} → [${(tags.length ? tags : oldTags).join(',') || '无标签'}]`);
+      return { ok: true, desc, tags: idx[name].tags };
+    } catch (e) {
+      this.log.warn?.(`[media] ${name} 描述失败: ${e.message}`);
+      return { ok: false, error: e.message };
+    }
+  }
+
+  /** 给素材图打描述的提示词（入库和重建共用同一段） */
+  #describePrompt() {
+    return (
+      '这是一张表情包截图。画面里可能混进了聊天界面元素：' +
+      '旁边的小头像、引用的缩略图、气泡边框、空白。\n' +
+      '请只看**最大、最居中**的那个主体 —— 那才是表情包本身，' +
+      '忽略旁边的小图和边框，不要把画面说成「分成几个部分」。\n' +
+      '\n' +
+      '用一句话回答，格式固定：\n' +
+      '「<主体是什么>，<情绪>，<主色调>，<风格>」\n' +
+      '\n' +
+      '**情绪**必须从下面这些词里选一个最接近的，不许省略、不许自己造词：\n' +
+      '开心 / 难过 / 生气 / 惊讶 / 无语 / 害羞 / 困倦 / 得意 / 安慰 / 吃饭 / 可爱 / 普通\n' +
+      '\n' +
+      '（这个情绪是用来给表情包分类的，缺了就分不了类。）不超过 40 字。'
+    );
+  }
+
+  /** 这条描述是不是「截歪了」——描述的是聊天界面而不是表情包本身 */
+  #looksLikeBadDesc(s) {
+    const t = String(s || '');
+    if (!t) return true;
+    const bad = [
+      '分为左右', '分成两个部分', '分成几个部分', '两个部分', '分为两部',
+      '聊天界面', '聊天窗口', '界面截图', '屏幕截图', '桌面',
+      '左侧部分', '右侧部分', '左半边', '右半边',
+    ];
+    const hit = bad.some((w) => t.includes(w));
+    return hit && (t.includes('部分') || t.includes('界面') || t.includes('截图'));
+  }
+
+  /** 描述清洗：去引号、去模板残留、去掉「主体是XXX」这种空话 */
+  #cleanDesc(s) {
+    let t = String(s || '').trim();
+    t = t.replace(/^[“”"'‘’\s]+|[“”"'‘’\s]+$/g, '');
+    t = t.replace(/<[^>]{0,40}>/g, '');
+    t = t.replace(/主体是[^，,。；;]{0,20}[，,]?/g, '');
+    t = t
+      .replace(/\s+/g, ' ')
+      .replace(/^[“”"'‘’，,。；;、\s]+|[“”"'‘’，,。；;、\s]+$/g, '')
+      .trim();
+    return t;
+  }
+
+  /** 情绪 → 关键词词表 */
+  #emojiTags() {
+    return {
+      开心: ['开心', '高兴', '笑', '哈哈', '快乐', '兴奋', '棒', '赞', '喜欢', '滑稽', '欢'],
+      难过: ['难过', '伤心', '哭', '委屈', '失落', '郁闷', '流泪', '沮丧'],
+      生气: ['生气', '愤怒', '怒', '火大', '不爽', '凶', '瞪', '翻脸'],
+      惊讶: ['惊讶', '震惊', '吃惊', '哇', '竟然', '没想到', '睁大', '瞪大', '懵'],
+      无语: ['无语', '无奈', '服了', '算了', '离谱', '沉默', '翻白眼', '普通', '面无表情'],
+      害羞: ['害羞', '脸红', '不好意思', '撒娇', '羞', '腮红', '腼腆'],
+      困倦: ['困', '累', '睡', '疲惫', '晚安', '打哈欠', '躺', '懒'],
+      得意: ['得意', '骄傲', '厉害', '牛', '叉腰', '坏笑', '自信'],
+      安慰: ['安慰', '抱抱', '摸头', '摸', '拍拍', '温柔'],
+      吃饭: ['吃', '饭', '饿', '美食', '馋', '喝', '西瓜', '零食'],
+      可爱: ['可爱', '萌', '软乎', '毛绒', '玩偶', '小猫', '猫咪', '小鲸'],
+    };
+  }
+
   async #rebuildStickerIndex(body = {}) {
     const limit = Math.min(Math.max(Number(body.limit) || 10, 1), 50);
     const mode = body.mode === 'untagged' ? 'untagged' : 'missing';
@@ -1582,82 +1729,16 @@ print('%016x' % bits)
     let tagged = 0;
     const failed = [];
 
-    /**
-     * 提示词要强调「只看主体」。
-     *
-     * 表情包截图里常混进聊天界面元素（旁边的小头像、引用的缩略图、气泡边框），
-     * 不点明的话模型会老老实实描述「这张图分成两个部分」——
-     * 这种描述抽不出任何情绪词，等于白跑一次。
-     *
-     * 同时明确要求带上情绪词，因为标签就是从情绪词里抽的。
-     */
-    const PROMPT =
-      '这是一张表情包截图。画面里可能混进了聊天界面元素：' +
-      '旁边的小头像、引用的缩略图、气泡边框、空白。\n' +
-      '请只看**最大、最居中**的那个主体 —— 那才是表情包本身，' +
-      '忽略旁边的小图和边框，不要把画面说成「分成几个部分」。\n' +
-      '\n' +
-      '用一句话回答，格式固定：\n' +
-      '「<主体是什么>，<情绪>，<主色调>，<风格>」\n' +
-      '\n' +
-      '**情绪**必须从下面这些词里选一个最接近的，不许省略、不许自己造词：\n' +
-      '开心 / 难过 / 生气 / 惊讶 / 无语 / 害羞 / 困倦 / 得意 / 安慰 / 吃饭 / 可爱 / 普通\n' +
-      '\n' +
-      '（这个情绪是用来给表情包分类的，缺了就分不了类。）不超过 40 字。';
-
-    /**
-     * 这条描述是不是「截歪了」——描述的是聊天界面而不是表情包本身。
-     *
-     * 和 bridge 里的 looks_like_bad_desc 保持同一套判断：
-     * 两边都会写同一个 index.json，判断不一致就会出现
-     * 「这边刚跳过，那边又存进去」。
-     */
-    const looksLikeBadDesc = (s) => {
-      const t = String(s || '');
-      if (!t) return true;
-      const bad = [
-        '分为左右', '分成两个部分', '分成几个部分', '两个部分', '分为两部',
-        '聊天界面', '聊天窗口', '界面截图', '屏幕截图', '桌面',
-        '左侧部分', '右侧部分', '左半边', '右半边',
-      ];
-      const hit = bad.some((w) => t.includes(w));
-      return hit && (t.includes('部分') || t.includes('界面') || t.includes('截图'));
-    };
-
-    /**
-     * 描述清洗。
-     *
-     * 视觉模型偶尔会偷懒，把提示词里的模板原样回显出来，比如
-     *   “<主体是YF的表情包>，普通，白色，简约”
-     * 里面既有尖括号模板、又有主人昵称。这种直接存进索引很丑，
-     * 而且会把昵称带到面板上。这里做一次清理。
-     */
-    const cleanDesc = (s) => {
-      let t = String(s || '').trim();
-      // 引号可能只出现一边（"YF”的表情包 这种），逐字符剥掉
-      t = t.replace(/^[“”"'‘’\s]+|[“”"'‘’\s]+$/g, '');
-      // 去掉 <...> 这种模板残留
-      t = t.replace(/<[^>]{0,40}>/g, '');
-      // 把「主体是XXX」这种空话去掉
-      t = t.replace(/主体是[^，,。；;]{0,20}[，,]?/g, '');
-      // 收尾清理
-      t = t
-        .replace(/\s+/g, ' ')
-        .replace(/^[“”"'‘’，,。；;、\s]+|[“”"'‘’，,。；;、\s]+$/g, '')
-        .trim();
-      return t;
-    };
-
     for (const item of todo) {
       const file = path.join(dirs[item.kind] || dirs.stickers, item.name);
       if (!fs.existsSync(file)) continue;
 
       try {
         const buf = fs.readFileSync(file);
-        const r = await this.engine.vision.describe(buf, { prompt: PROMPT });
+        const r = await this.engine.vision.describe(buf, { prompt: this.#describePrompt() });
 
         let desc = String(r?.description || '').trim();
-        desc = cleanDesc(desc);
+        desc = this.#cleanDesc(desc);
 
         if (!desc || desc.includes('看不清')) {
           failed.push(item.name);
@@ -1672,26 +1753,13 @@ print('%016x' % bits)
          * 看起来「已收录」，实际按语气永远挑不中。
          * 留着空白反而诚实，等下次重拍。
          */
-        if (looksLikeBadDesc(desc)) {
+        if (this.#looksLikeBadDesc(desc)) {
           this.log.warn?.(`[sticker-index] ${item.name} 描述像截歪了，跳过`);
           failed.push(item.name);
           continue;
         }
 
-        // 打情绪标签：和桥接那边用同一套词表
-        const TAGS = {
-          开心: ['开心', '高兴', '笑', '哈哈', '快乐', '兴奋', '棒', '赞', '喜欢', '滑稽', '欢'],
-          难过: ['难过', '伤心', '哭', '委屈', '失落', '郁闷', '流泪', '沮丧'],
-          生气: ['生气', '愤怒', '怒', '火大', '不爽', '凶', '瞪', '翻脸'],
-          惊讶: ['惊讶', '震惊', '吃惊', '哇', '竟然', '没想到', '睁大', '瞪大', '懵'],
-          无语: ['无语', '无奈', '服了', '算了', '离谱', '沉默', '翻白眼', '普通', '面无表情'],
-          害羞: ['害羞', '脸红', '不好意思', '撒娇', '羞', '腮红', '腼腆'],
-          困倦: ['困', '累', '睡', '疲惫', '晚安', '打哈欠', '躺', '懒'],
-          得意: ['得意', '骄傲', '厉害', '牛', '叉腰', '坏笑', '自信'],
-          安慰: ['安慰', '抱抱', '摸头', '摸', '拍拍', '温柔'],
-          吃饭: ['吃', '饭', '饿', '美食', '馋', '喝', '西瓜', '零食'],
-          可爱: ['可爱', '萌', '软乎', '毛绒', '玩偶', '小猫', '猫咪', '小鲸'],
-        };
+        const TAGS = this.#emojiTags();
 
         const tags = [];
         for (const [tag, words] of Object.entries(TAGS)) {
@@ -1854,10 +1922,10 @@ print('%016x' % bits)
     const target = String(body.path || '').trim();
     if (!target) return { ok: false, error: '缺少 path' };
 
-    const abs = path.isAbsolute(target) ? target : path.join(ROOT, target);
+    const abs = path.isAbsolute(target) ? target : path.join(this.root, target);
 
-    // 只允许 ROOT 内，防止被拿来当通用文件浏览器
-    const rootResolved = path.resolve(ROOT);
+    // 只允许项目目录内，防止被拿来当通用文件浏览器
+    const rootResolved = path.resolve(this.root);
     const p = path.resolve(abs);
     if (p !== rootResolved && !p.startsWith(rootResolved + path.sep)) {
       return { ok: false, error: '只能打开项目目录内的文件' };
@@ -1982,7 +2050,7 @@ print('%016x' % bits)
 
   /** 保存主人配置。 */
   #setOwner(body = {}) {
-    const file = path.join(ROOT, 'config.json');
+    const file = path.join(this.root, 'config.json');
     const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
 
     cfg.owner = cfg.owner || {};
@@ -2068,23 +2136,8 @@ print('%016x' % bits)
     this.config.owner = cfg.owner;
     if (cfg.wechat) {
       this.config.wechat = { ...(this.config.wechat || {}), ...cfg.wechat };
-      // 桥接进程要读这些，写进它的配置
-      try {
-        const bridgeCfg = path.join(ROOT, 'bridge', 'config.json');
-        if (fs.existsSync(bridgeCfg)) {
-          const bc = JSON.parse(fs.readFileSync(bridgeCfg, 'utf8'));
-          bc.wechat = bc.wechat || {};
-          if (typeof cfg.wechat.mediaCollect === 'boolean') {
-            bc.wechat.mediaCollect = cfg.wechat.mediaCollect;
-          }
-          if (Array.isArray(cfg.wechat.collectOnlyFrom)) {
-            bc.wechat.collectOnlyFrom = cfg.wechat.collectOnlyFrom;
-          }
-          fs.writeFileSync(bridgeCfg, JSON.stringify(bc, null, 2), 'utf8');
-        }
-      } catch (e) {
-        this.log.warn?.(`[admin] 同步桥接配置失败: ${e.message}`);
-      }
+      // 收藏设置只存核心这份。适配器通过 GET /api/media/policy 来取，
+      // 不再往它的配置文件里写 —— 它是独立仓库，路径和格式都不该由核心决定。
     }
     this.engine.updateOwner?.(cfg.owner);
 
@@ -2119,51 +2172,31 @@ print('%016x' % bits)
       }
     } catch {}
 
-    // 2. 补充：从桥接日志里挖（历史记录，可能带 wxid）
-    const logFile = path.join(ROOT, 'bridge', 'data', 'wechat-bridge-4x.log');
+    /**
+     * 2. 适配器上报的联系人。
+     *
+     * 以前这里是从桥接日志里正则挖 wxid —— 但适配器已经独立成另一个仓库、
+     * 另一个进程，日志不在核心目录下了，挖不到。
+     * 改成让适配器通过 POST /api/adapter/contacts 主动上报，
+     * 存在 engine.adapterContacts 里，这里直接读。
+     */
     try {
-      if (fs.existsSync(logFile)) {
-        const raw = fs.readFileSync(logFile, 'utf8');
-
-        // 带 wxid 的新格式：
-        //   [20:56:16] 收到 私聊 小明 ← 小明 （wxid_xxxxxxxxxxxx） ： 吃完了
-        // 注意 log() 用空格拼参数，所以「）」和「：」之间可能有空格
-        const reNew = /收到\s*(私聊|群)\s+([^\s←]+)\s*←\s*([^（]+?)\s*（([^）]+)）\s*[：:]/g;
-        let m;
-        while ((m = reNew.exec(raw)) !== null) {
-          const chatName = m[2].trim();
-          const senderName = m[3].trim();
-          const wxid = m[4].trim();
-          const key = wxid === 'unknown' ? `${chatName}|${senderName}` : wxid;
-
-          if (!seen.has(key)) {
-            seen.add(key);
-            out.push({
-              chatName,
-              senderName,
-              wxid: wxid === 'unknown' ? '' : wxid,
-              label: m[1] === '私聊' ? senderName : `${chatName} / ${senderName}`,
-              verified: wxid !== 'unknown' && /^wxid_/.test(wxid),
-            });
-          }
-        }
-
-        // 老格式（没 wxid）兜底：收到 私聊 小明 ← 小明 ： 内容
-        const reOld = /收到\s*(私聊|群)\s+([^\s←]+)\s*←\s*([^：]+?)\s*[：:]/g;
-        while ((m = reOld.exec(raw)) !== null) {
-          const senderName = m[3].trim();
-          if (senderName.includes('（')) continue; // 新格式已处理
-          const key = `old|${m[2].trim()}|${senderName}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            out.push({
-              chatName: m[2].trim(),
-              senderName,
-              wxid: '',
-              label: m[1] === '私聊' ? senderName : `${m[2].trim()} / ${senderName}`,
-              verified: false,
-            });
-          }
+      const reported = this.engine?.adapterContacts;
+      if (reported && typeof reported.values === 'function') {
+        for (const info of reported.values()) {
+          const wxid = String(info?.wxid || '').trim();
+          const senderName = String(info?.name || '').trim();
+          const chatName = String(info?.chatName || senderName).trim();
+          const key = wxid || `name|${chatName}|${senderName}`;
+          if (!senderName || seen.has(key)) continue;
+          seen.add(key);
+          out.push({
+            chatName,
+            senderName,
+            wxid,
+            label: info.isGroup ? `${chatName} / ${senderName}` : senderName,
+            verified: /^wxid_/.test(wxid),
+          });
         }
       }
     } catch {}
@@ -2203,7 +2236,7 @@ print('%016x' % bits)
 
   /** 保存网站列表。 */
   #saveSites(body = {}) {
-    const file = path.join(ROOT, 'config.json');
+    const file = path.join(this.root, 'config.json');
     const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
 
     cfg.learning = cfg.learning || {};
@@ -2341,7 +2374,7 @@ print('%016x' % bits)
     }
 
     // 去重后存待审
-    const dataDir = path.join(ROOT, 'data');
+    const dataDir = path.join(this.root, 'data');
     const uniq = [];
     const seen = new Set();
     for (const w of allWords) {
@@ -2401,7 +2434,7 @@ print('%016x' % bits)
 
   #learningStatus() {
     const cfg = this.config.learning || {};
-    const dataDir = path.join(ROOT, 'data');
+    const dataDir = path.join(this.root, 'data');
     const pending = readPending(dataDir);
 
     const mediaFile = path.join(dataDir, 'learned-media.json');
@@ -2483,7 +2516,7 @@ print('%016x' % bits)
     }
 
     // 3. 存入待审
-    const dataDir = path.join(ROOT, 'data');
+    const dataDir = path.join(this.root, 'data');
     const r = savePending(dataDir, words);
 
     // 自动整理进词库
@@ -2516,7 +2549,7 @@ print('%016x' % bits)
     const query = String(body.query || (kind === 'stickers' ? '表情包 搞笑 gif' : '壁纸 图片')).trim();
     const limit = Math.min(Number(body.limit) || 5, 10);
 
-    const dataDir = path.join(ROOT, 'data');
+    const dataDir = path.join(this.root, 'data');
     const dirs = this.#mediaDirs();
     const dir = dirs[kind];
     fs.mkdirSync(dir, { recursive: true });
@@ -2609,7 +2642,7 @@ print('%016x' % bits)
 
   /** 保存抓图网站列表。 */
   #saveMediaSites(body = {}) {
-    const file = path.join(ROOT, 'config.json');
+    const file = path.join(this.root, 'config.json');
     const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
 
     cfg.learning = cfg.learning || {};
@@ -2825,7 +2858,7 @@ print('%016x' % bits)
 
   /** 保存 RSS 列表。 */
   #saveRssFeeds(body = {}) {
-    const file = path.join(ROOT, 'config.json');
+    const file = path.join(this.root, 'config.json');
     const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
 
     cfg.learning = cfg.learning || {};
@@ -2987,7 +3020,7 @@ print('%016x' % bits)
       });
 
       if (words.length) {
-        const dataDir = path.join(ROOT, 'data');
+        const dataDir = path.join(this.root, 'data');
         const saved = savePending(dataDir, words);
         result.words = words.length;
         result.wordsTotal = saved.total;
@@ -3203,7 +3236,7 @@ print('%016x' % bits)
 
   /** 保存每日摘要配置。 */
   #saveDigest(body = {}) {
-    const file = path.join(ROOT, 'config.json');
+    const file = path.join(this.root, 'config.json');
     const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
 
     cfg.learning = cfg.learning || {};
@@ -3280,7 +3313,7 @@ print('%016x' % bits)
     // 新库要确保在配置里是启用的，否则拼不进提示词
     if (merged.added > 0) {
       try {
-        const cfgFile = path.join(ROOT, 'config.json');
+        const cfgFile = path.join(this.root, 'config.json');
         const cur = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
         cur.words = cur.words || {};
 
@@ -3310,7 +3343,7 @@ print('%016x' % bits)
 
   /** 把待审词条合并进词库。 */
   #applyLearned(body = {}) {
-    const dataDir = path.join(ROOT, 'data');
+    const dataDir = path.join(this.root, 'data');
     const pending = readPending(dataDir);
 
     if (!pending.words.length) {
@@ -3354,7 +3387,7 @@ print('%016x' % bits)
   /** 丢弃待审词条。 */
   #discardLearned() {
     try {
-      fs.unlinkSync(path.join(ROOT, 'data', 'learned-words.json'));
+      fs.unlinkSync(path.join(this.root, 'data', 'learned-words.json'));
     } catch {}
     return { ok: true, message: '已丢弃' };
   }
@@ -3509,10 +3542,11 @@ print('%016x' % bits)
   // ===== 会话列表 =====
 
   /**
-   * 列出微信会话（用于「搭话/分享发给谁」）。
+   * 列出会话（用于「搭话 / 分享发给谁」）。
    *
-   * 数据来源：桥接日志里出现过的会话名（最准，是真实存在的），
-   * 加上配置里已选的 careTargets / shareTargets。
+   * 数据来源改成适配器上报：适配器知道自己的会话列表，
+   * 通过 POST /api/adapter/contacts 报上来，存在 engine.adapterContacts。
+   * 以前是正则挖桥接日志，适配器独立成仓库之后日志不在核心目录下，挖不到了。
    */
   #listChats() {
     const chats = new Map();
@@ -3528,14 +3562,12 @@ print('%016x' % bits)
       chats.set(n, cur);
     };
 
-    const logFile = path.join(ROOT, 'bridge', 'data', 'wechat-bridge-4x.log');
+    // 适配器上报的会话（它知道自己的聊天列表）
     try {
-      if (fs.existsSync(logFile)) {
-        const raw = fs.readFileSync(logFile, 'utf8');
-        const re = /\[(\d{2}:\d{2}:\d{2})\]\s*(?:收到 (?:私聊|群) ([^\s←]+)|主动(?:搭话|分享) \S* → ([^\s:：]+))/g;
-        let m;
-        while ((m = re.exec(raw)) !== null) {
-          addChat(m[2] || m[3], m[1]);
+      const reported = this.engine?.adapterContacts;
+      if (reported && typeof reported.values === 'function') {
+        for (const info of reported.values()) {
+          addChat(info?.chatName || info?.name);
         }
       }
     } catch {}
@@ -3549,77 +3581,32 @@ print('%016x' % bits)
     return { chats: list, selected: { care: careTargets, share: shareTargets } };
   }
 
-  // ===== 桥接状态 =====
-
-  /**
-   * 查询桥接状态。
-   *
-   * whale-girl 桥接没有 HTTP 健康检查接口，只能靠：
-   *   1. 单实例锁端口 47821 是否在监听
-   *   2. 桥接日志的最后活动时间
-   *   3. 日志里的关键行（UIA 是否可用、当前账号）
-   */
-  /**
-   * 桥接目录信息：启动目录、数据目录、是不是和服务同一份安装。
-   *
-   * 「服务在 A，桥接在 B」这种错配没有任何报错，表现就是
-   * 「明明收藏了，控制台里看不到」。这里把结论暴露给控制台，一眼能看到。
-   */
-  #bridgeDirInfo() {
-    const info = this.engine?.bridgeInfo || null;
-    if (!info) return {};
-
-    return {
-      bridgeDir: {
-        root: info.root || '',
-        dataDir: info.dataDir || '',
-        bridgeFile: info.bridgeFile || '',
-        hasGif: Boolean(info.hasGif),
-        pid: info.pid || 0,
-        mismatch: Boolean(info.dataDirMismatch),
-        serverDataDir: info.serverDataDir || '',
-        reportedAt: info.at || 0,
-      },
-    };
-  }
+  // ===== 适配器状态 =====
 
   async #bridgeStatus() {
-    // ===== 优先用心跳判断 =====
-    // 为什么不用端口探测：桥接的单实例锁是 listen(1) 且从不 accept()，
-    // 队列一满就 ECONNREFUSED，netstat 却仍显示 LISTENING —— 探不准。
-    const hb = this.engine.bridgeHeartbeat;
+    /**
+     * 适配器（以前叫「桥接」）在线状态。
+     *
+     * 只看心跳，不读日志 —— 适配器现在是**独立仓库、独立进程**，
+     * 它的日志不在核心目录下，读不到。
+     * 所以心跳要带足够的信息：谁、账号、UIA 能不能用、最近有没有消息。
+     */
+    const hb = this.engine?.bridgeHeartbeat || null;
+    const info = this.engine?.bridgeInfo || null;
     const now = Date.now();
+
     // 心跳 20 秒一次，超过 60 秒没收到就算掉线
-    const heartbeatFresh = hb && now - hb.at < 60000;
+    const fresh = hb && now - hb.at < 60000;
+    const ago = hb ? Math.round((now - hb.at) / 1000) : null;
 
-    // 读日志补充账号等静态信息
-    const logFile = path.join(ROOT, 'bridge', 'data', 'wechat-bridge-4x.log');
-    let account = '';
-    let lastActivity = '';
-    let logHasUia = false;
-    let recentMessages = 0;
+    const dir = {
+      name: info?.name || hb?.name || '',
+      version: info?.version || '',
+      root: info?.root || '',
+      reportedAt: info?.at || 0,
+    };
 
-    try {
-      if (fs.existsSync(logFile)) {
-        const stat = fs.statSync(logFile);
-        lastActivity = stat.mtime.toLocaleString('zh-CN');
-
-        const raw = fs.readFileSync(logFile, 'utf8');
-        const lines = raw.split('\n').slice(-300);
-
-        for (const line of lines) {
-          if (line.includes('发送通道预热完成')) logHasUia = true;
-          if (line.includes('当前登录账号')) {
-            const m = /当前登录账号[:：]\s*(.+)/.exec(line);
-            if (m) account = m[1].trim();
-          }
-        }
-        recentMessages = lines.filter((l) => l.includes('收到 ')).length;
-      }
-    } catch {}
-
-    // 有心跳且新鲜 → 在线
-    if (heartbeatFresh) {
+    if (fresh) {
       return {
         online: true,
         bridgeOnline: true,
@@ -3629,47 +3616,11 @@ print('%016x' % bits)
         uiaOk: Boolean(hb.uia),
         resting: Boolean(hb.rest),
         ffmpeg: Boolean(hb.ffmpeg),
-        account,
-        lastActivity,
-        heartbeatAgo: Math.round((now - hb.at) / 1000),
-        stats: { recentMessages },
-        ...this.#bridgeDirInfo(),
-      };
-    }
-
-    // 没心跳：可能桥接根本没启动，也可能只是心跳线程卡了但进程在正常收发。
-    // 用「日志最近有没有在动」兜底判断 —— 实测遇到过心跳不发、消息照收的情况，
-    // 那时候面板报「离线」纯属误导。
-    let logFresh = false;
-    let logAgeSec = null;
-    try {
-      if (fs.existsSync(logFile)) {
-        logAgeSec = Math.round((now - fs.statSync(logFile).mtimeMs) / 1000);
-        // 15 分钟内有写入就算活着。
-        // 别用 2 分钟：桥接空闲时（没人发消息）本来就不写日志，
-        // 只有索引线程每 10 分钟留一行，阈值太紧会常态误报离线。
-        logFresh = logAgeSec < 900;
-      }
-    } catch {}
-
-    if (logFresh) {
-      return {
-        online: true,
-        bridgeOnline: true,
-        source: 'log-activity',
-        wechatReady: true,
-        listening: true,
-        uiaOk: logHasUia,
-        resting: false,
-        ffmpeg: null,
-        account,
-        lastActivity,
-        heartbeatAgo: hb ? Math.round((now - hb.at) / 1000) : null,
-        stats: { recentMessages },
-        note: hb
-          ? `心跳停了 ${Math.round((now - hb.at) / 1000)} 秒，但日志 ${logAgeSec} 秒前还在写，判定在线`
-          : `没收到心跳，但日志 ${logAgeSec} 秒前还在写，判定在线（心跳线程可能没起来）`,
-        ...this.#bridgeDirInfo(),
+        account: hb.account || '',
+        lastActivity: new Date(hb.at).toLocaleString('zh-CN'),
+        heartbeatAgo: ago,
+        stats: { recentMessages: Number(hb.recentMessages) || 0 },
+        adapter: dir,
       };
     }
 
@@ -3677,14 +3628,14 @@ print('%016x' % bits)
       online: false,
       bridgeOnline: false,
       source: 'heartbeat',
-      account,
-      lastActivity,
-      stats: { recentMessages },
+      account: hb?.account || '',
+      lastActivity: hb ? new Date(hb.at).toLocaleString('zh-CN') : '',
+      stats: { recentMessages: 0 },
       error: hb
-        ? `桥接心跳已停止（最后 ${Math.round((now - hb.at) / 1000)} 秒前），日志也 ${logAgeSec ?? '?'} 秒没动了`
-        : '没收到过桥接心跳，日志也没有动静（桥接可能没启动）',
-      hint: '双击「启动微信桥接.bat」并保持窗口开着',
-      ...this.#bridgeDirInfo(),
+        ? `适配器心跳已停止（最后 ${ago} 秒前）`
+        : '没收到过适配器心跳（没有适配器在跑，或者它连不上这个服务）',
+      hint: '启动你的适配器进程；接微信的话见 docs/adapters.md',
+      adapter: dir,
     };
   }
 
@@ -3701,7 +3652,7 @@ print('%016x' % bits)
     // 先回包再退出，否则前端拿不到响应只会看到连接断开
     setTimeout(() => {
       try {
-        const lock = path.join(ROOT, 'data', 'app.lock');
+        const lock = path.join(this.root, 'data', 'app.lock');
         if (fs.existsSync(lock)) {
           const cur = fs.readFileSync(lock, 'utf8').trim();
           if (cur === String(process.pid)) fs.unlinkSync(lock);
@@ -3725,7 +3676,7 @@ print('%016x' % bits)
   #restart() {
     this.log.info?.('[admin] 收到重启请求');
 
-    const root = ROOT;
+    const root = this.root;
     const lock = path.join(root, 'data', 'app.lock');
 
     // 看护脚本：等旧进程退掉（锁文件消失）→ 用 launch_background 重开
@@ -3807,7 +3758,7 @@ print('%016x' % bits)
         port: c.server?.port,
         stopWhenNoConsole: c.server?.stopWhenNoConsole === true,
         /** data/keep-alive 存在时，上面那个开关会被压制 */
-        keepAliveFile: fs.existsSync(path.join(ROOT, 'data', 'keep-alive')),
+        keepAliveFile: fs.existsSync(path.join(this.root, 'data', 'keep-alive')),
         pid: process.pid,
       },
       llm: {
@@ -3920,7 +3871,7 @@ print('%016x' % bits)
       throw new Error('请求体格式错误');
     }
 
-    const file = path.join(ROOT, 'config.json');
+    const file = path.join(this.root, 'config.json');
     const current = JSON.parse(fs.readFileSync(file, 'utf8'));
 
     // 逐项白名单合并
@@ -3953,7 +3904,27 @@ print('%016x' % bits)
       if (s.includes('****')) return; // 掩码，不是真 Key
       if (!s.trim()) return; // 空字符串视为「不修改」
 
-      target.apiKey = s.trim();
+      const next = s.trim();
+      const prev = String(target.apiKey || '');
+
+      /**
+       * 明显更短的 Key 不覆盖长的。
+       *
+       * 真实事故：单元测试往真实配置里写了 `test-voice-key-abcdef`（21 字符），
+       * 把用户 117 字符的语音 Key 覆盖掉，紧接着又被清空 ——
+       * 审计日志 voice:117→21→0。
+       *
+       * 真 Key 一般都比占位串长得多；真要换短的，传 forceApiKey: true 放行。
+       */
+      if (prev.length >= 40 && next.length < 40 && patchObj.forceApiKey !== true) {
+        this.log.warn?.(
+          `[admin] ${name || 'Key'} 新值只有 ${next.length} 字符，比现有 ${prev.length} 字符短太多，` +
+            '拒绝覆盖（确实要换请传 forceApiKey: true）',
+        );
+        return;
+      }
+
+      target.apiKey = next;
     };
 
     if (patch.llm) {
@@ -4148,22 +4119,8 @@ print('%016x' % bits)
         current.wechat.collectOnlyFrom = [];
       }
 
-      // 这些参数桥接进程要读，所以同步写进 bridge/config.json
-      try {
-        const bridgeCfg = path.join(ROOT, 'bridge', 'config.json');
-        if (fs.existsSync(bridgeCfg)) {
-          const bc = JSON.parse(fs.readFileSync(bridgeCfg, 'utf8'));
-          bc.wechat = bc.wechat || {};
-          if (Number.isFinite(w.stickerChance)) bc.wechat.stickerChance = clamp(w.stickerChance, 0, 1);
-          if (typeof w.mediaCollect === 'boolean') bc.wechat.mediaCollect = w.mediaCollect;
-          if (Array.isArray(current.wechat.collectOnlyFrom)) {
-            bc.wechat.collectOnlyFrom = current.wechat.collectOnlyFrom;
-          }
-          fs.writeFileSync(bridgeCfg, JSON.stringify(bc, null, 2), 'utf8');
-        }
-      } catch (e) {
-        this.log.warn?.(`[admin] 同步桥接配置失败: ${e.message}`);
-      }
+      // 这些设置只存在核心：适配器通过 GET /api/media/policy 读取。
+      // 不再往 bridge/config.json 写 —— 那是独立仓库，格式该由它自己决定。
     }
 
     // 画图
@@ -4262,7 +4219,7 @@ print('%016x' % bits)
         current.server.stopWhenNoConsole = s.stopWhenNoConsole;
       }
       if (typeof s.keepAlive === 'boolean') {
-        const flag = path.join(ROOT, 'data', 'keep-alive');
+        const flag = path.join(this.root, 'data', 'keep-alive');
         try {
           if (s.keepAlive) {
             fs.mkdirSync(path.dirname(flag), { recursive: true });
@@ -4354,8 +4311,8 @@ print('%016x' % bits)
 
   /** 读取日志尾部。 */
   #logs(lines = 120) {
-    const logFile = path.join(ROOT, 'data', 'app.out.log');
-    const errFile = path.join(ROOT, 'data', 'app.err.log');
+    const logFile = path.join(this.root, 'data', 'app.out.log');
+    const errFile = path.join(this.root, 'data', 'app.err.log');
 
     const readTail = (file) => {
       try {
@@ -4381,7 +4338,7 @@ print('%016x' % bits)
       throw new Error('卡片 id 不合法');
     }
 
-    const dir = path.join(ROOT, 'cards');
+    const dir = path.join(this.root, 'cards');
     for (const ext of ['.json', '.md']) {
       const file = path.join(dir, id + ext);
       if (!fs.existsSync(file)) continue;
@@ -4469,7 +4426,7 @@ print('%016x' % bits)
       },
     };
 
-    const dir = path.join(ROOT, 'cards');
+    const dir = path.join(this.root, 'cards');
     fs.mkdirSync(dir, { recursive: true });
 
     // 如果已有同名 md 卡片，删掉避免冲突
@@ -4494,7 +4451,7 @@ print('%016x' % bits)
     const id = String(body?.id || '').trim();
     if (!/^[a-zA-Z0-9_-]{1,40}$/.test(id)) throw new Error('id 不合法');
 
-    const dir = path.join(ROOT, 'cards');
+    const dir = path.join(this.root, 'cards');
     let deleted = false;
     for (const ext of ['.json', '.md']) {
       const file = path.join(dir, id + ext);
@@ -4517,12 +4474,12 @@ print('%016x' % bits)
     const id = body?.id;
     if (!id) throw new Error('缺少卡片 id');
 
-    const cards = listCards(ROOT);
+    const cards = listCards(this.root);
     if (!cards.some((c) => c.id === id)) {
       throw new Error(`找不到角色「${id}」`);
     }
 
-    const file = path.join(ROOT, 'config.json');
+    const file = path.join(this.root, 'config.json');
     const current = JSON.parse(fs.readFileSync(file, 'utf8'));
     current.card = id;
     writeConfig(file, current, 'card/switch', this.log);
@@ -4540,7 +4497,7 @@ print('%016x' % bits)
     let hot = false;
     try {
       const who = loadAnyPersona({
-        root: ROOT,
+        root: this.root,
         personaFile: current.personaFile,
         card: id,
       });

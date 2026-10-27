@@ -11,6 +11,37 @@ import { WebChannel } from '../channels/web.mjs';
 import { ChatEngine } from '../core/engine.mjs';
 import { AdminApi } from '../core/admin.mjs';
 import { loadConfig } from '../core/config.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+
+/** 测试用的独立根目录：配置、数据都写这里，不碰真实 data/ 和 config.json */
+const TEST_ROOT = fs.mkdtempSync(path.join(process.cwd(), '.tmp', 'api-test-'));
+fs.mkdirSync(path.join(TEST_ROOT, 'data'), { recursive: true });
+
+// 写一份最小 config.json：管理接口保存时会读它，没有就会 500
+fs.writeFileSync(
+  path.join(TEST_ROOT, 'config.json'),
+  JSON.stringify(
+    {
+      llm: { baseUrl: 'http://mock.local', apiKey: 'sk-test-mock-key-123456', model: 'mock' },
+      vision: { enabled: true, apiKey: '', baseUrl: 'https://mock', model: 'mock-vision' },
+      voice: { enabled: false, apiKey: '', baseUrl: '', model: '' },
+      search: { enabled: true, provider: 'bocha', apiKey: '' },
+      imagegen: { enabled: false, apiKey: '' },
+      sticker: {},
+      words: {},
+      server: { host: '127.0.0.1', port: 19021 },
+    },
+    null,
+    2,
+  ),
+  'utf8',
+);
+process.on('exit', () => {
+  try {
+    fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+  } catch {}
+});
 
 let channel;
 let base;
@@ -60,7 +91,21 @@ before(async () => {
   const mockFetch = makeMockFetch('测试回复');
 
   engine = new ChatEngine({ config, persona, fetchImpl: mockFetch, logger: { info() {}, warn() {}, error() {} } });
-  const admin = new AdminApi({ engine, config, channels: ['web'], logger: { info() {}, warn() {}, error() {} } });
+  /**
+   * 测试专用根目录。
+   *
+   * AdminApi 会把配置写回 root/config.json。以前这里没传 root，
+   * 于是测试里那句「设置一个假语音 Key」直接改掉了用户真实的 config.json ——
+   * 审计日志：voice:117→21→0，用户的语音 Key 就这么没了。
+   * 现在给它一个临时目录，测试爱怎么写都碰不到生产数据。
+   */
+  const admin = new AdminApi({
+    engine,
+    config,
+    channels: ['web'],
+    logger: { info() {}, warn() {}, error() {} },
+    root: TEST_ROOT,
+  });
 
   channel = new WebChannel({ engine, config, admin, logger: { info() {}, warn() {}, error() {} } });
   base = await channel.start();

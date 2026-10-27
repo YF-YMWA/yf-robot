@@ -691,7 +691,9 @@ export class ChatEngine {
 
     // 词库：只有启用的才会拼进来，每次随机抽取一部分（避免提示词过长）
     try {
-      const wordsDir = path.join(this.config.root || process.cwd(), 'bridge', 'resources');
+      // 词库属于核心（不接微信也要用），放在 resources/ 下。
+      // 以前是 bridge/resources，适配器独立成仓库之后那条路径就不存在了。
+      const wordsDir = path.join(this.config.root || process.cwd(), 'resources');
       const wordNote = renderWordBanks({
         dir: wordsDir,
         banks: this.config.words || {},

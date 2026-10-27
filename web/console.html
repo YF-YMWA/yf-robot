@@ -301,7 +301,7 @@
     <a data-page="active">主动功能</a>
     <a data-page="stickers">素材库</a>
     <a data-page="learn">联网学习</a>
-    <a data-page="bridge">微信桥接</a>
+    <a data-page="bridge">接入状态</a>
     <a data-page="logs">日志</a>
   </nav>
   <div class="pagebuild" id="pageBuild"></div>
@@ -1612,18 +1612,19 @@
   </div>
 
   <div class="page" id="page-bridge">
-    <h1>微信桥接</h1>
+    <h1>接入状态</h1>
     <div class="card">
-      <h2>桥接状态</h2>
+      <h2>适配器</h2>
       <div class="grid" id="bridgeGrid"><div class="stat"><div class="k">状态</div><div class="v">检测中…</div></div></div>
       <div style="margin-top:14px"><button class="ghost" onclick="loadBridge()">刷新</button></div>
     </div>
     <div class="card">
-      <h2>启动说明</h2>
+      <h2>怎么接入</h2>
       <div class="hint" style="line-height:2">
-        <p>桥接需要<b>管理员权限</b>（读取微信进程模块）。</p>
-        <p>双击项目根目录的 <b>一键启动桥接.bat</b>，会自动请求提权。</p>
-        <p>桥接端口 <b>8896</b>，监听微信消息转发给 YF-Robot（8899）。</p>
+        <p>核心本身<b>不包含任何平台的登录或自动化代码</b>，只提供一套 HTTP 协议。</p>
+        <p>任何能收发消息的程序都可以当适配器接进来：微信、QQ、Telegram、自定义网页……</p>
+        <p>协议说明见仓库里的 <code>docs/adapter-protocol.md</code>。</p>
+        <p>接入后，这个页面会显示适配器名称、账号、最近消息数。</p>
       </div>
     </div>
   </div>
@@ -1635,8 +1636,8 @@
       <pre id="logMain">加载中…</pre>
     </div>
     <div class="card">
-      <h2>桥接</h2>
-      <pre id="logBridge">加载中…</pre>
+      <h2>适配器</h2>
+      <pre id="logBridge">（适配器是独立进程，日志在它自己那边）</pre>
     </div>
   </div>
 </main>
@@ -2307,7 +2308,7 @@ function renderTargets(kind) {
   const names = Array.from(new Set([...chatList.map((c) => c.name), ...selected]));
 
   if (!names.length) {
-    box.innerHTML = '<span class="hint">还没有可选会话（桥接收到消息后会自动出现）</span>';
+    box.innerHTML = '<span class="hint">还没有可选会话（适配器上报后会自动出现）</span>';
     return;
   }
 
@@ -4984,60 +4985,30 @@ async function loadBridge() {
   try {
     const b = await api('bridge');
     const s = b.stats || {};
+    const ad = b.adapter || {};
 
     $('bridgeGrid').innerHTML = `
-      <div class="stat"><div class="k">桥接进程</div><div class="v ${b.online ? 'ok' : 'off'}">${b.online ? '运行中' : '未运行'}</div></div>
+      <div class="stat"><div class="k">适配器</div><div class="v ${b.online ? 'ok' : 'off'}">${b.online ? '已接入' : '未接入'}</div></div>
+      <div class="stat"><div class="k">适配器名称</div><div class="v" style="font-size:13px">${ad.name || '—'}</div></div>
       <div class="stat"><div class="k">登录账号</div><div class="v ${b.account ? 'ok' : 'off'}" style="font-size:13px">${b.account || '未知'}</div></div>
       <div class="stat"><div class="k">消息监听</div><div class="v ${b.listening ? 'ok' : 'warn'}">${b.listening ? '监听中' : '未开启'}</div></div>
-      <div class="stat"><div class="k">发送通道</div><div class="v ${b.uiaOk ? 'ok' : 'warn'}">${b.uiaOk ? 'UIA 可用' : 'OCR 兜底'}</div></div>
+      <div class="stat"><div class="k">发送通道</div><div class="v ${b.uiaOk ? 'ok' : 'warn'}">${b.uiaOk ? '可发送' : '受限'}</div></div>
       <div class="stat"><div class="k">最近消息</div><div class="v">${s.recentMessages || 0} 条</div></div>
-      <div class="stat"><div class="k">最后活动</div><div class="v" style="font-size:12px">${b.lastActivity || '-'}</div></div>`;
+      <div class="stat"><div class="k">最后心跳</div><div class="v" style="font-size:12px">${b.lastActivity || '-'}</div></div>`;
 
     if (!b.online) {
       $('bridgeGrid').innerHTML += `
         <div class="stat" style="grid-column:1/-1">
           <div class="k">提示</div>
           <div class="v" style="font-size:12px;color:var(--warn)">
-            ${b.error || '桥接未运行'}<br>
-            双击「启动微信桥接.bat」启动（需要管理员权限）
-          </div>
-        </div>`;
-    }
-
-    /**
-     * 目录错配警告。
-     *
-     * 桥接把素材存到自己所在目录的 data/，控制台读服务这边的 data/。
-     * 两边不是同一份安装时，会出现「收藏了但看不到」，而且没有任何报错。
-     * 这个警告就是为了让这种情况一眼可见，而不是让人猜半天。
-     */
-    const bd = b.bridgeDir;
-    if (bd && bd.mismatch) {
-      $('bridgeGrid').innerHTML += `
-        <div class="stat" style="grid-column:1/-1;border:1px solid var(--warn)">
-          <div class="k" style="color:var(--warn)">⚠ 桥接和服务不是同一份安装</div>
-          <div class="v" style="font-size:12px;line-height:1.7">
-            桥接从：<code>${bd.root || '?'}</code><br>
-            服务在：<code>${(bd.serverDataDir || '').replace(/[\\/]data$/, '') || '?'}</code><br>
-            <span style="color:var(--warn)">
-              这样素材会存进桥接那个目录，而控制台读的是服务这边 ——
-              所以「明明收藏了，素材库里却看不到」。<br>
-              解决：关掉现在的桥接窗口，改从这里启动：<code>${(bd.serverDataDir || '').replace(/[\\/]data$/, '')}\\bridge\\启动桥接.bat</code>
-            </span>
-          </div>
-        </div>`;
-    } else if (bd && bd.dataDir) {
-      $('bridgeGrid').innerHTML += `
-        <div class="stat" style="grid-column:1/-1">
-          <div class="k">桥接目录</div>
-          <div class="v" style="font-size:12px;line-height:1.6">
-            <code>${bd.root}</code>
-            ${bd.hasGif ? '<span class="chip on" style="margin-left:6px">支持动图</span>' : '<span class="chip off" style="margin-left:6px">旧版本</span>'}
+            ${b.error || '没有适配器在跑'}<br>
+            核心本身不接任何平台，需要一个适配器进程把消息转发过来；<br>
+            协议见 <code>docs/adapter-protocol.md</code>
           </div>
         </div>`;
     }
   } catch (e) {
-    toast('桥接检测失败: ' + e.message, 'err');
+    toast('接入状态检测失败: ' + e.message, 'err');
   }
 }
 
@@ -5046,7 +5017,7 @@ async function loadLogs() {
     const j = await api('logs');
     $('logMain').textContent = (j.out || '（无日志）').split('\n').slice(-60).join('\n');
   } catch (e) { $('logMain').textContent = '读取失败: ' + e.message; }
-  $('logBridge').textContent = '（桥接日志：data/pybridge.log）';
+  $('logBridge').textContent = '（适配器是独立进程，日志在它自己那边）';
 }
 
 const chatSession = 'console-' + Math.random().toString(36).slice(2, 10);

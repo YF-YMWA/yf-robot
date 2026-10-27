@@ -44,10 +44,15 @@ const INCLUDE = [
   'channels',
   'web',
   'cards',
+  // 词库（网络用语 / 回怼 / 缩写）：引擎拼提示词时要读，漏了就是「0 个库」
+  'resources',
   // 不打包 tests/：单元测试是开发用的，用户不需要；
   // 而且里面有一个写死的假 Key（sk-test-mock-*），会一直被扫描器拎出来。
   'tools',
-  'bridge',
+  // 不打包适配器：它是另一个仓库（yf-robot-wechat-adapter）。
+  // 主仓只发框架，这样「主仓不含任何平台自动化代码」这句话才成立。
+  'docs',
+  'examples',
   // 启动脚本：YF-Robot.bat 会调 scripts\start.ps1，漏了就打不开
   'scripts',
   // 所有用户入口，一个都不能漏 —— 之前漏过三个，对方拿到手上只有主菜单
@@ -55,7 +60,6 @@ const INCLUDE = [
   'YF-Robot.bat',
   '状态面板.bat',
   '工具菜单.bat',
-  '启动微信桥接.bat',
 ];
 
 /** 不复制的内容。 */
@@ -70,15 +74,12 @@ const EXCLUDE_PATTERNS = [
   /^credentials\//,
 
   /**
-   * bridge/data/ 是桥接的运行时数据，绝对不能打包。
+   * 任何模块的运行时数据都不能打包。
    *
-   * 里面实测有 31 个用户个人文件：收到的图片、**本人的语音消息**
-   * （.silk 原始 + .wav 转码）、care/share 状态，而且文件名全都带着
-   * 用户的 wxid（wxid_xxx_538_h.png 这种）。
-   *
-   * 之前只写了 /^data\//，管不到子目录，结果这些东西真的进了包。
+   * 实测踩过的坑：某个子模块的 data/ 里躺着 31 个用户个人文件 ——
+   * 收到的图片、本人的语音消息、状态文件，文件名还带着 wxid。
+   * 当时只写了 /^data\//，管不到子目录，这些东西真的进了包。
    */
-  /^bridge\/data\//,
 
   /**
    * 兜底：任何层级的 data/ 目录都不进包。
@@ -86,27 +87,14 @@ const EXCLUDE_PATTERNS = [
    */
   /(^|\/)data\//,
 
-  // 只排除根目录的 config.json。
-  // 以前写的是 /config\.json$/（末尾锚定），会把 bridge/config.json 也排掉 ——
-  // 结果分发出去的包桥接一启动就读不到配置，GAME_TOKENS 这类变量全空，
-  // 线程直接 NameError 崩掉，用户看到的就是「解压了用不了」。
+  // 只排除根目录的 config.json，它在【5】里重新生成一份 Key 全空的。
+  // 别用 /config\.json$/（末尾锚定）—— 那样连子目录里正常工作需要的
+  // 配置文件也一起排掉了，分发出去的包会因为「缺配置」静默退回默认值。
   /^config\.json$/,
-  // 桥接配置不直接复制：它里面有真实的 API Key（智谱那种 xxxx.yyyy 格式），
-  // 复制过去会被敏感信息扫描拦下，或者更糟 —— 漏过去真的发给别人。
-  // 改成在【5】里读源文件、清空 Key 和名单之后单独写一份干净的。
-  /^bridge\/config\.json$/,
   /package-lock\.json$/,
   /\.dsh-home/,
 
-  // bridge 下的调试脚本
-  /^bridge\/test_/,
-  /^bridge\/check_/,
-  /^bridge\/diag_/,
-  /^bridge\/verify_/,
-
-  // Python 单元测试也不进发行包（跟根目录的 tests/ 一样）
-  /^bridge\/tests\//,
-
+  // 单元测试不进发行包
   // 我排查问题时产生的临时文件
   /\.before-heal\.bak$/,
   /^dist\//,
@@ -193,7 +181,7 @@ function scanSecrets(files) {
     /**
      * 文件名本身就带隐私的先查一遍。
      *
-     * 实测踩过：bridge/data/media-cache/ 里藏着
+     * 实测踩过：某个子模块的 data/media-cache/ 里藏着
      *   wxid_xxxxxxxxxxxx_538_h.png
      *   wxid_xxxxxxxxxxxx_633.wav   ← 本人的语音
      * 这些都是二进制，内容扫不出来，但文件名已经把 wxid 暴露了。
@@ -370,7 +358,7 @@ if (WITH_RUNTIME) {
     console.log('  （Python 172MB，需要一点时间…）');
     copyDir(path.join(ROOT, 'runtime', 'python'), path.join(DIST, 'runtime', 'python'), 'Python 运行时');
   } else {
-    console.log('  [跳过] Python（用 --no-python 排除了，微信桥接会不可用）');
+    console.log('  [跳过] Python（用 --no-python 排除了，图片去重会退化成只比 md5）');
   }
   console.log('');
 } else {
@@ -398,78 +386,11 @@ if (fs.existsSync(examplePath)) {
   console.log('  ✗ 找不到 config.example.json');
 }
 
-// 5.5 桥接的 config.json：必须存在，但要把本机专属的东西清掉
-//
-// 这个文件缺失会让桥接把所有开关退回默认值（GAME_TOKENS 之类），
-// 表面上还能跑，实际功能全不对。所以既不能漏，也不能带本机数据。
-// 内容从源文件读，清干净再写到 dist。
-const bridgeCfgSrc = path.join(ROOT, 'bridge', 'config.json');
-const bridgeCfgPath = path.join(DIST, 'bridge', 'config.json');
-if (fs.existsSync(bridgeCfgSrc)) {
-  try {
-    const bc = JSON.parse(fs.readFileSync(bridgeCfgSrc, 'utf8'));
-
-    // 入站令牌恢复成占位值（真令牌不该发给别人）
-    bc.gateway = bc.gateway || {};
-    bc.gateway.wechat = bc.gateway.wechat || {};
-    bc.gateway.wechat.inboundToken = 'change-me-wechat';
-
-    // 主人名单清空（wxid 是个人隐私）
-    bc.persona = bc.persona || {};
-    bc.persona.master = bc.persona.master || {};
-    bc.persona.master.wxids = [];
-    bc.persona.master.names = [];
-
-    // 忽略名单 / 游戏白名单之类也清掉，避免带上本机联系人
-    if (bc.wechat) {
-      if (Array.isArray(bc.wechat.collectOnlyFrom)) bc.wechat.collectOnlyFrom = [];
-      if (Array.isArray(bc.wechat.gameWhitelist)) bc.wechat.gameWhitelist = [];
-      if (Array.isArray(bc.wechat.ignoreList)) bc.wechat.ignoreList = [];
-    }
-
-    /**
-     * 递归清空所有 API Key。
-     *
-     * 这个文件里藏着真的智谱 Key（`xxxx.DyyYrYJvO0RzgP5R` 这种格式），
-     * 原来只清了 token -- 差点把用户的 Key 一起发出去。
-     * 凡是名叫 apiKey / api_key / token 的字符串字段，一律清空。
-     */
-    let cleared = 0;
-    const scrub = (obj) => {
-      if (!obj || typeof obj !== 'object') return;
-
-      for (const k of Object.keys(obj)) {
-        const v = obj[k];
-        const lower = k.toLowerCase();
-
-        if (typeof v === 'string' && v) {
-          if (lower === 'apikey' || lower === 'api_key' || lower === 'secret' || lower === 'accesstoken') {
-            obj[k] = '';
-            cleared++;
-            continue;
-          }
-        }
-
-        if (v && typeof v === 'object') scrub(v);
-      }
-    };
-    scrub(bc);
-
-    fs.writeFileSync(bridgeCfgPath, JSON.stringify(bc, null, 2), 'utf8');
-    console.log(`  已清洗 bridge/config.json（清空 ${cleared} 个 Key，令牌占位、名单清空）`);
-  } catch (e) {
-    console.log(`  ✗ 清洗 bridge/config.json 失败: ${e.message}`);
-  }
-} else {
-  console.log('  ✗ 包里缺 bridge/config.json（桥接会用默认值，功能会不对）');
-}
-console.log('');
-
 // 6. 生成使用说明
 console.log('【6】生成说明文件…');
-const readme = `# YF-Robot · 微信 AI 助手
+const readme = `# YF-Robot · 人设化 AI 助手
 
-一个能接微信的 AI 聊天助手，支持看图、联网、工具调用、主动搭话。
+一个能陪聊、能干活的人设化 AI 助手，支持角色卡、长期记忆、看图、画图、语音、联网。
 
 ## 快速开始
 
@@ -494,13 +415,16 @@ const readme = `# YF-Robot · 微信 AI 助手
 2. 粘贴 API Key
 3. 会自动启动服务并打开控制台
 
-### 3. 配置微信（可选）
+### 3. 接聊天平台（可选）
 
-1. 双击 \`启动微信桥接.bat\`
-2. 弹 UAC 时点「是」（需要管理员权限读取微信）
-3. 保持微信窗口可见，不要最小化到托盘
+这个包只包含框架。想让它在微信/QQ 等平台上收发消息，
+需要另外跑一个**适配器**（独立项目）：
+它通过 HTTP 把消息转发给核心，核心不关心消息从哪来。
 
-> 桥接崩了会自动重启（5 秒后，最多 8 次），不用手动盯着。
+- 协议：\`docs/adapter-protocol.md\`
+- 骨架：\`examples/adapter-skeleton/\`
+
+不接任何平台也能用 —— 控制台网页里可以直接聊。
 
 ### 4. 打开控制台
 
@@ -518,15 +442,15 @@ YF-Robot.bat        主入口（启动服务 + 打开控制台）
 启动服务.bat        只启动服务，不开浏览器
 状态面板.bat        终端里的实时状态面板
 工具菜单.bat        命令行菜单（测试能力、开关功能）
-启动微信桥接.bat     接微信时用（需要管理员权限）
 
 app.mjs             服务入口
 core/               核心：引擎、会话、记忆、工具、学习、群聊
 channels/           通道：网页 / iLink / 微信群 / 微信 UIA
 web/                网页界面 + 控制台
 cards/              角色卡
-bridge/             微信桥接（独立进程，Python）
-runtime/            Node + Python 运行时（自带，不用另装）
+docs/               适配器协议说明
+examples/           适配器骨架（想自己接平台看这里）
+runtime/            Node 运行时（自带，不用另装）
 
 config.json         配置（API Key 存在这里）
 data/sessions/      会话记忆（重启后接着上次聊）
@@ -637,30 +561,30 @@ data/key-audit.log  Key 变更记录
 - \`data/key-audit.log\` 记录每次 Key 变化（哪个操作、从多长变成多长）
 - 写盘是原子的（先写临时文件再改名），不会留下半个 JSON
 
-### 9. 崩了自己爬起来
+### 9. 接入自己的平台（适配器）
 
-桥接遇到原生崩溃（UIA / COM 断开这类）会退出，
-启动脚本 5 秒后自动重启，最多连试 8 次；
-连崩 8 次就停下并提示去看 \`bridge/data/bridge-crash.log\`。
+核心**不含任何平台的登录、协议逆向或自动化代码**，只对外提供一套 HTTP 协议。
+任何能收发消息的程序都可以当适配器接进来 —— 微信、QQ、Telegram、自定义网页都行。
+
+- 协议说明：\`docs/adapter-protocol.md\`
+- 骨架示例：\`examples/adapter-skeleton/\`
+- 接入后，控制台「接入状态」页会显示适配器名称、账号、最近消息数
+
+素材（图片、表情）由适配器上传，**由核心统一落盘**：
+白名单校验、去重、打描述都在核心做，适配器不用管存哪。
 
 ## 常见问题
 
-**Q: 微信不回复？**
+**Q: 接不上任何聊天平台？**
 
-1. 检查桥接窗口是否还在运行
-2. 确认微信窗口**没有被最小化**（桥接需要操作窗口）
-3. 看控制台「微信桥接」页的状态
+这个包里只有框架，没有平台适配器。你需要自己跑一个适配器进程，
+它会通过 HTTP 把消息转发给核心。协议见 \`docs/adapter-protocol.md\`，
+控制台「接入状态」页会显示有没有适配器连上来。
 
 **Q: 表情包识别不出来？**
 
-微信 4.x 把表情缓存加密了，官方也没给读法。程序的处理顺序是：
-
-1. 试解密缓存（需要管理员权限，桥接有）
-2. 解不开就按 UIA 定位截图（同样需要管理员）
-3. 都不行就老实说「看不清」，不会瞎编
-
-如果经常出现「看不清」，看 \`bridge/data/wechat-bridge-4x.log\`
-里的「表情包：」开头的行，会写明卡在哪一步。
+微信 4.x 把表情缓存加密了，所以能不能收藏表情取决于你的适配器怎么取图。
+核心这边只做入库和识别：认不出来就老实说「看不清」，不会瞎编。
 
 **Q: 图片识别失败？**
 
@@ -714,7 +638,6 @@ const MUST_HAVE = [
   ['启动服务.bat', '直接启动'],
   ['状态面板.bat', '终端界面入口'],
   ['工具菜单.bat', '菜单入口'],
-  ['启动微信桥接.bat', '桥接快捷入口'],
   ['app.mjs', '服务入口'],
   ['config.json', '配置'],
   ['使用说明.md', '说明文档'],
@@ -723,8 +646,8 @@ const MUST_HAVE = [
   ['core/engine.mjs', '引擎'],
   ['core/admin.mjs', '管理接口'],
   ['tools/tui.mjs', '终端界面（状态面板.bat 调用）'],
-  // 桥接靠它读配置，缺了会静默退回默认值 —— 功能全不对但还能启动，最难查
-  ['bridge/config.json', '桥接配置'],
+  ['docs/adapter-protocol.md', '适配器协议'],
+  ['examples/adapter-skeleton/adapter.mjs', '适配器骨架'],
 ];
 
 if (WITH_RUNTIME) {
@@ -732,9 +655,7 @@ if (WITH_RUNTIME) {
 
   // Python 只在「带了运行时 + 没排除 Python」时才要求
   if (WITH_PYTHON) {
-    MUST_HAVE.push(['runtime/python/python.exe', 'Python 运行时（接微信要用）']);
-    MUST_HAVE.push(['bridge/wechatauto_bridge.py', '微信桥接主程序']);
-    MUST_HAVE.push(['启动微信桥接.bat', '桥接启动入口']);
+    MUST_HAVE.push(['runtime/python/python.exe', 'Python 运行时（算图片指纹要用）']);
   }
 }
 
