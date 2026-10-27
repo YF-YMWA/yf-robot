@@ -101,6 +101,9 @@ const EXCLUDE_PATTERNS = [
   /^bridge_wg\/diag_/,
   /^bridge_wg\/verify_/,
 
+  // Python 单元测试也不进发行包（跟根目录的 tests/ 一样）
+  /^bridge_wg\/tests\//,
+
   // 我排查问题时产生的临时文件
   /\.before-heal\.bak$/,
   /^dist\//,

@@ -26,6 +26,14 @@ import json
 import random
 import urllib.parse
 import os
+import sys
+
+# 把自己所在的目录放进 sys.path —— 这样不管从哪个目录启动
+# （双击 bat、被别的进程拉起、还是跑单元测试），都能 import media_store。
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
 # 关掉 wechatauto 的「拟人节流」（默认 natural：120 秒内 6 次写就冷却 30~75 秒）
 os.environ.setdefault("WECHATAUTO_RHYTHM", "off")
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
@@ -1816,138 +1824,76 @@ def main():
 
         return False
 
-    # 收藏用的目录和文件名前缀，图片和表情包共用一套规则
-    COLLECT_KINDS = {
-        "image": {"dir": "images", "prefix": "img_"},
-        "sticker": {"dir": "stickers", "prefix": "stk_"},
-        "generated": {"dir": "generated", "prefix": "gen_"},
-    }
+    # 收藏用的目录和文件名前缀，图片和表情包共用一套规则。
+    # 唯一来源是 media_store.KINDS，下面拿到之后再赋给 COLLECT_KINDS。
+
+    # 素材库存取逻辑已抽到 media_store.py —— 抽出去是为了**能被测试直接调用**。
+    # 以前这段嵌在 main() 里，外面调不到，每次改完只能看日志猜，
+    # 「动图被查重误杀」那个 bug 就是这么漏过去的。
+    from media_store import (
+        KINDS as _STORE_KINDS,
+        MediaStore as _MediaStore,
+        hamming as _hamming_fn,
+        perceptual_hash as _perceptual_hash_fn,
+    )
+
+    # 目录/前缀的唯一来源是 media_store.KINDS，这里只做个别名
+    COLLECT_KINDS = _STORE_KINDS
+
+    _media_store = _MediaStore(
+        data_dir=os.path.join(ROOT, "..", "data"),
+        phash_path=os.path.join(ROOT, "..", "data", "media-phash.json"),
+        log=log,
+    )
 
     def _perceptual_hash(data):
-        """算一个「看着像不像」的指纹（dHash，64 位）。
-
-        为什么不能只比内容 md5：
-           同一张表情包截两次图，JPEG 头里会有几十个字节不一样，
-           md5 完全不同，但人眼看是同一张 —— 结果就是素材库里越攒越多。
-           dHash 只看图像内容，缩放+灰度后比较相邻像素明暗，
-           肉眼相同就得到同一个指纹。
-        """
-        try:
-            import io
-            from PIL import Image
-
-            img = Image.open(io.BytesIO(data))
-            img = img.convert("L").resize((9, 8), Image.LANCZOS)
-            px = list(img.getdata())
-            bits = 0
-            for row in range(8):
-                for col in range(8):
-                    left = px[row * 9 + col]
-                    right = px[row * 9 + col + 1]
-                    bits = (bits << 1) | (1 if left > right else 0)
-            return "%016x" % bits
-        except Exception:
-            return ""
+        """dHash 指纹（实现见 media_store.py）。"""
+        return _perceptual_hash_fn(data)
 
     def _hamming(a, b):
-        """两个十六进制指纹差几位。"""
-        try:
-            return bin(int(a, 16) ^ int(b, 16)).count("1")
-        except Exception:
-            return 64
+        """两个指纹差几位。"""
+        return _hamming_fn(a, b)
 
     def _phash_cache_path():
-        return os.path.join(ROOT, "..", "data", "media-phash.json")
+        return _media_store.phash_path
 
     def _load_phash():
-        try:
-            with open(_phash_cache_path(), "r", encoding="utf-8") as f:
-                j = json.load(f)
-            return j if isinstance(j, dict) else {}
-        except Exception:
-            return {}
+        return _media_store.load_phash()
 
     def _save_phash(cache):
-        try:
-            p = _phash_cache_path()
-            os.makedirs(os.path.dirname(p), exist_ok=True)
-            tmp = p + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(cache, f, ensure_ascii=False)
-            os.replace(tmp, p)
-        except Exception:
-            pass
+        _media_store.save_phash(cache)
 
     def find_similar_media(data, kind):
-        """素材库里有没有「看着一样」的图。有就返回文件名。
-
-        @returns 已有文件名；没有返回空字符串
-        """
-        ph = _perceptual_hash(data)
-        if not ph:
-            return ""
-
-        info = COLLECT_KINDS.get(kind)
-        if not info:
-            return ""
-
-        cache = _load_phash()
-        target_dir = os.path.join(ROOT, "..", "data", info["dir"])
-
-        for name, rec in cache.items():
-            if not rec.get("hash"):
-                continue
-            if rec.get("kind") and rec["kind"] != kind:
-                continue
-            if not os.path.isfile(os.path.join(target_dir, name)):
-                continue
-            # 差 6 位以内认为是同一张（64 位里差 6 位 ≈ 肉眼看不出区别）
-            if _hamming(ph, rec["hash"]) <= 6:
-                return name
-
-        return ""
+        """素材库里有没有「看着一样」的图。有就返回文件名。"""
+        return _media_store.find_similar(data, kind)
 
     def remember_phash(name, data, kind):
         """把新文件的指纹记进缓存。"""
-        ph = _perceptual_hash(data)
-        if not ph or not name:
-            return
-        cache = _load_phash()
-        cache[name] = {"hash": ph, "kind": kind, "at": int(time.time())}
-        _save_phash(cache)
+        _media_store.remember(name, data, kind)
 
     def forget_phash(name):
-        """删掉某个文件的指纹记录（文件被替换/删除时用）。
+        """删掉某个文件的指纹记录（文件被替换/删除时用）。"""
+        _media_store.forget(name)
 
-        不删的话，缓存里留着一条指向已不存在文件的记录，
-        之后同样的图会一直「匹配」到这个空壳，永远存不进去。
-        """
-        if not name:
-            return
-        cache = _load_phash()
-        if name in cache:
-            cache.pop(name, None)
-            _save_phash(cache)
+    def _drop_stale_index(name):
+        """删除旧文件时顺手清掉描述索引里的孤儿条目。"""
+        try:
+            _idx = load_sticker_index()
+            if name in _idx:
+                _idx.pop(name, None)
+                save_sticker_index(_idx)
+        except Exception:                            # noqa: BLE001
+            pass
+
+    _media_store.on_forgotten = _drop_stale_index
 
     def save_media(raw, ext, kind, chat_username, sender_id, note=""):
         """把一份图片数据收进素材库。图片和表情包走同一个入口。
 
-        为什么要统一：
-           原来图片和表情包各写一段几乎一样的代码，结果是
-           「图片要授权才收、表情包谁发都收」这种不一致，
-           控制台里也分成两块，找起来也费劲。
-           现在只有这一个函数，权限、命名、日志全都一致。
-
-        去重分两层：
-           1. 内容 md5 完全相同 → 同一个文件名，直接跳过
-           2. 看着一样（dHash 相近）→ 也跳过，避免截图重复入库
+        权限判断留在桥接里（要读主人名单），存取逻辑在 MediaStore。
 
         @returns 保存的文件名（或已存在的同名文件）；没收藏返回空字符串
         """
-        info = COLLECT_KINDS.get(kind)
-        if not info or not raw:
-            return ""
-
         if not MEDIA_COLLECT:
             return ""
 
@@ -1957,69 +1903,9 @@ def main():
                 sender_id or "?"))
             return ""
 
-        try:
-            import hashlib as _hl
+        _media_store.allow = None            # 权限上面已经判过了
+        return _media_store.save(raw, ext, kind, chat_username, sender_id, note)
 
-            target = os.path.join(ROOT, "..", "data", info["dir"])
-            os.makedirs(target, exist_ok=True)
-
-            # 第一层：内容完全一样
-            digest = _hl.md5(raw).hexdigest()[:12]
-            name = "%s%s%s" % (info["prefix"], digest, ext)
-            path = os.path.join(target, name)
-
-            if os.path.exists(path):
-                return name
-
-            # 第二层：看着一样（截图路线最容易重复）
-            #
-            # 但动图要特殊对待：GIF 的第一帧和之前存过的静态 PNG 长得一样，
-            # dHash 判定为「重复」→ GIF 被直接跳过，素材库里永远只有静态图。
-            # 实测就是这样：日志里有「表情包连拍：8 帧 → GIF 391 KB」，
-            # 但紧接着没有任何「已收藏 .gif」，库里还是那张旧 PNG。
-            # 所以这里遇到「新的是动图、旧的不是」时，用动图**替换**静态版本。
-            similar = find_similar_media(raw, kind)
-            if similar:
-                new_is_gif = str(ext).lower() == ".gif"
-                old_is_gif = str(similar).lower().endswith(".gif")
-
-                if new_is_gif and not old_is_gif:
-                    old_path = os.path.join(target, similar)
-                    try:
-                        os.remove(old_path)
-                        log("动图替换静态版本：%s → %s" % (similar, name))
-                    except OSError as _e:            # noqa: BLE001
-                        log("旧静态图删不掉（继续存动图）：%r" % (_e,))
-                    try:
-                        forget_phash(similar)
-                    except Exception:                # noqa: BLE001
-                        pass
-                    # 描述索引里那条也清掉，免得控制台里看到一个指向空文件的条目
-                    try:
-                        _idx = load_sticker_index()
-                        if similar in _idx:
-                            _idx.pop(similar, None)
-                            save_sticker_index(_idx)
-                    except Exception:                # noqa: BLE001
-                        pass
-                    # 不 return，继续往下把 GIF 存进去
-                else:
-                    log("%s重复（看着和 %s 一样），跳过" % (
-                        "表情包" if kind == "sticker" else "图片", similar))
-                    return similar
-
-            with open(path, "wb") as f:
-                f.write(raw)
-
-            remember_phash(name, raw, kind)
-
-            log("%s已收藏：%s（%d KB）%s" % (
-                "表情包" if kind == "sticker" else "图片",
-                name, len(raw) // 1024, note))
-            return name
-        except Exception as e:                    # noqa: BLE001
-            log("素材收藏失败（不影响识别）：%r" % (e,))
-            return ""
 
     def describe_image(msg):
         try:
