@@ -192,6 +192,23 @@ export class WebChannel {
     this.presenceTimer.unref?.();
   }
 
+  /**
+   * 取某个适配器的状态槽位（没有就建）。
+   *
+   * 同时接微信和 QQ 时，心跳和联系人必须分开存 ——
+   * 只留一个槽位会互相覆盖，控制台就只显示最后一个报到的。
+   */
+  #adapterSlot(name) {
+    const key = String(name || 'default').slice(0, 40);
+    if (!this.engine.adapters) this.engine.adapters = new Map();
+    let slot = this.engine.adapters.get(key);
+    if (!slot) {
+      slot = { name: key, platform: '', heartbeat: null, info: null, contacts: new Map() };
+      this.engine.adapters.set(key, slot);
+    }
+    return slot;
+  }
+
   /** 媒体库（懒加载，第一次用到才建） */
   #mediaLib() {
     if (!this._mediaLib) {
@@ -378,7 +395,11 @@ export class WebChannel {
         return await this.#chat(req, res);
       }
       // 同步接口：给外部适配器用，返回普通 JSON（不是 SSE）
-      if (req.method === 'POST' && url.pathname === '/api/wechat') {
+      //
+      // /api/inbound 是平台无关的名字（QQ、Telegram 之类的适配器也用它，
+      // 免得文档里写着「wechat」让人以为只能接微信）。
+      // /api/wechat 保留为别名，老适配器不用改。
+      if (req.method === 'POST' && (url.pathname === '/api/wechat' || url.pathname === '/api/inbound')) {
         return await this.#wechatSync(req, res);
       }
 
@@ -451,23 +472,36 @@ export class WebChannel {
         // 适配器上报它知道的会话/联系人，供控制台选「搭话发给谁」和「收藏白名单」
         const body = await readJson(req).catch(() => null);
         const list = Array.isArray(body?.contacts) ? body.contacts : [];
+
+        // 按平台分开存：微信的 wxid 和 QQ 的号不该混在一张表里
+        const platform = String(body?.platform || 'wechat').slice(0, 20);
+        const slot = this.#adapterSlot(body?.name || 'default');
+        slot.platform = platform;
+
+        // 兼容旧代码（单平台时直接读这个）
         this.engine.adapterContacts = this.engine.adapterContacts || new Map();
 
         let n = 0;
         for (const c of list.slice(0, 200)) {
-          const wxid = String(c?.wxid || '').trim();
+          const id = String(c?.id || c?.wxid || '').trim();
           const name = String(c?.name || '').trim();
-          if (!name && !wxid) continue;
-          this.engine.adapterContacts.set(wxid || `name:${name}`, {
-            wxid,
+          if (!name && !id) continue;
+
+          const rec = {
+            id,
+            platform,
             name,
             chatName: String(c?.chatName || name).trim(),
             isGroup: Boolean(c?.isGroup),
             lastSeen: Date.now(),
-          });
+          };
+          // 槽位里按平台:id 存，避免跨平台撞号
+          slot.contacts.set(`${platform}:${id || name}`, rec);
+          // 旧的全局表也存一份（key 带平台前缀，同样不撞）
+          this.engine.adapterContacts.set(`${platform}:${id || name}`, rec);
           n++;
         }
-        return json(res, 200, { ok: true, stored: n });
+        return json(res, 200, { ok: true, stored: n, platform });
       }
 
       /**
@@ -564,27 +598,32 @@ export class WebChannel {
       // ===== 适配器配套接口 =====
       // 适配器在 bot_base() 之后拼这些路径来调用
 
-      // 心跳：适配器每 20 秒报一次「我还活着 + UIA 状态」
-      // 这是判断适配器在线最可靠的方式（47821 端口因 listen(1) 会拒绝连接，不能用来探活）
+      // 心跳：适配器每 20 秒报一次「我还活着 + 发送通道状态」
+      //
+      // 注意要按**适配器名字**分开存：同时接微信和 QQ 时，
+      // 只留一个槽位的话两边会互相覆盖，控制台只能看到最后报到那个。
       if (req.method === 'POST' && url.pathname === '/api/bridge/heartbeat') {
         const body = await readJson(req).catch(() => ({}));
+        const name = String(body.name || 'default').slice(0, 40);
+        const platform = String(body.platform || 'wechat').slice(0, 20);
+
         const hb = {
           at: Date.now(),
+          name,
+          platform,
           uia: Boolean(body.uia),
           rest: Boolean(body.rest),
           listener: Boolean(body.listener),
           ffmpeg: Boolean(body.ffmpeg),
-          platform: body.platform || 'wechat',
-          // 适配器独立之后，核心看不到它的日志了，
-          // 所以这些信息改由心跳带上来
-          name: String(body.name || ''),
           account: String(body.account || ''),
           recentMessages: Number(body.recentMessages) || 0,
         };
-        // 存到 engine 上，admin 接口能读到
+
+        this.#adapterSlot(name).heartbeat = hb;
+        // 兼容旧代码：bridgeHeartbeat 指向最近一次心跳
         this.engine.bridgeHeartbeat = hb;
         this.lastHeartbeat = hb;
-        return json(res, 200, { ok: true, heartbeat: true });
+        return json(res, 200, { ok: true, heartbeat: true, name });
       }
 
       /**
@@ -597,18 +636,25 @@ export class WebChannel {
        */
       if (req.method === 'POST' && url.pathname === '/api/bridge/hello') {
         const body = await readJson(req).catch(() => ({}));
+        const name = String(body.name || 'default').slice(0, 40);
 
-        this.bridgeInfo = {
+        const info = {
           at: Date.now(),
-          name: String(body.name || ''),
+          name,
+          platform: String(body.platform || 'wechat').slice(0, 20),
           version: String(body.version || ''),
           root: String(body.root || ''),
           pid: Number(body.pid) || 0,
         };
-        // 也挂到 engine 上，admin 接口能读到（和 bridgeHeartbeat 同一套做法）
-        this.engine.bridgeInfo = this.bridgeInfo;
+        const slot = this.#adapterSlot(name);
+        slot.info = info;
+        slot.platform = info.platform;
 
-        return json(res, 200, { ok: true, core: 'yf-robot' });
+        // 兼容旧字段
+        this.bridgeInfo = info;
+        this.engine.bridgeInfo = info;
+
+        return json(res, 200, { ok: true, core: 'yf-robot', name });
       }
 
       // 看图：适配器收到图片/表情包后调这个识别

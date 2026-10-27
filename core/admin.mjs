@@ -3649,57 +3649,90 @@ print('%016x' % bits)
 
   async #bridgeStatus() {
     /**
-     * 适配器（以前叫「桥接」）在线状态。
+     * 适配器在线状态（可能有好几个）。
      *
-     * 只看心跳，不读日志 —— 适配器现在是**独立仓库、独立进程**，
-     * 它的日志不在核心目录下，读不到。
-     * 所以心跳要带足够的信息：谁、账号、UIA 能不能用、最近有没有消息。
+     * 只看心跳，不读日志 —— 适配器是独立进程、独立仓库，
+     * 核心读不到它的日志，所以心跳必须带够信息：
+     * 名字、平台、账号、能不能发、最近有没有消息。
      */
-    const hb = this.engine?.bridgeHeartbeat || null;
-    const info = this.engine?.bridgeInfo || null;
     const now = Date.now();
+    const slots = this.engine?.adapters instanceof Map ? [...this.engine.adapters.values()] : [];
 
     // 心跳 20 秒一次，超过 60 秒没收到就算掉线
-    const fresh = hb && now - hb.at < 60000;
-    const ago = hb ? Math.round((now - hb.at) / 1000) : null;
+    const FRESH_MS = 60000;
 
-    const dir = {
-      name: info?.name || hb?.name || '',
-      version: info?.version || '',
-      root: info?.root || '',
-      reportedAt: info?.at || 0,
-    };
-
-    if (fresh) {
+    const list = slots.map((s) => {
+      const hb = s.heartbeat || null;
+      const info = s.info || null;
+      const fresh = Boolean(hb && now - hb.at < FRESH_MS);
       return {
-        online: true,
-        bridgeOnline: true,
+        name: s.name || hb?.name || info?.name || 'default',
+        platform: s.platform || hb?.platform || info?.platform || '',
+        online: fresh,
+        account: hb?.account || '',
+        uiaOk: Boolean(hb?.uia),
+        listening: Boolean(hb?.listener),
+        resting: Boolean(hb?.rest),
+        ffmpeg: Boolean(hb?.ffmpeg),
+        heartbeatAgo: hb ? Math.round((now - hb.at) / 1000) : null,
+        recentMessages: Number(hb?.recentMessages) || 0,
+        version: info?.version || '',
+        contacts: s.contacts ? s.contacts.size : 0,
+      };
+    });
+
+    // 最近报到的排前面
+    list.sort((a, b) => (a.heartbeatAgo ?? 1e9) - (b.heartbeatAgo ?? 1e9));
+
+    const primary = list[0] || null;
+    const anyOnline = list.some((a) => a.online);
+
+    // 兜底：只有 engine.bridgeHeartbeat（老的单槽位写法）时也能显示
+    if (!primary) {
+      const hb = this.engine?.bridgeHeartbeat || null;
+      const info = this.engine?.bridgeInfo || null;
+      const fresh = Boolean(hb && now - hb.at < FRESH_MS);
+      return {
+        online: fresh,
+        bridgeOnline: fresh,
         source: 'heartbeat',
-        wechatReady: Boolean(hb.listener),
-        listening: Boolean(hb.listener),
-        uiaOk: Boolean(hb.uia),
-        resting: Boolean(hb.rest),
-        ffmpeg: Boolean(hb.ffmpeg),
-        account: hb.account || '',
-        lastActivity: new Date(hb.at).toLocaleString('zh-CN'),
-        heartbeatAgo: ago,
-        stats: { recentMessages: Number(hb.recentMessages) || 0 },
-        adapter: dir,
+        account: hb?.account || '',
+        lastActivity: hb ? new Date(hb.at).toLocaleString('zh-CN') : '',
+        heartbeatAgo: hb ? Math.round((now - hb.at) / 1000) : null,
+        stats: { recentMessages: Number(hb?.recentMessages) || 0 },
+        adapters: [],
+        adapter: { name: '', version: '', root: info?.root || '', reportedAt: info?.at || 0 },
+        error: hb ? `适配器心跳已停止（最后 ${Math.round((now - hb.at) / 1000)} 秒前）`
+                   : '还没收到过适配器心跳（没有适配器在跑，或者它连不上这个服务）',
+        hint: '启动你的适配器；不接平台也能用网页聊天',
       };
     }
 
+    const offline = list.filter((a) => !a.online);
+
     return {
-      online: false,
-      bridgeOnline: false,
+      // ===== 兼容旧前端：顶层字段取「最近那个适配器」=====
+      online: anyOnline,
+      bridgeOnline: anyOnline,
       source: 'heartbeat',
-      account: hb?.account || '',
-      lastActivity: hb ? new Date(hb.at).toLocaleString('zh-CN') : '',
-      stats: { recentMessages: 0 },
-      error: hb
-        ? `适配器心跳已停止（最后 ${ago} 秒前）`
-        : '没收到过适配器心跳（没有适配器在跑，或者它连不上这个服务）',
-      hint: '启动你的适配器进程；接微信的话见 docs/adapters.md',
-      adapter: dir,
+      account: primary.account,
+      listening: primary.listening,
+      uiaOk: primary.uiaOk,
+      resting: primary.resting,
+      ffmpeg: primary.ffmpeg,
+      lastActivity: primary.heartbeatAgo != null
+        ? new Date(now - primary.heartbeatAgo * 1000).toLocaleString('zh-CN')
+        : '',
+      heartbeatAgo: primary.heartbeatAgo,
+      stats: { recentMessages: primary.recentMessages },
+      adapter: { name: primary.name, version: primary.version, root: '', reportedAt: 0 },
+
+      // ===== 新：完整列表 =====
+      adapters: list,
+      error: anyOnline
+        ? ''
+        : offline.map((a) => `${a.name}（心跳停了 ${a.heartbeatAgo ?? '?'} 秒）`).join('、'),
+      hint: anyOnline ? '' : '启动你的适配器；不接平台也能用网页聊天',
     };
   }
 
