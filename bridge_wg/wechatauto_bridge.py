@@ -2794,20 +2794,8 @@ def main():
                 json={
                     "image": base64.b64encode(data).decode(),
                     "mime": "image/jpeg",
-                    "prompt": (
-                        "这是一张微信表情包截图。画面里可能混进了聊天界面元素：\n"
-                        "旁边的小头像、引用的缩略图、气泡边框、空白。\n"
-                        "\n"
-                        "请只看**最大、最居中**的那个主体 —— 那才是表情包本身。\n"
-                        "忽略旁边的小图、头像、引用缩略图和界面边框，"
-                        "不要把画面说成「分成几个部分」。\n"
-                        "\n"
-                        "用一句话回答（不要分点、不要换行）：\n"
-                        "「<主体是什么>，<表情或动作>，<主色调>，<风格>」\n"
-                        "如果画面里有文字，在最后补「，文字：xxx」。\n"
-                        "\n"
-                        "如果确实看不清，只回答「看不清」。"
-                    ),
+                    # 和后台补索引、控制台重建共用同一段提示词
+                    "prompt": DESCRIBE_PROMPT,
                 },
                 timeout=60,
             )
@@ -2860,25 +2848,100 @@ def main():
         "可爱": ["可爱", "萌", "软乎", "毛绒", "玩偶", "小猫", "猫咪", "小鲸"],
     }
 
+    # 表情包描述用的提示词。
+    #
+    # 必须和 core/admin.mjs 里那段保持一致 —— 两边都会写同一个 index.json，
+    # 提示词不一致就会出现「控制台刚打好的标签，被后台线程用旧描述盖回去」。
+    # 实测踩过：img_xxx.png 本来有 [生气,惊讶]，十分钟后被改成
+    # 「这张图片分为左右两部分」→ 无标签 → 按语气永远挑不中。
+    DESCRIBE_PROMPT = (
+        "这是一张表情包截图。画面里可能混进了聊天界面元素："
+        "旁边的小头像、引用的缩略图、气泡边框、空白。\n"
+        "请只看**最大、最居中**的那个主体 —— 那才是表情包本身，"
+        "忽略旁边的小图和边框，不要把画面说成「分成几个部分」。\n"
+        "\n"
+        "用一句话回答，格式固定：\n"
+        "「<主体是什么>，<情绪>，<主色调>，<风格>」\n"
+        "\n"
+        "**情绪**必须从下面这些词里选一个最接近的，不许省略、不许自己造词：\n"
+        "开心 / 难过 / 生气 / 惊讶 / 无语 / 害羞 / 困倦 / 得意 / 安慰 / 吃饭 / 可爱 / 普通\n"
+        "\n"
+        "（这个情绪是用来给表情包分类的，缺了就分不了类。）不超过 40 字。"
+    )
+
+    def looks_like_bad_desc(desc):
+        """这条描述是不是「截歪了」——描述的是聊天界面而不是表情包本身。
+
+        这类描述一个情绪词都抽不出来，存进索引只会占位，
+        还不如不存，让它下次重拍。
+        """
+        s = str(desc or "")
+        if not s:
+            return True
+        bad = (
+            "分为左右", "分成两个部分", "分成几个部分", "两个部分", "分为两部",
+            "聊天界面", "聊天窗口", "界面截图", "屏幕截图", "桌面",
+            "左侧部分", "右侧部分", "左半边", "右半边",
+        )
+        hits = sum(1 for w in bad if w in s)
+        # 出现两个以上「界面」类词，或者明确说分块，基本就是截歪了
+        return hits >= 1 and ("部分" in s or "界面" in s or "截图" in s)
+
+    def clean_desc(s):
+        """描述清洗：去引号、去模板残留、去掉「主体是XXX」这种空话。
+
+        视觉模型偶尔会把提示词模板原样回显，比如
+          “<主体是YF的表情包>，普通，白色，简约”
+        既丑又会把主人昵称带进索引。和 core/admin.mjs 的 cleanDesc 同一套规则。
+        """
+        import re as _re
+
+        t = str(s or "").strip()
+        t = _re.sub(r'^[“"\'\\s]+|[”"\'\\s]+$', '', t)
+        t = _re.sub(r"<[^>]{0,40}>", "", t)
+        t = _re.sub(r"主体是[^，,。；;]{0,20}[，,]?", "", t)
+        t = _re.sub(r"\\s+", " ", t)
+        t = _re.sub(r"^[，,。；;、\\s]+", "", t).strip()
+        return t
+
     def index_sticker(filename, desc):
-        """把一次识别结果记进索引，以后按语境挑图时用。"""
+        """把一次识别结果记进索引，以后按语境挑图时用。
+
+        两条保护：
+          1. 截歪了的描述（"分为左右两部分"那种）直接丢弃，不写进索引
+          2. 新描述抽不出情绪标签、但旧条目有标签时，沿用旧标签，
+             不要让后台线程把控制台已经补好的标签抹掉
+        """
         if not filename or not desc:
             return
         try:
+            desc = clean_desc(str(desc).strip())
+
+            if looks_like_bad_desc(desc):
+                log("表情包索引：%s 的描述像是截歪了，跳过（等下次重拍）" % filename)
+                return
+
             index = load_sticker_index()
+            old = index.get(filename) or {}
+
             tags = []
             for tag, words in EMOJI_TAGS.items():
                 if any(w in desc for w in words):
                     tags.append(tag)
+
+            # 新描述没标签、旧的却有 → 保留旧标签，别把好东西覆盖没了
+            if not tags and old.get("tags"):
+                tags = list(old["tags"])
+
             index[filename] = {
-                "desc": str(desc)[:200],
+                "desc": desc[:200],
                 "tags": tags,
                 "addedAt": int(time.time()),
                 "source": "auto",
             }
             save_sticker_index(index)
             log("表情包索引：%s → [%s] %s" % (
-                filename, ",".join(tags) or "无标签", str(desc)[:30]))
+                filename, ",".join(tags) or "无标签", desc[:30]))
         except Exception as e:                       # noqa: BLE001
             log("表情包索引写入失败：", repr(e))
 
@@ -2928,18 +2991,15 @@ def main():
                         json={
                             "image": base64.b64encode(raw).decode(),
                             "mime": mime,
-                            "prompt": (
-                                "描述这张表情包：画面里是什么（人物/动物/物体）、"
-                                "什么表情、什么颜色、有没有文字。"
-                                "用一句话说清楚，不超过 30 字。"
-                            ),
+                            # 和控制台重建、截图识别共用同一段提示词，见 DESCRIBE_PROMPT
+                            "prompt": DESCRIBE_PROMPT,
                         },
                         timeout=60,
                     )
                     desc = str(r.json().get("text") or "").strip()
                     if not desc or "看不清" in desc:
                         continue
-
+                    # 截歪了的描述 index_sticker 内部会丢掉，这里不用重复判断
                     index_sticker(n, desc)
                     done += 1
                     time.sleep(0.3)

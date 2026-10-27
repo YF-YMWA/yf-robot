@@ -1605,6 +1605,46 @@ print('%016x' % bits)
       '\n' +
       '（这个情绪是用来给表情包分类的，缺了就分不了类。）不超过 40 字。';
 
+    /**
+     * 这条描述是不是「截歪了」——描述的是聊天界面而不是表情包本身。
+     *
+     * 和 bridge_wg 里的 looks_like_bad_desc 保持同一套判断：
+     * 两边都会写同一个 index.json，判断不一致就会出现
+     * 「这边刚跳过，那边又存进去」。
+     */
+    const looksLikeBadDesc = (s) => {
+      const t = String(s || '');
+      if (!t) return true;
+      const bad = [
+        '分为左右', '分成两个部分', '分成几个部分', '两个部分', '分为两部',
+        '聊天界面', '聊天窗口', '界面截图', '屏幕截图', '桌面',
+        '左侧部分', '右侧部分', '左半边', '右半边',
+      ];
+      const hit = bad.some((w) => t.includes(w));
+      return hit && (t.includes('部分') || t.includes('界面') || t.includes('截图'));
+    };
+
+    /**
+     * 描述清洗。
+     *
+     * 视觉模型偶尔会偷懒，把提示词里的模板原样回显出来，比如
+     *   “<主体是YF的表情包>，普通，白色，简约”
+     * 里面既有尖括号模板、又有主人昵称。这种直接存进索引很丑，
+     * 而且会把昵称带到面板上。这里做一次清理。
+     */
+    const cleanDesc = (s) => {
+      let t = String(s || '').trim();
+      // 去掉包着的引号
+      t = t.replace(/^[“"'\s]+|[”"'\s]+$/g, '');
+      // 去掉 <...> 这种模板残留
+      t = t.replace(/<[^>]{0,40}>/g, '');
+      // 把「主体是XXX」这种空话去掉
+      t = t.replace(/主体是[^，,。；;]{0,20}[，,]?/g, '');
+      // 收尾清理
+      t = t.replace(/\s+/g, ' ').replace(/^[，,。；;、\s]+/, '').trim();
+      return t;
+    };
+
     for (const item of todo) {
       const file = path.join(dirs[item.kind] || dirs.stickers, item.name);
       if (!fs.existsSync(file)) continue;
@@ -1613,9 +1653,24 @@ print('%016x' % bits)
         const buf = fs.readFileSync(file);
         const r = await this.engine.vision.describe(buf, { prompt: PROMPT });
 
-        const desc = String(r?.description || '').trim();
+        let desc = String(r?.description || '').trim();
+        desc = cleanDesc(desc);
 
         if (!desc || desc.includes('看不清')) {
+          failed.push(item.name);
+          continue;
+        }
+
+        /**
+         * 截歪了的描述直接丢弃。
+         *
+         * 这类描述说的是「这张图分为左右两部分 / 聊天界面截图」——
+         * 一个情绪词都抽不出来，存进索引只会占位，
+         * 看起来「已收录」，实际按语气永远挑不中。
+         * 留着空白反而诚实，等下次重拍。
+         */
+        if (looksLikeBadDesc(desc)) {
+          this.log.warn?.(`[sticker-index] ${item.name} 描述像截歪了，跳过`);
           failed.push(item.name);
           continue;
         }
@@ -1640,14 +1695,19 @@ print('%016x' % bits)
           if (words.some((w) => desc.includes(w))) tags.push(tag);
         }
 
+        // 新描述没抽出标签、但旧条目有 → 沿用旧的，别把好东西覆盖没了
+        // （桥接后台线程也会写这个索引，两边可能交叉覆盖）
+        const oldTags = index[item.name]?.tags || [];
+        const finalTags = tags.length ? tags : oldTags;
+
         index[item.name] = {
           desc: desc.slice(0, 200),
-          tags,
+          tags: finalTags,
           addedAt: Math.floor(Date.now() / 1000),
           source: 'rebuild',
         };
         done++;
-        if (tags.length) tagged++;
+        if (finalTags.length) tagged++;
       } catch (e) {
         failed.push(item.name);
         this.log.warn?.(`[sticker-index] ${item.name} 描述失败: ${e.message}`);

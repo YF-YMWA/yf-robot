@@ -561,7 +561,9 @@
           <div class="switch" id="swVision" onclick="toggleSw('swVision')"></div>
           <select id="visionPreset" onchange="applyPreset('vision')" style="max-width:160px">
             <option value="">— 预设 —</option>
-            <option value="zhipu-flash">智谱 GLM-4V-Flash（免费）</option>
+            <option value="zhipu-flash">智谱 GLM-4V-Flash（免费，最弱）</option>
+            <option value="zhipu-v">智谱 GLM-4V（推荐，识别更准）</option>
+            <option value="zhipu-plus">智谱 GLM-4V-Plus（最强）</option>
             <option value="zhipu-air">智谱 GLM-4V-Air</option>
             <option value="deepseek">DeepSeek Vision</option>
             <option value="custom">自定义</option>
@@ -1929,6 +1931,8 @@ const PRESETS = {
   },
   vision: {
     'zhipu-flash': { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4v-flash' },
+    'zhipu-v': { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4v' },
+    'zhipu-plus': { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4v-plus' },
     'zhipu-air': { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4v-air' },
     deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash-vision-exp' },
   },
