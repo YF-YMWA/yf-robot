@@ -417,6 +417,8 @@ export class WebChannel {
           /** 收藏白名单：空 = 全收；填了 = 只收这些会话/发送者 */
           collectOnlyFrom: w.collectOnlyFrom || [],
           stickerChance: w.stickerChance ?? 0.3,
+          /** 回复改用语音（合成后发音频文件）的概率 */
+          voiceChance: w.voiceChance ?? 0,
         });
       }
 
@@ -663,6 +665,64 @@ export class WebChannel {
       // 听语音：适配器收到语音后调这个转写
       if (req.method === 'POST' && url.pathname === '/api/voice') {
         return await this.#voiceApi(req, res);
+      }
+
+      /**
+       * 说语音：文字 → 音频，适配器拿去发语音条。
+       *
+       * 合成结果同时落盘到 data/voice/，方便试听和排查。
+       */
+      if (req.method === 'POST' && url.pathname === '/api/tts') {
+        const body = await readJson(req).catch(() => ({}));
+        const text = String(body?.text || '').trim();
+        if (!text) return json(res, 400, { ok: false, error: '缺少 text' });
+
+        const { synthesize, toVoiceFormat } = await import('../core/tts.mjs');
+        const r = await synthesize({
+          text,
+          voice: body?.voice || undefined,
+          config: this.config,
+          log: (m) => this.log.info?.('[tts] ' + m),
+        });
+
+        if (!r.ok) return json(res, 200, { ok: false, error: r.error });
+
+        // ffmpeg 没配就自己找（否则只能发 wav，130KB 而不是 6KB 的 amr）
+        let ff = this.config.voice?.ffmpeg || '';
+        if (!ff) {
+          try {
+            const { findFfmpeg } = await import('../core/image.mjs');
+            ff = findFfmpeg() || '';
+          } catch {}
+        }
+
+        const converted = await toVoiceFormat(r.buf, {
+          ffmpeg: ff,
+          log: (m) => this.log.info?.('[tts] ' + m),
+        });
+
+        let name = '';
+        try {
+          const dir = path.join(__dirname, '..', 'data', 'voice');
+          mkdirSync(dir, { recursive: true });
+          name = `tts_${Date.now()}.${converted.ext}`;
+          writeFileSync(path.join(dir, name), converted.buf);
+        } catch (e) {
+          this.log.warn?.(`[tts] 音频落盘失败: ${e.message}`);
+        }
+
+        this.log.info?.(
+          `[tts] 合成 ${r.chars} 字 → ${converted.ext} ${Math.round(converted.buf.length / 1024)} KB`,
+        );
+
+        return json(res, 200, {
+          ok: true,
+          name,
+          ext: converted.ext,
+          chars: r.chars,
+          // 小文件直接给 base64，适配器不用再下载
+          data: converted.buf.length <= 512 * 1024 ? converted.buf.toString('base64') : '',
+        });
       }
       // 主动搭话：问该不该发
       if (req.method === 'GET' && url.pathname === '/api/care/due') {

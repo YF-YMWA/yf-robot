@@ -1001,6 +1001,22 @@
         </div>
       </div>
     </div>
+
+    <div class="card">
+      <h2>语音回复</h2>
+      <div class="row">
+        <label>语音概率</label>
+        <div class="ctl">
+          <input type="number" id="voiceChance" min="0" max="100" step="5" style="max-width:90px">
+          <span class="hint">%。每次回复后有这个概率改成发语音（合成后作为音频文件发出）</span>
+          <button class="ghost sm" onclick="saveVoiceChance()">保存</button>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:8px;line-height:1.7">
+        语音由阿里云百炼合成（和「语音转写」共用同一个 Key）。<br>
+        微信自动化只能把音频<b>作为文件</b>发出去，不是语音条气泡 —— 对方点开就能听。
+      </div>
+    </div>
   </div>
 
   <div class="page" id="page-learn">
@@ -2847,6 +2863,16 @@ async function saveStickerChance() {
   }
 }
 
+async function saveVoiceChance() {
+  const v = Number($('voiceChance').value) / 100;
+  try {
+    await api('config', { method: 'POST', body: { wechat: { voiceChance: v } } });
+    toast('已保存：' + Math.round(v * 100) + '% 概率发语音');
+  } catch (e) {
+    toast('保存失败: ' + e.message, 'err');
+  }
+}
+
 // ===== 素材库查重 =====
 
 function renderDedupe(j) {
@@ -3081,6 +3107,9 @@ async function loadStickerChance() {
     const c = await api('config');
     const v = c.wechat?.stickerChance ?? 0.3;
     $('stickerChance').value = Math.round(v * 100);
+    const vc = c.wechat?.voiceChance ?? 0;
+    const el = $('voiceChance');
+    if (el) el.value = Math.round(vc * 100);
   } catch {}
 }
 

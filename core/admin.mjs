@@ -2108,6 +2108,7 @@ print('%016x' % bits)
           this.config.wechat?.collectScope ||
           ((this.config.wechat?.collectOnlyFrom || []).length ? 'custom' : 'all'),
         stickerChance: this.config.wechat?.stickerChance ?? 0.3,
+        voiceChance: this.config.wechat?.voiceChance ?? 0,
       },
     };
   }
@@ -3914,6 +3915,7 @@ print('%016x' % bits)
       },
       wechat: {
         stickerChance: c.wechat?.stickerChance ?? 0,
+        voiceChance: c.wechat?.voiceChance ?? 0,
         mediaCollect: c.wechat?.mediaCollect !== false,
         /**
          * 收藏白名单。
@@ -4196,6 +4198,9 @@ print('%016x' % bits)
       current.wechat = current.wechat || {};
       if (Number.isFinite(w.stickerChance)) {
         current.wechat.stickerChance = clamp(w.stickerChance, 0, 1);
+      }
+      if (Number.isFinite(w.voiceChance)) {
+        current.wechat.voiceChance = clamp(w.voiceChance, 0, 1);
       }
       if (typeof w.mediaCollect === 'boolean') current.wechat.mediaCollect = w.mediaCollect;
 
