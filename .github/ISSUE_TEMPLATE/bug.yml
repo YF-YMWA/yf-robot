@@ -49,8 +49,8 @@ body:
       label: 相关日志
       description: |
         · 服务日志：`data/app.out.log`、`data/app.err.log`
-        · 桥接日志：`bridge/data/wechat-bridge-4x.log`
-        · 崩溃堆栈：`bridge/data/bridge-crash.log`
+        · 如果是适配器出问题，请附上**你那个适配器**的日志
+          （核心看不到适配器的日志，它是另一个进程）
         贴最后 20~30 行就行。**贴之前把 API Key、wxid 删掉。**
       render: text
     validations:
@@ -72,5 +72,5 @@ body:
       options:
         - label: 我贴的日志里已经删掉了 API Key 和 wxid
           required: true
-        - label: 微信窗口没有最小化到托盘（桥接需要操作窗口）
+        - label: 如果接了微信：窗口没有最小化到托盘（适配器需要操作窗口）
           required: false

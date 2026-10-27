@@ -7,7 +7,7 @@
  *   - 接话窗口 + 多重速率限制
  *   - 快捷回复走固定文本，不浪费模型
  *
- * 数据来源由桥接提供（见文件底部契约）。
+ * 数据来源由适配器提供（见文件底部契约）。
  */
 import { GroupSessionStore } from '../core/group-session.mjs';
 import { GroupEvent, cleanForModel } from '../core/group.mjs';
@@ -29,9 +29,9 @@ export class WeChatGroupChannel {
     this.cfg = config.group;
     this.store = new GroupSessionStore(this.cfg);
     this.seen = new Set();
-    /** HTTP 服务，供桥接推送消息 */
+    /** HTTP 服务，供适配器推送消息 */
     this.server = null;
-    /** 待桥接拉取的回复队列 */
+    /** 待适配器拉取的回复队列 */
     this.outbox = [];
   }
 
@@ -69,11 +69,11 @@ export class WeChatGroupChannel {
     }
 
     try {
-      // 桥接推送群消息
+      // 适配器推送群消息
       if (req.method === 'POST' && url.pathname === '/group/inbound') {
         return await this.#inbound(req, res);
       }
-      // 桥接拉取待发送的回复
+      // 适配器拉取待发送的回复
       if (req.method === 'GET' && url.pathname === '/group/outbox') {
         const messages = this.outbox.splice(0, this.outbox.length);
         return json(res, 200, { ok: true, messages });
@@ -107,7 +107,7 @@ export class WeChatGroupChannel {
       const r = await this.onMessage(msg);
       results.push(r);
 
-      // 有回复就放进队列，等桥接来取
+      // 有回复就放进队列，等适配器来取
       if (r.reply && Array.isArray(r.bubbles)) {
         for (const bubble of r.bubbles) {
           this.outbox.push({
@@ -123,7 +123,7 @@ export class WeChatGroupChannel {
   }
 
   /**
-   * 处理一条群消息。这是桥接应该调用的入口。
+   * 处理一条群消息。这是适配器应该调用的入口。
    *
    * @param {object} msg
    * @param {string} msg.groupId 群标识
@@ -433,10 +433,10 @@ function readJson(req, limit = 2 * 1024 * 1024) {
 }
 
 /**
- * 桥接契约（你需要实现的部分）
+ * 适配器契约（你需要实现的部分）
  * ==================================
  *
- * 你的桥接负责从微信客户端读取群消息，然后调用 onMessage()：
+ * 你的适配器负责从微信客户端读取群消息，然后调用 onMessage()：
  *
  *   import { WeChatGroupChannel } from './channels/wechat-group.mjs';
  *
@@ -450,7 +450,7 @@ function readJson(req, limit = 2 * 1024 * 1024) {
  *     name: '张三',                       // 发送者昵称
  *     text: '鲸鲸你好',                   // 文本内容
  *     msgId: 'msg_xyz',                   // 唯一 id，用于去重
- *     atMe: true,                         // 是否 @ 了机器人（桥接判断）
+ *     atMe: true,                         // 是否 @ 了机器人（适配器判断）
  *     replyToBot: false,                  // 是否引用回复机器人
  *     isGroupAdmin: false,                // 是否群管理员
  *     replyToName: '',                    // 引用的是谁
@@ -465,11 +465,11 @@ function readJson(req, limit = 2 * 1024 * 1024) {
  *   }
  *
  * 关键点：
- *   1. `atMe` 必须由桥接判断——本通道不解析微信原始消息格式
+ *   1. `atMe` 必须由适配器判断——本通道不解析微信原始消息格式
  *   2. `groupId` 用群原始 id（xxx@chatroom 形式）
  *   3. 语音/图片传本地路径，转码由本通道负责
  *   4. 即使 result.reply 为 false，消息也已被记录进上下文，
  *      下次被叫到时模型能看到群里刚才聊了什么
  *
- * 桥接本身需要读写微信客户端（UIA 或数据库），那部分不在本项目范围内。
+ * 适配器本身需要读写微信客户端（UIA 或数据库），那部分不在本项目范围内。
  */

@@ -21,7 +21,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /**
  * 这个会话/发送者发的图要不要收藏。
  *
- * 规则和桥接里那套一致：
+ * 规则和适配器上报的一致（以核心这份为准）：
  *   1. 白名单为空 → 全收
  *   2. 会话或发送者在白名单 → 收
  *   3. 否则不收
@@ -375,7 +375,7 @@ export class WebChannel {
       if (req.method === 'POST' && url.pathname === '/api/chat') {
         return await this.#chat(req, res);
       }
-      // 同步接口：给外部桥接用，返回普通 JSON（不是 SSE）
+      // 同步接口：给外部适配器用，返回普通 JSON（不是 SSE）
       if (req.method === 'POST' && url.pathname === '/api/wechat') {
         return await this.#wechatSync(req, res);
       }
@@ -491,11 +491,11 @@ export class WebChannel {
         });
       }
 
-      // ===== 桥接配套接口 =====
-      // 桥接在 bot_base() 之后拼这些路径来调用
+      // ===== 适配器配套接口 =====
+      // 适配器在 bot_base() 之后拼这些路径来调用
 
-      // 心跳：桥接每 20 秒报一次「我还活着 + UIA 状态」
-      // 这是判断桥接在线最可靠的方式（47821 端口因 listen(1) 会拒绝连接，不能用来探活）
+      // 心跳：适配器每 20 秒报一次「我还活着 + UIA 状态」
+      // 这是判断适配器在线最可靠的方式（47821 端口因 listen(1) 会拒绝连接，不能用来探活）
       if (req.method === 'POST' && url.pathname === '/api/bridge/heartbeat') {
         const body = await readJson(req).catch(() => ({}));
         const hb = {
@@ -541,12 +541,12 @@ export class WebChannel {
         return json(res, 200, { ok: true, core: 'yf-robot' });
       }
 
-      // 看图：桥接收到图片/表情包后调这个识别
+      // 看图：适配器收到图片/表情包后调这个识别
       if (req.method === 'POST' && url.pathname === '/api/vision') {
         return await this.#visionApi(req, res);
       }
 
-      // 听语音：桥接收到语音后调这个转写
+      // 听语音：适配器收到语音后调这个转写
       if (req.method === 'POST' && url.pathname === '/api/voice') {
         return await this.#voiceApi(req, res);
       }
@@ -586,10 +586,10 @@ export class WebChannel {
   }
 
   /**
-   * 同步接口：给外部微信桥接用。
+   * 同步接口：给外部适配器用。
    *
    * 和 /api/chat 的区别：这个不走 SSE，一次返回完整 JSON，
-   * 桥接程序用起来更简单。
+   * 适配器用起来更简单。
    *
    * 请求：{ chat_id, chat_type, senderId, senderName, text, msg_id, at_me }
    * 响应：{ action: 'reply'|'ignore', bubbles: [...], reason }
@@ -644,7 +644,7 @@ export class WebChannel {
         if (!result.bubbles?.length) {
           return json(res, 200, { action: 'ignore', reason: result.reason || 'no_reply' });
         }
-        // reply 是 whale-girl 桥接要求的主字段（它用 data["reply"] 判断是否发送），
+        // reply 是 适配器要求的主字段（它用 data["reply"] 判断是否发送），
         // bubbles 是完整气泡列表，两者都给
         return json(res, 200, {
           action: 'reply',
@@ -678,7 +678,7 @@ export class WebChannel {
         action: 'reply',
         reply: result.bubbles.join(''),
         bubbles: result.bubbles,
-        // 她画的图，桥接会发到微信
+        // 她画的图，适配器会发到微信
         images: result.images || [],
       });
     } catch (e) {
@@ -688,7 +688,7 @@ export class WebChannel {
   }
 
   /**
-   * 看图接口：桥接收到图片/表情包后调这里识别。
+   * 看图接口：适配器收到图片/表情包后调这里识别。
    *
    * 请求：{ image: base64, mime: 'image/jpeg' }
    * 响应：{ ok, text }
@@ -733,10 +733,10 @@ export class WebChannel {
   }
 
   /**
-   * 语音转写：桥接收到语音后调这个。
+   * 语音转写：适配器收到语音后调这个。
    *
-   * 桥接不自己实现识别，统一走这里 —— 只需在控制台配一处 Key，
-   * 也不会出现「服务端能识别、桥接识别不了」的两套配置。
+   * 适配器不自己实现识别，统一走这里 —— 只需在控制台配一处 Key，
+   * 也不会出现「服务端能识别、适配器识别不了」的两套配置。
    */
   async #voiceApi(req, res) {
     let body;

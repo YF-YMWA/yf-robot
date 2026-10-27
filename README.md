@@ -44,22 +44,22 @@ Node.js + Python，Windows 桌面双击即用。支持自定义角色卡、长�
 
 ```bash
 git clone https://github.com/your-name/yf-robot.git
-cd jingjing
+cd yf-robot
 
-# 1. Node 依赖（当前没有第三方依赖，只检查版本）
+# 1. 检查 Node 版本（当前没有第三方依赖）
 node --version   # >= 18
 
-# 2. Python 依赖（接微信才需要）
-python -m pip install -r requirements.txt
+# 2. 首次配置：复制示例配置，填 Key
+cp config.example.json config.json
 
-# 3. 首次配置：复制示例配置，填 Key
-copy config.example.json config.json
-
-# 4. 启动
+# 3. 启动
 node app.mjs
 ```
 
 打开 http://127.0.0.1:8899/console ，在「模型与功能」里填 Key。
+
+> 不需要装 Python。核心是纯 Node；
+> 接聊天平台要另跑一个适配器（独立项目，自备环境）。
 
 ### 需要的 Key
 

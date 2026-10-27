@@ -147,7 +147,7 @@ function printHeader(st) {
   const label = (ok, on, off) => (ok ? col('green', on) : col('dim', off));
 
   console.log(`    服务    ${dot(st.webAlive)} ${label(st.webAlive, '运行中', '已停止')}   ${col('dim', `端口 ${st.port}`)}`);
-  console.log(`    桥接    ${dot(st.bridgeAlive)} ${label(st.bridgeAlive, '运行中', '已停止')}`);
+  console.log(`    适配器  ${dot(st.bridgeAlive)} ${label(st.bridgeAlive, '已接入', '未接入')}`);
   console.log('');
 
   const keyMark = (ok) => (ok ? col('green', '✓') : col('yellow', '!'));
@@ -166,7 +166,7 @@ function printMenu(st) {
   console.log(`   ${col('cyan', '1')}  启动服务        ${col('dim', st.webAlive ? '（已在运行）' : '配好 Key 后自动开浏览器')}`);
   console.log(`   ${col('cyan', '2')}  打开控制台      ${col('dim', 'Key、角色卡、能力开关')}`);
   console.log(`   ${col('cyan', '3')}  打开聊天页      ${col('dim', '网页版对话')}`);
-  console.log(`   ${col('cyan', '4')}  启动微信桥接    ${col('dim', '需管理员权限')}`);
+  console.log(`   ${col('cyan', '4')}  接入聊天平台    ${col('dim', '怎么把微信/QQ 接进来')}`);
   console.log(`   ${col('cyan', '5')}  测试全部能力    ${col('dim', '对话 / 看图 / 联网')}`);
   console.log(`   ${col('cyan', '6')}  查看详细状态`);
   console.log(`   ${col('cyan', '7')}  停止全部`);
@@ -305,9 +305,9 @@ async function showStatus() {
   console.log(`    看图      ${(cfg.vision?.model || '-').padEnd(28)} ${st.hasVisionKey ? col('green', 'Key 已配置') : col('yellow', 'Key 未配置')}`);
   console.log(`    联网      ${(cfg.search?.provider || '-').padEnd(28)} ${st.hasSearchKey ? col('green', 'Key 已配置') : col('yellow', 'Key 未配置')}`);
   console.log('');
-  console.log('  ' + col('bold', '微信桥接'));
-  console.log(`    状态      ${st.bridgeAlive ? col('green', '运行中') : col('dim', '已停止')}`);
-  console.log(col('dim', '    需要管理员权限，用 4 启动'));
+  console.log('  ' + col('bold', '适配器'));
+  console.log(`    状态      ${st.bridgeAlive ? col('green', '已接入') : col('dim', '未接入')}`);
+  console.log(col('dim', '    本框架不含平台代码，接入方式见 4'));
   console.log('');
   console.log('  ' + col('bold', '角色'));
   console.log(`    当前      ${cfg.card || '默认'}`);
@@ -340,38 +340,30 @@ async function stopAll() {
 
   if (stopped === 0) console.log(col('dim', '  没有需要停止的进程'));
   console.log('');
-  console.log(col('dim', '  提示：微信桥接请在它自己的窗口里按 Ctrl+C 停止'));
+  console.log(col('dim', '  提示：适配器是独立进程，请在它自己的窗口里停止'));
 }
 
-async function startBridge() {
-  console.log(col('dim', '  桥接需要管理员权限，会弹 UAC 确认框'));
-  console.log(col('dim', '  微信窗口请保持可见（不要最小化到托盘）'));
+async function showAdapterHelp() {
   console.log('');
-
-  const ok = (await ask('  继续？(Y/n): ')).trim().toLowerCase();
-  if (ok === 'n') return;
-
-  const batPath = path.join(ROOT, '启动微信桥接.bat');
-  if (!fs.existsSync(batPath)) {
-    console.log(col('red', '  ✗ 找不到 启动微信桥接.bat'));
-    return;
-  }
-
-  if (!isWin) {
-    console.log(col('yellow', '  ! 微信桥接只支持 Windows'));
-    return;
-  }
-
-  try {
-    spawn('cmd', ['/c', 'start', '', batPath], {
-      cwd: ROOT,
-      detached: true,
-      stdio: 'ignore',
-    }).unref();
-    console.log(col('green', '  ✓ 已启动（请在弹出的窗口确认 UAC）'));
-  } catch (e) {
-    console.log(col('red', `  ✗ 启动失败: ${e.message}`));
-  }
+  console.log(col('bold', '  接入聊天平台'));
+  console.log('');
+  console.log('  这个程序本身**不包含任何聊天平台的登录或自动化代码**。');
+  console.log('  它只对外提供一套 HTTP 接口，由「适配器」把消息送进来。');
+  console.log('');
+  console.log(col('dim', '  协议：docs/adapter-protocol.md'));
+  console.log(col('dim', '  示例：examples/adapter-skeleton/'));
+  console.log('');
+  console.log('  自己写一个适配器只需要做三件事：');
+  console.log(col('dim', '    1. 收到消息 → POST /api/wechat → 拿 bubbles 逐条发出去'));
+  console.log(col('dim', '    2. 每 20 秒 POST /api/bridge/heartbeat'));
+  console.log(col('dim', '    3. 想收藏图片 → POST /api/media/ingest'));
+  console.log('');
+  console.log('  想先看看能不能跑通？');
+  console.log(col('dim', `    ${process.execPath} examples/adapter-skeleton/adapter.mjs`));
+  console.log('');
+  console.log('  不接任何平台也能用：控制台网页里可以直接聊。');
+  console.log('');
+  await ask('  按回车返回');
 }
 
 async function autostartHelp() {
@@ -479,7 +471,7 @@ async function main() {
         else openUrl(`http://127.0.0.1:${st.port}`);
         break;
       case '4':
-        await startBridge();
+        await showAdapterHelp();
         break;
       case '5':
         await testAll();

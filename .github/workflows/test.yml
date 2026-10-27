@@ -32,31 +32,6 @@ jobs:
           node tools/check-console-js.mjs
           node tools/check-console-fns.mjs
 
-  python:
-    name: Python 单元测试
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: 安装依赖
-        # 只装单元测试需要的（Pillow 用于 dHash 和动图处理）
-        run: python -m pip install --upgrade pip Pillow
-
-      - name: 语法检查
-        run: |
-          python -m py_compile bridge/wechatauto_bridge.py
-          python -m py_compile bridge/media_store.py
-          python -m py_compile bridge/msg_route.py
-          python -m py_compile bridge/wechat_xml.py
-
-      - name: 单元测试
-        # 这几个模块不依赖 wechatauto，CI 上能单独跑
-        run: python -m unittest discover -s bridge/tests -v
-
   leak-scan:
     name: 敏感信息扫描
     runs-on: windows-latest
