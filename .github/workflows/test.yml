@@ -25,7 +25,9 @@ jobs:
           node --check channels/web.mjs
 
       - name: 单元测试
-        run: node --test tests/
+        # 注意不要写 `node --test tests/` ——
+        # Windows 上它会把 tests 当模块路径，报 Cannot find module
+        run: node --test "tests/*.test.mjs"
 
       - name: 控制台脚本检查
         run: |

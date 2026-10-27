@@ -28,8 +28,8 @@ function tmpConfig(initial) {
 }
 
 const KEYS = {
-  llm: { apiKey: 'sk-llm-abcdefghijklmnopqrstuvwxyz' },
-  voice: { apiKey: 'sk-voice-0123456789abcdef0123456789abcdef' },
+  llm: { apiKey: 'sk-test-llm-abcdefghijklmnopqrstuvwxyz' },
+  voice: { apiKey: 'sk-test-voice-0123456789abcdef0123456789abcdef' },
   vision: { apiKey: '' },
   search: { apiKey: '' },
   imagegen: { apiKey: '' },

@@ -11,6 +11,21 @@ const TOKEN = fs.readFileSync(path.join(ROOT, 'data', 'token.txt'), 'utf8').trim
 const BASE = 'http://127.0.0.1:8899';
 const H = { 'x-local-token': TOKEN, 'content-type': 'application/json' };
 
+/**
+ * 主人 id 从配置里读，不要写死在代码里 ——
+ * 写死会把真实 wxid 泄露到公开仓库（这个坑已经踩过一次）。
+ * 读不到就用占位符，测试仍然能跑（只是主人权限的用例会走陌生人分支）。
+ */
+function ownerId() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+    return (cfg.owner?.wxids || [])[0] || 'wxid_owner_placeholder';
+  } catch {
+    return 'wxid_owner_placeholder';
+  }
+}
+const OWNER = ownerId();
+
 const rows = [];
 const add = (group, name, ok, detail = '') => rows.push({ group, name, ok, detail });
 
@@ -27,7 +42,7 @@ async function chat(text, chatId, extra = {}) {
     body: JSON.stringify({
       chat_id: chatId,
       chat_type: 'private',
-      senderId: 'wxid_owner_placeholder',
+      senderId: OWNER,
       senderName: 'YF',
       text,
       msg_id: 'mx' + Date.now() + Math.random().toString(36).slice(2, 6),
