@@ -470,6 +470,41 @@ export class WebChannel {
         return json(res, 200, { ok: true, stored: n });
       }
 
+      /**
+       * 适配器要的用户设置（主人名单、主动功能、热点间隔）。
+       *
+       * 这些以前在适配器自己的 config.json 里也存一份，结果两边各改各的：
+       * 控制台把「主动搭话」关了，适配器那边还开着；
+       * 适配器的主人 wxids 是空的，每日热点就永远不发。
+       * 现在统一由核心提供，适配器定时拉。
+       */
+      if (req.method === 'GET' && url.pathname === '/api/adapter/config') {
+        const c = this.config;
+        return json(res, 200, {
+          ok: true,
+          owner: {
+            enabled: c.owner?.enabled !== false,
+            wxids: c.owner?.wxids || [],
+            names: c.owner?.names || [],
+            displayName: c.owner?.displayName || '',
+          },
+          care: {
+            enabled: Boolean(c.care?.enabled),
+            targets: c.care?.targets || [],
+            quietMinutes: c.care?.quietMinutes ?? 20,
+          },
+          share: {
+            enabled: Boolean(c.share?.enabled),
+            targets: c.share?.targets || [],
+            everyMinutes: c.share?.everyMinutes ?? 120,
+          },
+          digest: {
+            enabled: Boolean(c.learning?.digest?.enabled),
+            intervalHours: c.learning?.digest?.intervalHours ?? 24,
+          },
+        });
+      }
+
       // 适配器要发图：按语气挑一张（素材库在核心，适配器那边没有图）
       if (req.method === 'GET' && url.pathname === '/api/media/pick') {
         const text = url.searchParams.get('text') || '';
