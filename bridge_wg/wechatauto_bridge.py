@@ -1818,6 +1818,10 @@ def main():
         is_collect_allowed as _collect_allowed_fn,
         perceptual_hash as _perceptual_hash_fn,
     )
+    from wechat_xml import (
+        extract_emoticon_md5 as _extract_emoticon_md5,
+        is_emoji_appmsg as _is_emoji_appmsg,
+    )
 
     def _is_collect_allowed(chat_username, sender_id):
         """判断这个会话/发送者发的图要不要收藏。
@@ -2507,6 +2511,9 @@ def main():
                     lambda cn, nm: (
                         nm == "动画表情"
                         or (cn == "mmui::ChatBubbleItemView" and "[动画表情" in str(nm))
+                        # GIF 被当成 appmsg 发来时，气泡名可能是「[表情]」「[动图]」
+                        or (cn == "mmui::ChatBubbleItemView"
+                            and any(k in str(nm) for k in ("[表情", "[动图", "[动画")))
                     ),
                     match_last=True,
                     max_scrolls=40,
@@ -3291,7 +3298,18 @@ def main():
                 except Exception as e:            # noqa: BLE001
                     log("表情包收藏失败（不影响识别）：%r" % (e,))
 
+            # 表情的 md5 有两种写法（见 wechat_xml.extract_emoticon_md5）：
+            #   <emoji md5="xxxx" .../>            —— 普通表情/动画表情
+            #   <emoticonmd5>xxxx</emoticonmd5>    —— GIF 被当成 appmsg(type=8) 发来时
             m = re.search(r'md5="([0-9a-fA-F]{32})"', content)
+            md5 = _extract_emoticon_md5(content)
+            if not m and md5:
+                # 让后面的 `m.group(1)` 逻辑不用改
+                class _M:
+                    @staticmethod
+                    def group(i):
+                        return md5
+                m = _M()
             md5 = m.group(1).lower() if m else ""
 
             if not md5:
@@ -3409,6 +3427,10 @@ def main():
             log("表情包识别异常：", repr(e))
             return _sticker_label(str(msg.get("content") or ""))
 
+    def is_emoji_appmsg(content):
+        """这条 appmsg 是不是「表情/GIF」而不是链接卡片（实现见 wechat_xml.py）。"""
+        return _is_emoji_appmsg(content)
+
     def on_message_inner(msg, listener):
         try:
             username = msg.get("username") or ""
@@ -3436,6 +3458,19 @@ def main():
                     content = "（对方发了一个表情包，但你没看清是什么。随便应一声就行，别编具体内容。）"
                 else:
                     content = "（对方刚刚新发了一个表情包，内容是：%s）" % desc
+
+            # GIF 被微信当成 appmsg(type=8) 发过来时，类型会落到「文件/链接/卡片」。
+            # 以前这里只认带 <url> 的链接卡片，这类消息整条被丢掉 ——
+            # 用户看到的就是「直接发的动图她没反应」。
+            if mtype not in ("文本", "语音", "图片", "表情", "动画表情") and is_emoji_appmsg(content):
+                log("收到 appmsg 形式的表情/GIF（local_id=%s）" % msg.get("local_id"))
+                desc = describe_sticker(msg)
+                if not desc:
+                    content = "（对方发了一个动图/表情，但画面上没认出内容。随便应一声，别编。）"
+                else:
+                    content = "（对方刚刚发来一个动图或表情，内容是：%s）" % desc
+                mtype = "表情"   # 后续按表情处理
+
             if mtype not in ("文本", "语音", "图片", "表情", "动画表情"):
                 if "移出群聊" in content or "移出" in content:
                     dead_chats.add(username)
