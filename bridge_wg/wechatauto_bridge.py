@@ -2499,26 +2499,29 @@ def main():
                 log("表情包定位：微信窗口没准备好")
                 return None
 
-            try:
-                cur = eng.current_chat()
-            except Exception:
-                cur = None
-
-            if who and cur != who:
+            # UIA 是 COM 对象，多线程同时碰会 access violation。
+            # 定位整段持锁，别和发送/截图线程抢。
+            with gui_lock:
                 try:
-                    eng.open_chat(who)
-                    time.sleep(0.6)
-                except Exception as e:          # noqa: BLE001
-                    log("表情包定位：打开会话失败", repr(e))
+                    cur = eng.current_chat()
+                except Exception:
+                    cur = None
 
-            found = eng.find_in_message_list(
-                lambda cn, nm: (
-                    nm == "动画表情"
-                    or (cn == "mmui::ChatBubbleItemView" and "[动画表情" in str(nm))
-                ),
-                match_last=True,
-                max_scrolls=40,
-            )
+                if who and cur != who:
+                    try:
+                        eng.open_chat(who)
+                        time.sleep(0.6)
+                    except Exception as e:          # noqa: BLE001
+                        log("表情包定位：打开会话失败", repr(e))
+
+                found = eng.find_in_message_list(
+                    lambda cn, nm: (
+                        nm == "动画表情"
+                        or (cn == "mmui::ChatBubbleItemView" and "[动画表情" in str(nm))
+                    ),
+                    match_last=True,
+                    max_scrolls=40,
+                )
 
             if not found:
                 log("表情包定位：消息列表里没找到「动画表情」控件")
@@ -3082,14 +3085,19 @@ def main():
                 # GIF 要校验：微信有可能不把它当图片，而是当**文件**发出去
                 # （聊天里是个文件卡片，动画就没了）。verify=True 会查数据库，
                 # 只有真出现了一条「图片」消息才算成功。
-                try:
-                    return gui.send_image(p, chat_display_name, verify=is_gif)
-                except TypeError:
-                    # 老版本没有 verify 参数
-                    return gui.send_image(p, chat_display_name)
-                except Exception as e:               # noqa: BLE001
-                    log("send_image 异常，回退 send_file：", repr(e))
-                    return gui.send_file(p, chat_display_name)
+                #
+                # 必须持 gui_lock：发图要走剪贴板（OpenClipboard → SetClipboardData
+                # → Ctrl+V）和 UIA。这几步全是原生调用，两个线程同时进来会
+                # 直接 access violation 把整个进程干掉 —— 实测崩过。
+                with gui_lock:
+                    try:
+                        return gui.send_image(p, chat_display_name, verify=is_gif)
+                    except TypeError:
+                        # 老版本没有 verify 参数
+                        return gui.send_image(p, chat_display_name)
+                    except Exception as e:               # noqa: BLE001
+                        log("send_image 异常，回退 send_file：", repr(e))
+                        return gui.send_file(p, chat_display_name)
 
             r = _do_send(path)
             ok = bool(r and r.get("status") == "成功")
