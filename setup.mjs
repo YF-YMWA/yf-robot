@@ -202,7 +202,8 @@ async function main() {
       engagedMinutes: 6,
       maxRepliesPerHour: 1000,
       muteDefaultMinutes: 30,
-      aliases: ['鲸鲸'],
+      // 群里的称呼：留空 = 用角色卡里的名字（控制台可改）
+      aliases: [],
       ownerIds: [],
       historyTurns: 10,
     },

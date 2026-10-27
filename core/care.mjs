@@ -75,7 +75,7 @@ export function checkCareDue({ lastTs = 0, sentToday = 0, now = new Date(), cfg 
  * @param {function} [opts.pick] 随机选择函数（测试可注入）
  * @returns {string}
  */
-export function composeCare({ persona = '鲸鲸', now = new Date(), pick = defaultPick } = {}) {
+export function composeCare({ persona = '', now = new Date(), pick = defaultPick } = {}) {
   const hour = now.getHours();
   const minutes = now.getMinutes();
 

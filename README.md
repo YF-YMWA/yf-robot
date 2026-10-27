@@ -34,7 +34,7 @@ Node.js + Python，Windows 桌面双击即用。支持自定义角色卡、长�
 
 ### 方式一：下载发行包（推荐给不写代码的人）
 
-到 [Releases](../../releases) 下载最新 `鲸鲸.zip`，解压到**纯英文路径**（例如 `D:\jingjing`），双击 `YF-Robot.bat`。
+到 [Releases](../../releases) 下载最新 `YF-Robot-vX.zip`，解压到**纯英文路径**（例如 `D:\YF-Robot`），双击 `YF-Robot.bat`。
 
 包内自带 Node 和 Python 运行时，**不需要另外安装**。
 

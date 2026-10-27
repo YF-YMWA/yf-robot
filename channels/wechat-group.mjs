@@ -35,6 +35,18 @@ export class WeChatGroupChannel {
     this.outbox = [];
   }
 
+  /**
+   * 她在群里的显示名。
+   *
+   * 不能写死：用户换角色卡之后，群事件里还叫旧名字会很出戏。
+   * 从人设里取，取不到就用「机器人」兜底。
+   */
+  #botName() {
+    const p = this.engine?.persona || this.engine?.config?.persona || null;
+    const name = p?.name || this.engine?.config?.card || '';
+    return String(name || '机器人').trim() || '机器人';
+  }
+
   async start() {
     const webCfg = this.config.channels['wechat-group'] || {};
     const host = webCfg.listenHost || '127.0.0.1';
@@ -158,7 +170,7 @@ export class WeChatGroupChannel {
       group.addEvent(
         new GroupEvent({
           senderId: 'bot',
-          senderName: '鲸鲸',
+          senderName: this.#botName(),
           text: cmdResult.bubbles.join(' '),
           isBot: true,
           addressedToBot: false,
@@ -208,7 +220,7 @@ export class WeChatGroupChannel {
     if (decision.canned) {
       group.recordReply({ reason: decision.reason, senderId: from });
       const bubbles = [decision.canned];
-      group.addEvent(new GroupEvent({ senderId: 'bot', senderName: '鲸鲸', text: decision.canned, isBot: true }));
+      group.addEvent(new GroupEvent({ senderId: 'bot', senderName: this.#botName(), text: decision.canned, isBot: true }));
       return { reply: true, bubbles, reason: decision.reason };
     }
 
@@ -247,7 +259,7 @@ export class WeChatGroupChannel {
     group.addEvent(
       new GroupEvent({
         senderId: 'bot',
-        senderName: '鲸鲸',
+        senderName: this.#botName(),
         text: result.bubbles.join(' '),
         isBot: true,
       }),

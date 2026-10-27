@@ -22,7 +22,7 @@ function startupDir() {
 }
 
 const START_BAT = path.join(ROOT, '启动服务.bat');
-const LINK_NAME = 'jingjing-autostart.vbs';
+const LINK_NAME = 'yf-robot-autostart.vbs';
 const VBS = path.join(startupDir(), LINK_NAME);
 
 /** 生成一个 VBS 脚本来无窗口启动。 */

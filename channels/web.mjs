@@ -738,7 +738,11 @@ export class WebChannel {
       // 主动搭话：生成内容
       if (req.method === 'GET' && url.pathname === '/api/care') {
         const text = composeCare({
-          persona: this.engine.config.__personaName || '鲸鲸',
+          // 从人设取，别写死（换角色卡后还叫旧名会很怪）
+          persona:
+            this.engine.persona?.name ||
+            this.engine.config?.__personaName ||
+            '',
         });
         return json(res, 200, { text });
       }
