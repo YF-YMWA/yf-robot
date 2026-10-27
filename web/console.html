@@ -2483,7 +2483,11 @@ async function loadServerMode() {
  * 「关网页即停服务」靠它判断页面还在不在：
  *   · 每 4 秒报一次「我还开着」
  *   · 关页面/刷新时用 sendBeacon 报一声拜拜（sendBeacon 在 unload 时也能发出去）
- * 刷新会先拜拜再 ping，服务端有 15 秒宽限，不会把自己刷没。
+ *
+ * 注意浏览器会**节流后台标签页的定时器**（可能一分钟才跑一次），
+ * 所以服务端判定「页面还活着」的窗口设成了 5 分钟，
+ * 切到别的窗口不会被误判成关闭。
+ * 反过来，从后台切回来时立刻补一次 ping，让状态马上刷新。
  */
 const CONSOLE_PAGE_ID = 'pg-' + Math.random().toString(36).slice(2, 12) + '-' + Date.now().toString(36);
 
@@ -2502,6 +2506,18 @@ function startConsolePing() {
   pingConsole();
   setInterval(pingConsole, 4000);
 
+  // 从后台切回来时补一次，别等服务端等超时
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') pingConsole();
+  });
+  window.addEventListener('focus', pingConsole);
+
+  /**
+   * 只有「真的离开页面」才报拜拜。
+   *
+   * 不能用 visibilitychange 报拜拜 —— 切到别的标签页同样是 hidden，
+   * 那样一换窗口服务就被停了（这就是之前「面板直接消失」的原因）。
+   */
   const bye = () => {
     try {
       const blob = new Blob([JSON.stringify({ pageId: CONSOLE_PAGE_ID })], {

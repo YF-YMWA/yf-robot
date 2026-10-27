@@ -48,10 +48,22 @@ export class WebChannel {
     this.consolePages = new Map();
     this.sawConsolePage = false;
     this.stopTimer = null;
-    /** 连续多久没收到任何页面的 ping 就算「页面都关了」 */
+    /** 页面报拜拜之后，等多久才真正停（给刷新留余量） */
     this.idleMs = 15000;
-    /** 判定一个页面「还活着」的窗口 */
-    this.pageTtlMs = 12000;
+
+    /**
+     * 判定一个页面「还活着」的窗口。
+     *
+     * 这里踩过坑：原来设 12 秒，结果**切到别的窗口**（标签页进后台）时，
+     * 浏览器会把定时器节流到一分钟甚至更久，ping 跟不上，
+     * 服务就以为页面关了 → 15 秒后自动退出 → 控制台直接「消失」。
+     *
+     * 现在改成 5 分钟：
+     *   · 正常关页面靠 sendBeacon 的 bye，立刻生效（不等这个超时）
+     *   · 后台节流期间 ping 一分钟一次也够用，不会被误判成关闭
+     *   · 浏览器崩溃这种「没有 bye 也没有 ping」的情况，5 分钟后照样兜住
+     */
+    this.pageTtlMs = 5 * 60 * 1000;
   }
 
   /** 「关网页即停服务」现在生效吗（开关 + 未被 keep-alive 压制）。 */
@@ -76,6 +88,7 @@ export class WebChannel {
   /** 记录一次页面心跳。 */
   touchPage(pageId) {
     const id = String(pageId || '').slice(0, 64) || 'anonymous';
+    const first = !this.consolePages.has(id);
     this.consolePages.set(id, Date.now());
     this.sawConsolePage = true;
     if (this.stopTimer) {
@@ -83,19 +96,31 @@ export class WebChannel {
       this.stopTimer = null;
       this.log.info?.('[web] 控制台又连上了，取消自动停止');
     }
+    if (first) this.log.info?.(`[web] 控制台页面连上（共 ${this.consolePages.size} 个）`);
   }
 
-  /** 页面主动说拜拜（关闭/刷新时）。 */
+  /**
+   * 页面主动说拜拜（关闭标签页/刷新时触发）。
+   *
+   * 这是「关网页即停服务」的主路径 —— 立刻把页面摘掉，
+   * 不等 5 分钟的兜底超时，否则关个网页要等五分钟才停，体验很怪。
+   */
   pageClosed(pageId) {
     const id = String(pageId || '').slice(0, 64) || 'anonymous';
-    this.consolePages.delete(id);
+    if (this.consolePages.delete(id)) {
+      this.log.info?.(`[web] 控制台页面关闭（剩 ${this.consolePages.size} 个）`);
+    }
   }
 
   /**
    * 定期检查：开关开着 + 页面都关了 → 停服务。
    *
-   * 为什么要等一会：刷新页面会先关再开，立刻停会把自己弄没。
-   * 15 秒足够覆盖刷新，也不会让人等太久。
+   * 触发来源有两个：
+   *   · 页面主动 bye（关标签页）→ livePages 立刻变 0，马上开始倒计时
+   *   · ping 超时（浏览器崩溃/休眠）→ 等 pageTtlMs 之后才算「关」
+   *
+   * 倒计时期间只要再来一次 ping 就取消 —— 刷新页面会先 bye 再连上，
+   * 15 秒足够它连回来，不会把自己刷没。
    */
   startPresenceWatch() {
     if (this.presenceTimer) return;
