@@ -3964,6 +3964,53 @@ def main():
     threading.Thread(target=sticker_index_worker, daemon=True).start()
     log("已启动。鲸鲸地址：", bot_url)
 
+    def self_check():
+        """启动自检：告诉服务「我从哪个目录启动的、是什么版本」。
+
+        为什么需要：
+            桥接把素材存到 **自己所在目录** 的 data/ 下，
+            而控制台读的是 **服务所在目录** 的 data/。
+            两边不是同一份安装时，会出现「明明收藏了，控制台里看不到」——
+            而且完全没有报错，非常难查。
+
+            实测踩过：服务跑在 A 目录，桥接在桌面另一个旧拷贝 B 目录，
+            桥接是旧代码、素材库是空的，用户怎么测都不对。
+
+        所以这里把目录和版本报给服务，服务对不上就在控制台报警。
+        """
+        try:
+            import json as _json
+
+            payload = {
+                "root": os.path.dirname(ROOT),
+                "dataDir": os.path.abspath(os.path.join(ROOT, "..", "data")),
+                "bridgeFile": os.path.abspath(__file__),
+                "hasGif": True,
+                "pid": os.getpid(),
+            }
+
+            base = bot_base().rstrip("/")
+            r = requests.post(base + "/api/bridge/hello", json=payload, timeout=8)
+            j = r.json() if r.ok else {}
+
+            if j.get("dataDirMismatch"):
+                log("")
+                log("=" * 56)
+                log("⚠ 目录不一致！")
+                log("  桥接数据目录： %s" % payload["dataDir"])
+                log("  服务数据目录： %s" % j.get("serverDataDir"))
+                log("  两边不是同一份安装 —— 素材会存到桥接那边，")
+                log("  控制台却读服务那边，于是「收藏了却看不到」。")
+                log("  解决：从服务所在目录启动桥接。")
+                log("=" * 56)
+                log("")
+            else:
+                log("启动自检：目录一致（%s）" % payload["dataDir"])
+        except Exception as e:                      # noqa: BLE001
+            log("启动自检跳过（服务未就绪）：%r" % (e,))
+
+    threading.Thread(target=self_check, daemon=True).start()
+
     try:
         while True:
             time.sleep(1)

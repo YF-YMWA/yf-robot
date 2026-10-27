@@ -3357,6 +3357,30 @@ print('%016x' % bits)
    *   2. 桥接日志的最后活动时间
    *   3. 日志里的关键行（UIA 是否可用、当前账号）
    */
+  /**
+   * 桥接目录信息：启动目录、数据目录、是不是和服务同一份安装。
+   *
+   * 「服务在 A，桥接在 B」这种错配没有任何报错，表现就是
+   * 「明明收藏了，控制台里看不到」。这里把结论暴露给控制台，一眼能看到。
+   */
+  #bridgeDirInfo() {
+    const info = this.engine?.bridgeInfo || null;
+    if (!info) return {};
+
+    return {
+      bridgeDir: {
+        root: info.root || '',
+        dataDir: info.dataDir || '',
+        bridgeFile: info.bridgeFile || '',
+        hasGif: Boolean(info.hasGif),
+        pid: info.pid || 0,
+        mismatch: Boolean(info.dataDirMismatch),
+        serverDataDir: info.serverDataDir || '',
+        reportedAt: info.at || 0,
+      },
+    };
+  }
+
   async #bridgeStatus() {
     // ===== 优先用心跳判断 =====
     // 为什么不用端口探测：桥接的单实例锁是 listen(1) 且从不 accept()，
@@ -3407,6 +3431,7 @@ print('%016x' % bits)
         lastActivity,
         heartbeatAgo: Math.round((now - hb.at) / 1000),
         stats: { recentMessages },
+        ...this.#bridgeDirInfo(),
       };
     }
 
@@ -3442,6 +3467,7 @@ print('%016x' % bits)
         note: hb
           ? `心跳停了 ${Math.round((now - hb.at) / 1000)} 秒，但日志 ${logAgeSec} 秒前还在写，判定在线`
           : `没收到心跳，但日志 ${logAgeSec} 秒前还在写，判定在线（心跳线程可能没起来）`,
+        ...this.#bridgeDirInfo(),
       };
     }
 
@@ -3456,6 +3482,7 @@ print('%016x' % bits)
         ? `桥接心跳已停止（最后 ${Math.round((now - hb.at) / 1000)} 秒前），日志也 ${logAgeSec ?? '?'} 秒没动了`
         : '没收到过桥接心跳，日志也没有动静（桥接可能没启动）',
       hint: '双击「启动微信桥接.bat」并保持窗口开着',
+      ...this.#bridgeDirInfo(),
     };
   }
 

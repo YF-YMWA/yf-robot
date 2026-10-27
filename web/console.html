@@ -4789,6 +4789,39 @@ async function loadBridge() {
           </div>
         </div>`;
     }
+
+    /**
+     * 目录错配警告。
+     *
+     * 桥接把素材存到自己所在目录的 data/，控制台读服务这边的 data/。
+     * 两边不是同一份安装时，会出现「收藏了但看不到」，而且没有任何报错。
+     * 这个警告就是为了让这种情况一眼可见，而不是让人猜半天。
+     */
+    const bd = b.bridgeDir;
+    if (bd && bd.mismatch) {
+      $('bridgeGrid').innerHTML += `
+        <div class="stat" style="grid-column:1/-1;border:1px solid var(--warn)">
+          <div class="k" style="color:var(--warn)">⚠ 桥接和服务不是同一份安装</div>
+          <div class="v" style="font-size:12px;line-height:1.7">
+            桥接从：<code>${bd.root || '?'}</code><br>
+            服务在：<code>${(bd.serverDataDir || '').replace(/[\\/]data$/, '') || '?'}</code><br>
+            <span style="color:var(--warn)">
+              这样素材会存进桥接那个目录，而控制台读的是服务这边 ——
+              所以「明明收藏了，素材库里却看不到」。<br>
+              解决：关掉现在的桥接窗口，改从这里启动：<code>${(bd.serverDataDir || '').replace(/[\\/]data$/, '')}\\bridge_wg\\启动桥接.bat</code>
+            </span>
+          </div>
+        </div>`;
+    } else if (bd && bd.dataDir) {
+      $('bridgeGrid').innerHTML += `
+        <div class="stat" style="grid-column:1/-1">
+          <div class="k">桥接目录</div>
+          <div class="v" style="font-size:12px;line-height:1.6">
+            <code>${bd.root}</code>
+            ${bd.hasGif ? '<span class="chip on" style="margin-left:6px">支持动图</span>' : '<span class="chip off" style="margin-left:6px">旧版本</span>'}
+          </div>
+        </div>`;
+    }
   } catch (e) {
     toast('桥接检测失败: ' + e.message, 'err');
   }

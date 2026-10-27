@@ -221,6 +221,57 @@ export class WebChannel {
         return json(res, 200, { ok: true, heartbeat: true });
       }
 
+      /**
+       * 启动自检：桥接报告「我从哪个目录启动的」。
+       *
+       * 桥接把素材存到自己所在目录的 data/ 下，控制台读的是服务这边的 data/。
+       * 两边不是同一份安装时，会出现「收藏了但控制台看不到」，且毫无报错。
+       * 这里对比一下，不一致就让桥接在日志里大声警告，控制台也能显示。
+       */
+      if (req.method === 'POST' && url.pathname === '/api/bridge/hello') {
+        const body = await readJson(req).catch(() => ({}));
+
+        const norm = (p) => {
+          try {
+            return path.resolve(String(p || '')).replace(/[\\/]+$/, '').toLowerCase();
+          } catch {
+            return '';
+          }
+        };
+
+        const serverRoot = path.join(__dirname, '..');
+        const serverDataDir = path.join(serverRoot, 'data');
+        const bridgeDataDir = String(body.dataDir || '');
+        const mismatch = Boolean(bridgeDataDir) && norm(bridgeDataDir) !== norm(serverDataDir);
+
+        this.bridgeInfo = {
+          at: Date.now(),
+          root: String(body.root || ''),
+          dataDir: bridgeDataDir,
+          bridgeFile: String(body.bridgeFile || ''),
+          hasGif: Boolean(body.hasGif),
+          pid: Number(body.pid) || 0,
+          dataDirMismatch: mismatch,
+          serverDataDir,
+        };
+        // 也挂到 engine 上，admin 接口能读到（和 bridgeHeartbeat 同一套做法）
+        this.engine.bridgeInfo = this.bridgeInfo;
+
+        if (mismatch) {
+          this.log.warn?.(
+            `[bridge] ⚠ 桥接数据目录与服务不一致：桥接=${bridgeDataDir}，服务=${serverDataDir}。` +
+              '两边不是同一份安装，素材会存到桥接那边而控制台读这边。',
+          );
+        }
+
+        return json(res, 200, {
+          ok: true,
+          dataDirMismatch: mismatch,
+          serverDataDir,
+          serverRoot,
+        });
+      }
+
       // 看图：桥接收到图片/表情包后调这个识别
       if (req.method === 'POST' && url.pathname === '/api/vision') {
         return await this.#visionApi(req, res);
