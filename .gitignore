@@ -1,0 +1,85 @@
+# ===== 本机数据：绝对不能提交 =====
+# 里面有聊天记录、收到的图片语音、Key、会话存档
+data/
+credentials/
+agent-workspace/
+.dsh-home/
+.tmp/
+
+# 微信数据库解密密钥（wechatauto 生成的，20 个 64 位十六进制密钥）
+# 泄露了等于把整个微信聊天记录交出去
+wechatauto_db/
+
+# 配置：含 API Key。用 config.json* 一次覆盖所有变体
+# （config.json.bak / config.json.2026-xx.bak / config.json.before-heal.bak）
+config.json*
+!config.example.json
+
+# 开发时生成的一次性测试文件
+remember.txt
+probe.txt
+*.pid
+app.lock
+
+# ===== 运行时：体积太大，用 npm run setup 或按文档装 =====
+# Node 90MB + Python 164MB，仓库里不该放二进制
+runtime/
+
+# ===== 打包产物 =====
+dist/
+*.zip
+
+# ===== 依赖 / 缓存 =====
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# ===== 日志 / 临时 =====
+*.log
+*.tmp
+/app.err.log
+/app.out.log
+/bridge.log
+/bridge.err.log
+/pybridge.log
+/pybridge.err.log
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 开发期调试脚本（不是产品功能） =====
+tools/test-*.mjs
+tools/check-*.mjs
+tools/compare-*.mjs
+tools/make-*.mjs
+tools/scan-*.mjs
+tools/dual-*.mjs
+tools/bisect-*.mjs
+tools/find-*.mjs
+tools/perf_*.mjs
+tools/live_*.mjs
+tools/full_*.mjs
+tools/import_*.mjs
+tools/group_*.mjs
+tools/diag-*.py
+bridge_wg/test_*.py
+bridge_wg/check_*.py
+bridge_wg/diag_*.py
+bridge_wg/verify_*.py
+bridge_wg/diag_*.mjs
+
+# ===== 本机专属：微信个人数据 =====
+bridge_wg/data/
+
+# 桥接配置：真实文件不提交，模板要提交
+!bridge_wg/config.example.json
+
+# 本地泄露扫描脚本（读本机配置，不适合提交）
+tools/scan-leak*.py

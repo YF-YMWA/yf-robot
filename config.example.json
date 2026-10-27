@@ -1,0 +1,142 @@
+{
+  "_说明": "只写想改的字段，未写的自动用 core/config.mjs 里的默认值。环境变量优先级最高。",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8899,
+    "autoPort": true
+  },
+  "llm": {
+    "_说明": "OpenAI 兼容接口。DeepSeek 官方、智谱、通义、Ollama 都适用",
+    "baseUrl": "https://api.deepseek.com",
+    "apiKey": "",
+    "model": "deepseek-chat",
+    "temperature": 1,
+    "maxTokens": 800,
+    "timeoutMs": 60000,
+    "fallbacks": []
+  },
+  "vision": {
+    "_说明": "看图能力。需要一个支持图像输入的模型（如 glm-4v / qwen-vl / gpt-4o）。填了才启用",
+    "enabled": true,
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "apiKey": "",
+    "model": "glm-4v-flash",
+    "timeoutMs": 45000,
+    "maxEdge": 1568,
+    "maxTokens": 512,
+    "segments": 3,
+    "ffmpeg": "",
+    "provider": "zhipu"
+  },
+  "voice": {
+    "_说明": "语音转文字。默认阿里云百炼 qwen3-asr-flash（有免费额度）。mode=chat 走 OpenAI 兼容接口，mode=transcriptions 走 whisper 那类",
+    "enabled": false,
+    "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "apiKey": "",
+    "model": "qwen3-asr-flash",
+    "mode": "chat",
+    "language": "",
+    "enableItn": true,
+    "timeoutMs": 60000,
+    "maxSeconds": 120,
+    "ffmpeg": ""
+  },
+  "search": {
+    "_说明": "联网搜索。provider 可选 bocha（国内）/ serper / tavily / custom",
+    "enabled": true,
+    "provider": "bocha",
+    "baseUrl": "",
+    "apiKey": "",
+    "maxResults": 5,
+    "timeoutMs": 15000,
+    "autoDetect": true,
+    "fieldMap": null
+  },
+  "share": {
+    "_说明": "定时分享 B 站视频。只在 ilink 通道启用时有效",
+    "enabled": false,
+    "intervalHours": 2,
+    "count": 20,
+    "keywords": [
+      "鲸鱼",
+      "海洋",
+      "AI"
+    ],
+    "recentIds": []
+  },
+  "group": {
+    "_说明": "群聊策略。数据来源需要你自己的桥接",
+    "requireAt": true,
+    "freeChat": false,
+    "freeChatChance": 0.06,
+    "cooldownSec": 0,
+    "masterAlwaysReply": true,
+    "engagedMinutes": 8,
+    "maxRepliesPerHour": 1000,
+    "muteDefaultMinutes": 30,
+    "aliases": [
+      "鲸鲸"
+    ],
+    "ownerIds": [],
+    "historyTurns": 10
+  },
+  "session": {
+    "_说明": "会话记忆。persist=true 时会落盘到 data/sessions，重启后接着聊",
+    "persist": true,
+    "historyTurns": 20,
+    "idleMinutes": 120,
+    "compressAfter": 40,
+    "maxQueue": 5
+  },
+  "reply": {
+    "maxChars": 280,
+    "maxBubbles": 2,
+    "bubbleDelayMs": 400,
+    "stripMarkdown": true,
+    "emoji": {
+      "_说明": "表情装饰。只有检测到情绪时才加，平淡回复不加",
+      "enabled": true,
+      "chance": 0.7,
+      "kaomoji": true
+    }
+  },
+  "channels": {
+    "web": {
+      "enabled": true
+    },
+    "ilink": {
+      "_说明": "微信官方单聊通道。需先扫码登录生成凭据",
+      "enabled": true,
+      "credFile": "credentials/ilink.json"
+    },
+    "wechat-uia": {
+      "_说明": "微信群聊通道。需要你自己的桥接实现，详见 channels/wechat-uia.mjs 顶部说明",
+      "enabled": false,
+      "bridgeUrl": "",
+      "ownerIds": []
+    },
+    "wechat-group": {
+      "_说明": "微信群聊。需要桥接程序推送消息，接口见 README",
+      "enabled": true,
+      "listenHost": "127.0.0.1",
+      "listenPort": 8898,
+      "token": ""
+    }
+  },
+  "log": {
+    "level": "info",
+    "file": "data/app.log"
+  },
+  "card": "jingjing-wg",
+  "tools": {
+    "enabled": true,
+    "sandbox": "agent-workspace",
+    "maxFileSize": 524288,
+    "cmdTimeout": 30000,
+    "dsh": {
+      "enabled": true,
+      "cwd": "",
+      "timeoutMs": 180000
+    }
+  }
+}

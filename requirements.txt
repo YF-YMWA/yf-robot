@@ -1,0 +1,23 @@
+# Python 依赖（只有接微信的桥接需要；只用 Node 跑网页聊天可以不装）
+#
+# 安装：
+#   python -m pip install -r requirements.txt
+#
+# 如果用发行包里自带的 runtime/python，这些已经装好了。
+
+# 微信 4.x 自动化库：数据库解密读取 + UIA 发送 + 媒体下载
+# 许可证 Apache-2.0，源码 https://github.com/fanyuantaier/wechatauto-replica
+wechatauto-replica>=1.2.7
+
+# 图片处理（截图裁剪、动图转码、感知哈希）
+Pillow>=10.0
+
+# Windows 窗口/剪贴板操作
+pywin32>=306
+comtypes>=1.2
+
+# 图片 AES 解密（wxgf / .dat 容器）
+cryptography>=41.0
+
+# 数值处理（wechatauto 内部用到）
+numpy>=1.24

@@ -1,0 +1,4774 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>鲸鲸 · 控制台</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #e6edf3; --dim: #8b949e; --accent: #3b82f6;
+    --ok: #3fb950; --warn: #d29922; --err: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; display: flex; min-height: 100vh;
+    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text);
+  }
+  aside {
+    width: 200px; flex: 0 0 200px; background: var(--panel);
+    border-right: 1px solid var(--border); padding: 16px 0;
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  }
+  aside .brand {
+    padding: 0 18px 16px; font-size: 15px; font-weight: 600;
+    border-bottom: 1px solid var(--border); margin-bottom: 12px;
+  }
+  aside .brand small { display: block; font-size: 11px; color: var(--dim); font-weight: normal; margin-top: 2px; }
+  aside nav a {
+    display: block; padding: 9px 18px; color: var(--dim);
+    text-decoration: none; font-size: 13px; border-left: 3px solid transparent; cursor: pointer;
+  }
+  aside nav a:hover { color: var(--text); background: #0d1117; }
+  aside nav a.active { color: var(--text); border-left-color: var(--accent); background: #0d1117; }
+  main { flex: 1; padding: 24px; max-width: 1000px; }
+  .page { display: none; }
+  .page.active { display: block; }
+  h1 { font-size: 18px; margin: 0 0 18px; font-weight: 600; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px; margin-bottom: 16px;
+  }
+  .card h2 {
+    font-size: 14px; margin: 0 0 14px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card h2 .sp { flex: 1; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .stat .k { font-size: 12px; color: var(--dim); margin-bottom: 4px; }
+  .stat .v { font-size: 15px; font-weight: 600; }
+  .stat .v.ok { color: var(--ok); }
+  .stat .v.off { color: var(--dim); }
+  .stat .v.warn { color: var(--warn); }
+  .row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid #21262d; }
+  .row:last-child { border-bottom: none; }
+  .row > label { flex: 0 0 120px; color: var(--dim); font-size: 13px; }
+  .row .ctl { flex: 1; display: flex; gap: 8px; align-items: center; }
+  input, select, textarea {
+    background: #0d1117; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 7px 10px; font: inherit; font-size: 13px; min-width: 0; flex: 1;
+  }
+  textarea { resize: vertical; font-family: ui-monospace, Consolas, monospace; line-height: 1.5; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  button {
+    background: var(--accent); border: none; color: #fff; padding: 7px 16px;
+    border-radius: 6px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap;
+  }
+  button:hover { opacity: .88; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--dim); }
+  button.ghost:hover { color: var(--text); border-color: var(--dim); }
+  button.sm { padding: 4px 10px; font-size: 12px; }
+  .switch {
+    position: relative; width: 42px; height: 24px; background: #30363d;
+    border-radius: 12px; cursor: pointer; transition: background .2s; flex: 0 0 42px;
+  }
+  .switch.on { background: var(--ok); }
+  .switch::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+    background: #fff; border-radius: 50%; transition: transform .2s;
+  }
+  .switch.on::after { transform: translateX(18px); }
+  pre {
+    background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; overflow: auto; max-height: 400px; font-size: 12px; line-height: 1.5;
+    margin: 0; white-space: pre-wrap; word-break: break-all;
+  }
+  #chatLog { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .msg { padding: 8px 12px; border-radius: 8px; max-width: 80%; white-space: pre-wrap; }
+  .msg.user { background: #1f6feb; align-self: flex-end; }
+  .msg.bot { background: #21262d; align-self: flex-start; }
+  .chip { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #21262d; color: var(--dim); }
+  .chip.on { background: rgba(63,185,80,.15); color: var(--ok); }
+  .chip.off { background: rgba(139,148,158,.15); }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 20px; font-size: 13px; opacity: 0; transition: opacity .3s;
+    pointer-events: none; z-index: 100;
+  }
+  .toast.show { opacity: 1; }
+  .toast.ok { border-color: var(--ok); }
+  .toast.err { border-color: var(--err); }
+  .hint { font-size: 12px; color: var(--dim); }
+
+  /* 能力测试 */
+  .test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .test-item {
+    background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .test-item .th {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 13px; font-weight: 600;
+  }
+  .test-item .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #484f58; flex: 0 0 8px;
+  }
+  .test-item.ok .dot { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .test-item.fail .dot { background: var(--err); box-shadow: 0 0 6px var(--err); }
+  .test-item.loading .dot { background: var(--warn); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .test-item .tb { font-size: 12px; color: var(--dim); min-height: 32px; word-break: break-all; }
+  .test-item.ok .tb { color: var(--ok); }
+  .test-item.fail .tb { color: var(--err); }
+  /* 未启用（比如没填语音 Key）：灰色，不算失败 */
+  .test-item.skip .dot { background: var(--dim); }
+  .test-item.skip .tb { color: var(--dim); }
+  .test-item button { align-self: flex-start; }
+
+  /* Key 输入行 */
+  .feature { border-bottom: 1px solid #21262d; padding-bottom: 8px; margin-bottom: 8px; }
+  .feature:last-of-type { border-bottom: none; }
+  .keyrow {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 0 2px 132px;
+  }
+  .keyrow label { font-size: 12px; color: var(--dim); flex: 0 0 34px; }
+  .keyrow input { max-width: 340px; font-size: 12px; padding: 5px 9px; }
+
+  /* Key 状态提示 */
+  .keystate { padding: 2px 0 6px 132px; }
+  .keystate .hint { display: inline-flex; align-items: center; gap: 6px; }
+  .keystate .mark { width: 6px; height: 6px; border-radius: 50%; background: #484f58; }
+  .keystate.set .mark { background: var(--ok); }
+  .keystate.set .hint { color: var(--ok); }
+
+  /* 服务商帮助 */
+  .keyhelp { padding: 0 0 6px 132px; font-size: 11px; color: var(--dim); }
+  .keyhelp a { color: var(--accent); text-decoration: none; }
+  .keyhelp a:hover { text-decoration: underline; }
+
+  /* 会话选择列表 */
+  .target-list {
+    display: flex; flex-wrap: wrap; gap: 8px; min-height: 32px;
+    padding: 8px; background: #0d1117; border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .target-item {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 14px; font-size: 12px;
+    background: #21262d; color: var(--dim); cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .target-item:hover { border-color: var(--dim); }
+  .target-item.on { background: rgba(59,130,246,.18); color: #79c0ff; border-color: rgba(59,130,246,.4); }
+  .target-item .x { opacity: .6; }
+  .target-item .x:hover { opacity: 1; color: var(--err); }
+
+  .warn-hint { font-size: 11px; color: var(--warn); }
+
+  /* 页面构建时间：方便判断是不是旧缓存 */
+  .pagebuild {
+    position: absolute; bottom: 10px; left: 16px; right: 16px;
+    font-size: 10px; color: var(--dim); line-height: 1.5;
+    border-top: 1px solid var(--border); padding-top: 8px;
+  }
+
+  /* 单选行（收藏范围） */
+  .radio-line {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--text); cursor: pointer; padding: 3px 0;
+  }
+  .radio-line input { accent-color: var(--accent); cursor: pointer; }
+
+  /* 抓取预览 */
+  .preview-box {
+    max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; font-size: 12px; line-height: 1.7; color: var(--text2);
+    font-family: inherit; margin: 0;
+  }
+
+  /* 记忆条目 */
+  .mem-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 9px 0; border-bottom: 1px solid var(--border);
+  }
+  .mem-item:last-child { border-bottom: none; }
+  .mem-k { font-size: 12px; color: var(--accent); margin-bottom: 3px; }
+  .mem-v { font-size: 13px; color: var(--text); line-height: 1.6; word-break: break-word; }
+  .mem-t { font-size: 11px; color: var(--dim); margin-top: 4px; }
+  .mem-x {
+    cursor: pointer; color: var(--dim); font-size: 15px; line-height: 1;
+    padding: 2px 6px; border-radius: 4px; flex-shrink: 0;
+  }
+  .mem-x:hover { color: var(--err); background: rgba(248,81,73,.12); }
+
+  /* 安全等级提示框 */
+  .secbox {
+    background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; margin: 10px 0;
+  }
+  .secbox.high { border-color: rgba(63,185,80,.4); background: rgba(63,185,80,.06); }
+  .secbox.medium { border-color: rgba(210,153,34,.4); background: rgba(210,153,34,.06); }
+  .secbox.low { border-color: rgba(248,81,73,.4); background: rgba(248,81,73,.06); }
+  .sechint { font-size: 12px; line-height: 1.7; }
+  .secbox.high .sechint { color: var(--ok); }
+  .secbox.medium .sechint { color: var(--warn); }
+  .secbox.low .sechint { color: var(--err); }
+
+  /* 词库条目 */
+  .word-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .word-tag {
+    font-size: 12px; padding: 3px 10px; border-radius: 12px;
+    background: #21262d; border: 1px solid var(--border);
+  }
+  .word-tag.add {
+    background: rgba(63,185,80,.12); border-color: rgba(63,185,80,.35);
+    color: var(--ok); cursor: pointer;
+  }
+  .word-tag.add:hover { background: rgba(63,185,80,.22); }
+
+  /* 表情包网格 */
+  .sticker-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 10px;
+  }
+  .sticker-cell {
+    position: relative; background: #0d1117; border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px; text-align: center;
+  }
+  .sticker-cell img {
+    width: 100%; height: 80px; object-fit: contain; border-radius: 4px;
+    background: #161b22;
+  }
+  .sticker-cell .nm { font-size: 10px; color: var(--dim); margin-top: 4px; word-break: break-all; }
+  .sticker-cell .del {
+    position: absolute; top: 2px; right: 4px; font-size: 14px; color: var(--dim);
+    cursor: pointer; line-height: 1; padding: 2px 5px; border-radius: 4px;
+  }
+  .sticker-cell .del:hover { color: var(--err); background: rgba(248,81,73,.12); }
+  /* 素材类型标签：图片 / 表情包 */
+  .sticker-cell .kindtag {
+    position: absolute; left: 4px; bottom: 22px;
+    font-size: 9px; padding: 1px 5px; border-radius: 4px;
+    background: rgba(0,0,0,.62); color: #fff; pointer-events: none;
+  }
+
+  /* 表情包描述索引 */
+  .si-row {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .si-row:last-child { border-bottom: none; }
+  .si-thumb {
+    width: 64px; height: 64px; object-fit: cover;
+    border-radius: 6px; background: var(--bg2); flex-shrink: 0;
+  }
+  .si-main { flex: 1; min-width: 0; }
+  .si-name { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 12px; }
+  .si-desc, .si-tags {
+    width: 100%; margin-bottom: 5px; font-size: 12px;
+    padding: 5px 8px;
+  }
+  .si-tags { color: var(--dim); }
+  .item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer; margin-bottom: 8px;
+  }
+  .item:hover { border-color: var(--dim); }
+  .item.active { border-color: var(--accent); }
+  .item .nm { font-weight: 600; }
+  .item .meta { font-size: 12px; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<aside>
+  <div class="brand">鲸鲸 · 控制台<small id="brandSub">加载中…</small></div>
+  <nav>
+    <a data-page="overview" class="active">总览</a>
+    <a data-page="chat">对话调试</a>
+    <a data-page="model">模型与功能</a>
+    <a data-page="persona">角色卡</a>
+    <a data-page="owner">主人设置</a>
+    <a data-page="memory">记忆</a>
+    <a data-page="words">词库</a>
+    <a data-page="active">主动功能</a>
+    <a data-page="stickers">素材库</a>
+    <a data-page="learn">联网学习</a>
+    <a data-page="bridge">微信桥接</a>
+    <a data-page="logs">日志</a>
+  </nav>
+  <div class="pagebuild" id="pageBuild"></div>
+</aside>
+
+<main>
+  <div class="page active" id="page-overview">
+    <h1>总览</h1>
+    <div class="card">
+      <h2>运行状态</h2>
+      <div class="grid" id="statusGrid"><div class="stat"><div class="k">加载中</div><div class="v">—</div></div></div>
+    </div>
+    <div class="card">
+      <h2>快捷操作</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button onclick="window.open('/','_blank')">打开聊天页</button>
+        <button class="ghost" onclick="testModel()">测试模型</button>
+        <button class="ghost" onclick="loadAll()">刷新状态</button>
+        <button class="ghost" onclick="restartService()">重启服务</button>
+        <button class="ghost" onclick="stopService()" style="color:var(--err)">停止服务</button>
+      </div>
+      <div class="hint" style="margin-top:10px">
+        关掉网页<strong>不会</strong>停掉服务（它是后台进程）。要停请点「停止服务」。<br>
+        点「重启服务」会关掉当前实例并重新启动一个，页面会自动刷新。
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-chat">
+    <h1>对话调试</h1>
+    <div class="card">
+      <h2>实时对话<span class="sp"></span><button class="ghost sm" onclick="clearChat()">清空</button></h2>
+      <div id="chatLog"></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <input id="chatInput" placeholder="输入消息，回车发送…" onkeydown="if(event.key==='Enter')sendChat()">
+        <button onclick="sendChat()" id="chatBtn">发送</button>
+      </div>
+      <div class="hint" style="margin-top:8px">调试会话，和微信会话独立。</div>
+    </div>
+  </div>
+
+  <div class="page" id="page-model">
+    <h1>模型与功能</h1>
+
+    <!-- 能力测试面板 -->
+    <div class="card">
+      <h2>能力测试<span class="sp"></span>
+        <button class="sm" onclick="testAll()" id="btnTestAll">全部测试</button>
+      </h2>
+      <div class="test-grid" id="testGrid">
+        <div class="test-item" id="test-llm">
+          <div class="th"><span class="dot"></span>对话模型</div>
+          <div class="tb" id="res-llm">未测试</div>
+          <button class="ghost sm" onclick="testOne('llm')">测试</button>
+        </div>
+        <div class="test-item" id="test-vision">
+          <div class="th"><span class="dot"></span>看图识图</div>
+          <div class="tb" id="res-vision">未测试</div>
+          <button class="ghost sm" onclick="testOne('vision')">测试</button>
+        </div>
+        <div class="test-item" id="test-search">
+          <div class="th"><span class="dot"></span>联网搜索</div>
+          <div class="tb" id="res-search">未测试</div>
+          <button class="ghost sm" onclick="testOne('search')">测试</button>
+        </div>
+        <div class="test-item" id="test-voice">
+          <div class="th"><span class="dot"></span>语音识别</div>
+          <div class="tb" id="res-voice">未测试</div>
+          <button class="ghost sm" onclick="testOne('voice')">测试</button>
+        </div>
+        <div class="test-item" id="test-imagegen">
+          <div class="th"><span class="dot"></span>画图</div>
+          <div class="tb" id="res-imagegen">未测试</div>
+          <button class="ghost sm" onclick="testOne('imagegen')">测试</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 画图能力 -->
+    <div class="card">
+      <h2>画图能力 <span class="chip" id="imagegenChip"></span>
+        <span class="sp"></span>
+        <button class="ghost sm" onclick="testImageGen()" id="btnTestDraw">试画一张</button>
+      </h2>
+      <div class="hint" style="margin-bottom:12px">
+        开启后她能用 <code>draw_image</code> 自己画图，画完直接发到微信。<br>
+        智谱 <b>cogview-3-flash 免费</b>，用同一个 Key 即可（Key 为空时自动复用看图模型的 Key）。
+      </div>
+
+      <div class="row"><label>启用</label><div class="ctl">
+        <div class="switch" id="swImagegen" onclick="toggleSw('swImagegen')"></div>
+        <span class="hint">关闭后她不会画图</span>
+      </div></div>
+
+      <div class="row"><label>接口地址</label><div class="ctl">
+        <input type="text" id="igBaseUrl" placeholder="https://open.bigmodel.cn/api/paas/v4">
+      </div></div>
+
+      <div class="row"><label>模型</label><div class="ctl">
+        <input type="text" id="igModel" placeholder="cogview-3-flash" style="max-width:220px">
+        <span class="hint">cogview-3-flash 免费 / cogview-3 / cogview-4 更精细</span>
+      </div></div>
+
+      <div class="row"><label>API Key</label><div class="ctl">
+        <input type="password" id="igApiKey" placeholder="留空则用看图模型的 Key">
+        <span class="hint" id="igKeyHint"></span>
+      </div></div>
+
+      <div class="row"><label>尺寸</label><div class="ctl">
+        <select id="igSize" style="max-width:160px">
+          <option value="1024x1024">1024×1024（方形）</option>
+          <option value="768x1344">768×1344（竖图）</option>
+          <option value="1344x768">1344×768（横图）</option>
+        </select>
+      </div></div>
+
+      <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+        <button onclick="saveImagegen()">保存</button>
+        <span class="hint" id="igSaveHint"></span>
+      </div>
+
+      <div class="hint" id="igTestResult" style="margin-top:12px"></div>
+    </div>
+
+    <!-- 主动画图 -->
+    <div class="card">
+      <h2>主动画图 <span class="chip" id="proactiveDrawChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        开启后，她偶尔会「突然想画点什么」发给你，不用你先说。<br>
+        她自己也判断场合——你在说正经事或难过时不会画。
+      </div>
+
+      <div class="row"><label>启用</label><div class="ctl">
+        <div class="switch" id="swProactiveDraw" onclick="toggleSw('swProactiveDraw')"></div>
+        <span class="hint">关闭后只有你让她画她才画</span>
+      </div></div>
+
+      <div class="row"><label>触发概率</label><div class="ctl">
+        <input type="number" id="pdChance" min="0" max="100" step="1" style="max-width:80px">
+        <span class="hint">% —— 每条消息有这么大机会想画</span>
+      </div></div>
+
+      <div class="row"><label>最小间隔</label><div class="ctl">
+        <input type="number" id="pdInterval" min="5" max="1440" step="5" style="max-width:90px">
+        <span class="hint">分钟 —— 两次主动画图至少隔这么久</span>
+      </div></div>
+
+      <div class="row"><label>每天上限</label><div class="ctl">
+        <input type="number" id="pdMaxPerDay" min="1" max="20" step="1" style="max-width:80px">
+        <span class="hint">张 —— 防止刷屏和烧钱</span>
+      </div></div>
+
+      <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+        <button onclick="saveProactiveDraw()">保存</button>
+        <span class="hint" id="pdSaveHint"></span>
+      </div>
+
+      <div class="hint" style="margin-top:10px;line-height:1.9">
+        举例：概率 5%、间隔 60 分钟、每天 2 张<br>
+        → 平均每 20 条消息可能画一次，一小时内最多一次，一天最多两张。
+      </div>
+    </div>
+
+    <!-- 对话模型 -->
+    <div class="card">
+      <h2>对话模型 <span class="chip" id="modelChip"></span></h2>
+
+      <div class="row"><label>服务商</label><div class="ctl">
+        <select id="llmPreset" onchange="applyPreset('llm')" style="max-width:220px">
+          <option value="">— 选择预设 —</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="zhipu">智谱 GLM</option>
+          <option value="moonshot">Kimi</option>
+          <option value="openai">OpenAI</option>
+          <option value="custom">自定义</option>
+        </select>
+        <span class="hint">选预设会自动填地址和模型名</span>
+      </div></div>
+
+      <div class="row"><label>接口地址</label><div class="ctl">
+        <input type="text" id="llmBaseUrl" placeholder="https://api.deepseek.com">
+      </div></div>
+      <div class="row"><label>模型名</label><div class="ctl">
+        <input type="text" id="llmModel" placeholder="deepseek-chat">
+      </div></div>
+
+      <div class="row"><label>API Key</label><div class="ctl">
+        <input type="password" id="llmKey" placeholder="粘贴你的 API Key">
+        <button class="ghost" onclick="testOne('llm')">测试</button>
+        <button class="ghost" onclick="clearKey('llm')" title="删除已保存的 Key">删除Key</button>
+      </div></div>
+      <div class="keystate" id="state-llm">
+        <span class="hint">未配置 Key</span>
+      </div>
+
+      <div class="row"><label>温度</label><div class="ctl">
+        <input type="number" id="llmTemp" min="0" max="2" step="0.1" style="max-width:100px">
+        <span class="hint">越高越随机，0.7~1.0 自然</span>
+      </div></div>
+    </div>
+
+    <!-- 能力开关 + Key -->
+    <div class="card">
+      <h2>能力开关</h2>
+
+      <div class="feature">
+        <div class="row"><label>看图</label><div class="ctl">
+          <div class="switch" id="swVision" onclick="toggleSw('swVision')"></div>
+          <select id="visionPreset" onchange="applyPreset('vision')" style="max-width:160px">
+            <option value="">— 预设 —</option>
+            <option value="zhipu-flash">智谱 GLM-4V-Flash（免费）</option>
+            <option value="zhipu-air">智谱 GLM-4V-Air</option>
+            <option value="deepseek">DeepSeek Vision</option>
+            <option value="custom">自定义</option>
+          </select>
+          <input type="text" id="visionModel" placeholder="模型名" style="max-width:160px">
+          <button class="ghost sm" onclick="testOne('vision')">测试</button>
+        </div></div>
+        <div class="keyrow">
+          <label>Key</label>
+          <input type="password" id="visionKey" placeholder="留空则沿用对话模型的 Key">
+          <button class="ghost sm" onclick="clearKey('vision')" title="删除已保存的 Key">删除Key</button>
+        </div>
+        <div class="keystate" id="state-vision">
+          <span class="hint">未配置（将复用对话模型的 Key）</span>
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="row"><label>联网搜索</label><div class="ctl">
+          <div class="switch" id="swSearch" onclick="toggleSw('swSearch')"></div>
+          <select id="searchProvider" onchange="onProviderChange()" style="max-width:140px">
+            <option value="bocha">博查</option>
+            <option value="serper">Serper</option>
+            <option value="tavily">Tavily</option>
+          </select>
+          <button class="ghost sm" onclick="testOne('search')">测试</button>
+        </div></div>
+        <div class="keyrow">
+          <label>Key</label>
+          <input type="password" id="searchKey" placeholder="粘贴搜索服务商的 Key">
+          <button class="ghost sm" onclick="clearKey('search')" title="删除已保存的 Key">删除Key</button>
+        </div>
+        <div class="keystate" id="state-search">
+          <span class="hint">未配置 Key</span>
+        </div>
+
+        <div class="row" style="padding-left:0"><label>对话时自动联网</label><div class="ctl">
+          <div class="switch" id="swAutoSearch" onclick="toggleSw('swAutoSearch')"></div>
+          <span class="hint">
+            她判断需要新鲜信息（天气、新闻、价格…）时自己搜。<br>
+            关掉后只有你明确让她查才会联网。
+          </span>
+        </div></div>
+
+        <div class="row" style="padding-left:0"><label>每小时最多搜</label><div class="ctl">
+          <input type="number" id="searchMaxPerHour" min="1" max="200" style="max-width:80px">
+          <span class="hint">次 —— 防止聊嗨了把额度烧光</span>
+        </div></div>
+
+        <div class="hint" id="searchStatusBox" style="margin-top:6px"></div>
+
+        <div class="keyhelp" id="searchHelp"></div>
+      </div>
+
+      <div class="feature">
+        <div class="row"><label>语音转文字</label><div class="ctl">
+          <div class="switch" id="swVoice" onclick="toggleSw('swVoice')"></div>
+          <input type="text" id="voiceModel" placeholder="模型名" style="max-width:200px">
+        </div></div>
+        <div class="keyrow">
+          <label>Key</label>
+          <input type="password" id="voiceKey" placeholder="阿里云百炼 Key（sk-xxx）">
+          <button class="ghost sm" onclick="clearKey('voice')" title="删除已保存的 Key">删除Key</button>
+        </div>
+        <div class="keystate" id="state-voice">
+          <span class="hint">未配置 Key</span>
+        </div>
+        <div class="keyhelp">
+          在 <a href="https://bailian.console.aliyun.com" target="_blank" rel="noopener">bailian.console.aliyun.com</a>
+          → API-KEY 里创建（有免费额度）
+        </div>
+      </div>
+
+      <div class="row"><label>表情</label><div class="ctl">
+        <div class="switch" id="swEmoji" onclick="toggleSw('swEmoji')"></div>
+        <span class="hint">检测到情绪时加 emoji</span>
+      </div></div>
+      <div class="row"><label>工具能力</label><div class="ctl">
+        <div class="switch" id="swTools" onclick="toggleSw('swTools')"></div>
+        <span class="hint">读写工作目录、跑白名单命令</span>
+      </div></div>
+      <div class="row"><label>调用 DSH</label><div class="ctl">
+        <div class="switch" id="swDsh" onclick="toggleSw('swDsh')"></div>
+        <span class="hint">复杂任务交给 DSH</span>
+      </div></div>
+    </div>
+
+    <!-- 回复风格 -->
+    <div class="card">
+      <h2>回复风格</h2>
+      <div class="row"><label>单条字数</label><div class="ctl">
+        <input type="number" id="replyMaxChars" min="50" max="2000" style="max-width:120px">
+        <span class="hint">超出会拆成多条</span>
+      </div></div>
+      <div class="row"><label>气泡数</label><div class="ctl"><input type="number" id="replyBubbles" min="1" max="6" style="max-width:120px"></div></div>
+      <div class="row"><label>气泡间隔</label><div class="ctl">
+        <input type="number" id="replyDelay" min="0" max="5000" style="max-width:120px"><span class="hint">毫秒</span>
+      </div></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;gap:10px;align-items:center">
+        <button onclick="saveModel()">保存配置</button>
+        <span class="hint" id="modelSaveHint"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-persona">
+    <h1>角色卡</h1>
+    <div class="card">
+      <h2>角色列表<span class="sp"></span><button class="sm" onclick="newCard()">+ 新建</button></h2>
+      <div id="cardList"></div>
+    </div>
+    <div class="card" id="cardEditor" style="display:none">
+      <h2 id="cardEditorTitle">编辑角色</h2>
+      <div class="row"><label>ID</label><div class="ctl">
+        <input type="text" id="ceId" placeholder="英文标识，如 dafeiyu" style="max-width:220px">
+        <span class="hint">英文、数字、下划线</span>
+      </div></div>
+      <div class="row"><label>角色名</label><div class="ctl"><input type="text" id="ceName" placeholder="大肥鱼"></div></div>
+      <div class="row"><label>怎么称呼你</label><div class="ctl"><input type="text" id="ceSpeaker" placeholder="主人" style="max-width:220px"></div></div>
+      <div class="row" style="align-items:flex-start"><label style="padding-top:8px">身份设定</label>
+        <div class="ctl"><textarea id="ceDesc" rows="4" placeholder="它是谁、住哪、和你什么关系…"></textarea></div></div>
+      <div class="row" style="align-items:flex-start"><label style="padding-top:8px">性格</label>
+        <div class="ctl"><textarea id="cePersonality" rows="3" placeholder="懒、馋、嘴硬心软…"></textarea></div></div>
+      <div class="row" style="align-items:flex-start"><label style="padding-top:8px">行为准则</label>
+        <div class="ctl"><textarea id="ceRules" rows="6" placeholder="每行一条"></textarea></div></div>
+      <div class="row" style="align-items:flex-start"><label style="padding-top:8px">开场白</label>
+        <div class="ctl"><textarea id="ceFirst" rows="2" placeholder="第一次对话说的话"></textarea></div></div>
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button onclick="saveCard()">保存</button>
+        <button class="ghost" onclick="hideCardEditor()">取消</button>
+        <span class="hint" id="cardSaveHint"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-active">
+    <h1>主动功能</h1>
+
+    <!-- 主动搭话 -->
+    <div class="card">
+      <h2>主动搭话 <span class="chip" id="careChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        她会在合适的时间主动找你说话，比如问吃饭没、累不累。
+      </div>
+
+      <div class="row"><label>启用</label><div class="ctl">
+        <div class="switch" id="swCare" onclick="toggleSw('swCare')"></div>
+        <span class="hint">关闭后完全不会主动说话</span>
+      </div></div>
+
+      <div class="row"><label>最小间隔</label><div class="ctl">
+        <input type="number" id="careInterval" min="15" max="1440" style="max-width:110px">
+        <span class="hint">分钟。两次搭话至少隔这么久</span>
+      </div></div>
+
+      <div class="row"><label>每日上限</label><div class="ctl">
+        <input type="number" id="careMaxPerDay" min="1" max="20" style="max-width:110px">
+        <span class="hint">次。一天最多主动找你几次</span>
+      </div></div>
+
+      <div class="row"><label>安静时段</label><div class="ctl">
+        <input type="number" id="careQuietStart" min="0" max="23" style="max-width:80px">
+        <span class="hint">点 到</span>
+        <input type="number" id="careQuietEnd" min="0" max="23" style="max-width:80px">
+        <span class="hint">点，这段时间不打扰</span>
+      </div></div>
+
+      <div class="row"><label>当前状态</label><div class="ctl">
+        <span class="hint" id="careStatus">检测中…</span>
+        <button class="ghost sm" onclick="checkCareNow()">立即检测</button>
+      </div></div>
+
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:8px">搭话对象</label>
+        <div class="ctl" style="flex-direction:column;align-items:stretch;gap:8px">
+          <div class="hint">不选 = 发给所有会话；选了 = 只发这些</div>
+          <div id="careTargets" class="target-list">
+            <span class="hint">加载中…</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="careTargetInput" placeholder="手动输入会话名（如：大肥鱼2号）">
+            <button class="ghost sm" onclick="addTarget('care')">添加</button>
+            <button class="ghost sm" onclick="refreshChats()">刷新列表</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button onclick="saveActive()">保存</button>
+        <span class="hint" id="activeSaveHint"></span>
+      </div>
+    </div>
+
+    <!-- B站分享 -->
+    <div class="card">
+      <h2>内容分享 <span class="chip" id="shareChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        定时从你指定的网站挑个内容分享，会附一句她的看法。
+      </div>
+
+      <div class="row"><label>启用</label><div class="ctl">
+        <div class="switch" id="swShare" onclick="toggleSw('swShare')"></div>
+      </div></div>
+
+      <div class="row"><label>分享间隔</label><div class="ctl">
+        <input type="number" id="shareInterval" min="1" max="24" style="max-width:110px">
+        <span class="hint">小时。多久分享一次</span>
+      </div></div>
+
+      <div class="row"><label>内容来源</label><div class="ctl">
+        <select id="shareSourceType" onchange="onSourceChange()" style="max-width:180px">
+          <option value="bilibili">B站热门</option>
+          <option value="custom">自定义网站</option>
+        </select>
+        <span class="hint">选「自定义」可填自己的安全站点</span>
+      </div></div>
+
+      <div id="shareCustomBox" style="display:none">
+        <div class="row"><label>网站地址</label><div class="ctl">
+          <input type="text" id="shareSourceUrl" placeholder="https://example.com/api/feed">
+          <span class="warn-hint">⚠ 只会访问你填的地址，请确认是可信站点</span>
+        </div></div>
+        <div class="row"><label>分类关键词</label><div class="ctl">
+          <input type="text" id="shareSourceCategories" placeholder="科技, 游戏, 音乐（逗号分隔）">
+        </div></div>
+      </div>
+
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:8px">分享对象</label>
+        <div class="ctl" style="flex-direction:column;align-items:stretch;gap:8px">
+          <div class="hint">不选 = 发给所有会话；选了 = 只发这些</div>
+          <div id="shareTargets" class="target-list">
+            <span class="hint">加载中…</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="shareTargetInput" placeholder="手动输入会话名">
+            <button class="ghost sm" onclick="addTarget('share')">添加</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row"><label>测试</label><div class="ctl">
+        <button class="ghost sm" onclick="testShare()">取一个内容看看</button>
+        <span class="hint" id="shareTestResult"></span>
+      </div></div>
+
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button onclick="saveActive()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-stickers">
+    <h1>素材库</h1>
+
+    <div class="card">
+      <h2>上传素材</h2>
+      <div class="hint" style="margin-bottom:12px">
+        支持 PNG / JPG / GIF / WEBP，单张最大 8MB。GIF 会动，效果最像表情包。
+      </div>
+      <div class="row">
+        <label>类型</label>
+        <div class="ctl">
+          <select id="upKind" style="max-width:160px">
+            <option value="stickers">表情包</option>
+            <option value="images">图片</option>
+          </select>
+          <input type="file" id="upFile" accept="image/*" multiple style="max-width:280px">
+          <button onclick="uploadFiles()" id="btnUpload">上传</button>
+          <span class="hint" id="upResult"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>免费图源下载</h2>
+      <div class="hint" style="margin-bottom:12px">
+        不需要 API Key，直接从公开图源下载。
+      </div>
+      <div class="row">
+        <label>来源</label>
+        <div class="ctl">
+          <select id="freeSource" style="max-width:200px">
+            <option value="cataas">猫咪图（Cataas）</option>
+            <option value="picsum">随机照片（Lorem Picsum）</option>
+            <option value="dicebear">像素头像（DiceBear）</option>
+            <option value="robohash">机器人头像（RoboHash）</option>
+          </select>
+          <input type="number" id="freeCount" min="1" max="10" value="3" style="max-width:80px">
+          <span class="hint">张</span>
+          <button class="ghost" onclick="fetchFree()" id="btnFree">下载</button>
+        </div>
+      </div>
+      <div class="hint" id="freeResult" style="margin-top:6px"></div>
+    </div>
+
+    <div class="card">
+      <h2>她画的图 <span class="chip" id="generatedCount"></span>
+        <span class="sp"></span>
+        <button class="ghost sm" onclick="loadMedia('generated')">刷新</button>
+      </h2>
+      <div class="hint" style="margin-bottom:12px">
+        她用 <code>draw_image</code> 画的图都存在这里，会自动发到微信。<br>
+        删除只影响本地存档，已发出的不影响。
+      </div>
+      <div id="generatedGrid" class="sticker-grid">
+        <div class="hint">加载中…</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>收到的素材 <span class="chip" id="mediaCount"></span>
+        <span class="sp"></span>
+        <select id="mediaFilter" onchange="loadMediaAll()" style="max-width:130px">
+          <option value="all">全部</option>
+          <option value="images">只看图片</option>
+          <option value="stickers">只看表情包</option>
+        </select>
+        <button class="ghost sm" onclick="loadMediaAll()">刷新</button>
+      </h2>
+      <div class="hint" style="margin-bottom:12px">
+        别人发来的图片和表情包都自动存到这里，用同一套授权规则。<br>
+        表情包她会随机补发；<span style="color:var(--warn)">微信不能发动作表情，但能发 GIF —— 视觉效果一样。</span>
+      </div>
+
+      <div id="mediaGrid" class="sticker-grid">
+        <div class="hint">加载中…</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>素材库查重 <span class="chip" id="dedupeChip"></span>
+        <span class="sp"></span>
+        <button class="ghost sm" onclick="checkDedupe()">检查重复</button>
+        <button class="ghost sm" onclick="runDedupe()">清理重复</button>
+      </h2>
+      <div class="hint" style="margin-bottom:10px">
+        同一张图可能被存好几份（截图重复、来回转发都会）。<br>
+        这里按「看起来是否一样」判断，不看文件大小 —— 截图差几十字节也能认出来。<br>
+        <span style="color:var(--dim)">清理时保留正牌表情包优先，同类里留最大的那个。</span>
+      </div>
+      <div id="dedupeResult" class="hint"></div>
+    </div>
+
+    <div class="card">
+      <h2>表情包描述索引 <span class="chip" id="siChip"></span>
+        <span class="sp"></span>
+        <button class="ghost sm" onclick="loadStickerIndex()">刷新</button>
+        <button class="ghost sm" onclick="rebuildStickerIndex()">重建缺失的</button>
+        <button class="ghost sm" onclick="clearStickerIndex()">清空</button>
+      </h2>
+      <div class="hint" style="margin-bottom:12px">
+        她按「语气」挑表情包，靠的就是这里的描述。<br>
+        没描述过的图只能随机发，有描述的才能挑到贴合当前情绪那张。<br>
+        <span style="color:var(--dim)">她自己也会在后台慢慢补（启动后 1 分钟开始，每 10 分钟补一批）。</span>
+      </div>
+
+      <div id="siStats" class="hint" style="margin-bottom:10px"></div>
+      <div id="siGrid"></div>
+    </div>
+
+    <div class="card">
+      <h2>表情包发送</h2>
+      <div class="row">
+        <label>发送概率</label>
+        <div class="ctl">
+          <input type="number" id="stickerChance" min="0" max="100" step="5" style="max-width:90px">
+          <span class="hint">%。每次回复后有这个概率补一个表情包</span>
+          <button class="ghost sm" onclick="saveStickerChance()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-learn">
+    <h1>联网学习</h1>
+
+    <div class="card">
+      <h2>总开关 <span class="chip" id="learnChip"></span></h2>
+      <div class="row">
+        <label>启用</label>
+        <div class="ctl">
+          <div class="switch" id="swLearn" onclick="toggleSw('swLearn')"></div>
+          <span class="hint">关闭后不能联网收集词条和图片</span>
+        </div>
+      </div>
+      <div class="row">
+        <label>单次上限</label>
+        <div class="ctl">
+          <input type="number" id="learnMax" min="1" max="50" style="max-width:90px">
+          <span class="hint">条。一次最多学多少词条</span>
+        </div>
+      </div>
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:8px">搜索关键词</label>
+        <div class="ctl">
+          <textarea id="learnQueries" rows="3" placeholder="每行一个关键词"></textarea>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button onclick="saveLearn()">保存设置</button>
+        <span class="hint" id="learnSaveHint"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>定向网站学习 <span class="chip" id="siteChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        指定几个网站，让她直接从页面正文里学词，比关键词搜索更准。<br>
+        适合：梗百科、网络用语大全、特定圈子黑话页。
+      </div>
+
+      <div id="siteList" class="target-list" style="margin-bottom:10px">
+        <span class="hint">还没添加网站</span>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <input type="text" id="siteUrlInput" placeholder="https://..." style="flex:1;min-width:240px">
+        <input type="text" id="siteNoteInput" placeholder="备注（可选）" style="max-width:140px">
+        <button class="ghost sm" onclick="addSite()">添加</button>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button onclick="learnFromSites()" id="btnLearnSites">学习所有网站</button>
+        <button class="ghost" onclick="previewSite()" id="btnPreviewSite">先预览抓取效果</button>
+        <span class="hint" id="siteLearnResult"></span>
+      </div>
+
+      <div id="sitePreviewBox" style="display:none;margin-top:14px">
+        <h2 style="font-size:13px;margin-bottom:8px">
+          <span id="sitePreviewTitle"></span>
+        </h2>
+        <pre id="sitePreviewText" class="preview-box"></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>学到的词自动进词库 <span class="chip" id="autoMergeChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        开着的话，联网学到的词直接整理进词库，不用每次手动点「合并」。<br>
+        默认进 <code>learned</code> 库（独立于内置库，学歪了直接清空这一库就行）。
+      </div>
+
+      <div class="row"><label>启用</label><div class="ctl">
+        <div class="switch" id="swAutoMerge" onclick="toggleSw('swAutoMerge')"></div>
+        <span class="hint">学完立刻可用</span>
+      </div></div>
+
+      <div class="row"><label>存到</label><div class="ctl">
+        <input type="text" id="autoMergeBank" placeholder="learned" style="max-width:160px">
+        <span class="hint">词库名，不存在会自动创建</span>
+      </div></div>
+
+      <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+        <button onclick="saveAutoMerge()">保存</button>
+        <span class="hint" id="autoMergeHint"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>对话时自动学习 <span class="chip" id="autoLearnChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        开着聊天也能让她自己长本事，不用你手动点。<br>
+        <span style="color:var(--warn)">会自动消耗搜索/模型额度</span>，所以默认关闭，频率也可控。
+      </div>
+
+      <div class="row"><label>启用</label><div class="ctl">
+        <div class="switch" id="swAutoLearn" onclick="toggleSw('swAutoLearn')"></div>
+        <span class="hint">关闭时完全不会自动联网</span>
+      </div></div>
+
+      <div class="row"><label>每多少轮</label><div class="ctl">
+        <input type="number" id="autoEvery" min="1" max="500" style="max-width:90px">
+        <span class="hint">轮对话尝试学一次</span>
+      </div></div>
+
+      <div class="row"><label>最小间隔</label><div class="ctl">
+        <input type="number" id="autoInterval" min="1" max="1440" style="max-width:90px">
+        <span class="hint">分钟，两次至少隔这么久</span>
+      </div></div>
+
+      <div class="row"><label>每天上限</label><div class="ctl">
+        <input type="number" id="autoMaxPerDay" min="1" max="100" style="max-width:90px">
+        <span class="hint">次，到上限当天就不再自动学</span>
+      </div></div>
+
+      <div class="row"><label>学什么</label><div class="ctl">
+        <select id="autoMode" style="max-width:150px">
+          <option value="words">词条</option>
+          <option value="media">图片</option>
+        </select>
+        <span class="hint">单次最多</span>
+        <input type="number" id="autoMaxPerRun" min="1" max="50" style="max-width:80px">
+        <span class="hint">条</span>
+      </div></div>
+
+      <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+        <button onclick="saveAutoLearn()">保存</button>
+        <span class="hint" id="autoSaveHint"></span>
+      </div>
+
+      <div class="hint" id="autoStatusBox" style="margin-top:12px;line-height:1.9"></div>
+    </div>
+
+    <div class="card">
+      <h2>学习网络用语</h2>
+      <div class="hint" style="margin-bottom:12px">
+        从网上搜最新网络用语，让模型提炼成词条。学到的会先进「待审」，确认后才合并进词库。
+      </div>
+      <button onclick="learnWords()" id="btnLearnWords">开始学习</button>
+      <span class="hint" id="learnWordsResult" style="margin-left:12px"></span>
+
+      <div id="pendingBox" style="display:none;margin-top:16px">
+        <h2 style="font-size:13px;margin-bottom:10px">待审词条 <span class="chip" id="pendingCount"></span></h2>
+        <div id="pendingList" class="word-tags"></div>
+        <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
+          <select id="applyBank" style="max-width:180px"></select>
+          <button onclick="applyLearned()">合并进词库</button>
+          <button class="ghost" onclick="discardLearned()">全部丢弃</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>下载图片素材</h2>
+      <div class="hint" style="margin-bottom:12px">
+        按关键词搜索图片并下载收藏。<br>
+        <span style="color:var(--warn)">注意：只下载公开可访问的图片；部分网站有防盗链会失败。</span>
+      </div>
+      <div class="row">
+        <label>类型</label>
+        <div class="ctl">
+          <select id="mediaKind" style="max-width:160px">
+            <option value="stickers">表情包</option>
+            <option value="images">图片</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <label>关键词</label>
+        <div class="ctl">
+          <input type="text" id="mediaQuery" placeholder="搞笑 gif / 猫 表情 / 壁纸">
+        </div>
+      </div>
+      <div class="row">
+        <label>数量</label>
+        <div class="ctl">
+          <input type="number" id="mediaLimit" min="1" max="10" value="5" style="max-width:90px">
+          <span class="hint">张</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
+        <button onclick="learnMedia()" id="btnLearnMedia">下载</button>
+        <span class="hint" id="learnMediaResult"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>定向网页抓图 <span class="chip" id="mediaSiteChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        指定网页，把页面里的图片批量抓下来。<br>
+        适合：表情包合集页、壁纸站、图片专题页。
+      </div>
+
+      <div class="row">
+        <label>存到</label>
+        <div class="ctl">
+          <select id="mediaSiteKind" style="max-width:160px">
+            <option value="stickers">表情包</option>
+            <option value="images">图片</option>
+          </select>
+          <span class="hint">张数</span>
+          <input type="number" id="mediaSiteLimit" min="1" max="20" value="5" style="max-width:80px">
+        </div>
+      </div>
+
+      <div id="mediaSiteList" class="target-list" style="margin:10px 0">
+        <span class="hint">还没添加网站</span>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <input type="text" id="mediaSiteUrlInput" placeholder="https://... 图片合集页" style="flex:1;min-width:240px">
+        <input type="text" id="mediaSiteNoteInput" placeholder="备注（可选）" style="max-width:140px">
+        <button class="ghost sm" onclick="addMediaSite()">添加</button>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button onclick="learnMediaFromSites()" id="btnLearnMediaSites">抓取所有网站</button>
+        <button class="ghost" onclick="previewMediaSite()" id="btnPreviewMediaSite">先看看有几张图</button>
+        <span class="hint" id="mediaSiteResult"></span>
+      </div>
+
+      <div id="mediaSitePreviewBox" style="display:none;margin-top:14px">
+        <h2 style="font-size:13px;margin-bottom:8px"><span id="mediaSitePreviewTitle"></span></h2>
+        <div id="mediaSitePreviewGrid" class="sticker-grid"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>RSS 订阅学习 <span class="chip" id="rssChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        B站、小黑盒、微博、知乎这类站点网页是 JS 渲染的，直接抓只有空壳。<br>
+        用 <a href="https://docs.rsshub.app" target="_blank" rel="noopener">RSSHub</a>
+        把它们转成订阅源，就能拿到结构化内容和图片。
+      </div>
+
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:8px">例子</label>
+        <div class="ctl" style="flex-direction:column;gap:4px">
+          <span class="hint">B站 UP 主动态：<code>https://rsshub.app/bilibili/user/dynamic/2267573</code></span>
+          <span class="hint">B站热门：<code>https://rsshub.app/bilibili/popular/all</code></span>
+          <span class="hint">微博热搜：<code>https://rsshub.app/weibo/search/hot</code></span>
+          <span class="hint">小黑盒资讯：<code>https://rsshub.app/xiaoheihe/news</code></span>
+        </div>
+      </div>
+
+      <div id="rssList" class="target-list" style="margin:10px 0">
+        <span class="hint">还没添加订阅</span>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <input type="text" id="rssUrlInput" placeholder="https://rsshub.app/..." style="flex:1;min-width:240px">
+        <input type="text" id="rssNoteInput" placeholder="备注（可选）" style="max-width:140px">
+        <button class="ghost sm" onclick="addRss()">添加</button>
+      </div>
+
+      <div class="row">
+        <label>学什么</label>
+        <div class="ctl">
+          <select id="rssMode" style="max-width:170px">
+            <option value="words">只学词条</option>
+            <option value="media">只下图片</option>
+            <option value="both">词条 + 图片</option>
+          </select>
+          <span class="hint">图片存到</span>
+          <select id="rssKind" style="max-width:130px">
+            <option value="stickers">表情包</option>
+            <option value="images">图片</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+        <button onclick="learnFromRss()" id="btnLearnRss">开始学习</button>
+        <button class="ghost" onclick="previewRss()" id="btnPreviewRss">先看看条目</button>
+        <span class="hint" id="rssResult"></span>
+      </div>
+
+      <div id="rssPreviewBox" style="display:none;margin-top:14px">
+        <h2 style="font-size:13px;margin-bottom:8px"><span id="rssPreviewTitle"></span></h2>
+        <div id="rssPreviewList"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>每日热点摘要 <span class="chip" id="digestChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        每天抓一次上面的订阅源，总结成几条「今天大家在聊什么」存进记忆。<br>
+        之后不管谁跟她聊，她都知道最近的热点。
+      </div>
+
+      <div class="row"><label>启用</label><div class="ctl">
+        <div class="switch" id="swDigest" onclick="toggleSw('swDigest')"></div>
+        <span class="hint">需要先在上面配好 RSS 订阅</span>
+      </div></div>
+
+      <div class="row"><label>间隔</label><div class="ctl">
+        <input type="number" id="digestInterval" min="1" max="168" style="max-width:90px">
+        <span class="hint">小时跑一次</span>
+      </div></div>
+
+      <div class="row"><label>总结几条</label><div class="ctl">
+        <input type="number" id="digestPoints" min="1" max="10" style="max-width:80px">
+        <span class="hint">条要点</span>
+      </div></div>
+
+      <div style="display:flex;gap:10px;margin-top:14px;align-items:center;flex-wrap:wrap">
+        <button onclick="saveDigest()">保存</button>
+        <button class="ghost" onclick="runDigest()" id="btnRunDigest">立即跑一次</button>
+        <span class="hint" id="digestSaveHint"></span>
+      </div>
+
+      <div id="digestResult" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <div class="page" id="page-owner">
+    <h1>主人设置</h1>
+
+    <div class="card">
+      <h2>身份识别 <span class="chip" id="ownerChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        她靠这里的信息判断谁是主人。<b>只有主人能用工具</b>（读写文件、执行命令、调用 DSH）。
+      </div>
+
+      <div class="row"><label>启用识别</label><div class="ctl">
+        <div class="switch" id="swOwner" onclick="toggleSw('swOwner')"></div>
+        <span class="hint">关闭后私聊一律视为主人（不推荐）</span>
+      </div></div>
+
+      <div class="secbox" id="ownerSecBox">
+        <div class="sechint" id="ownerSecHint">加载中…</div>
+        <div class="row" style="border:none;padding-top:6px">
+          <label>信任昵称</label>
+          <div class="ctl">
+            <div class="switch" id="swTrustNickname" onclick="toggleSw('swTrustNickname')"></div>
+            <span class="warn-hint">⚠ 开启后，别人改昵称就能冒充主人用工具</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row"><label>怎么称呼你</label><div class="ctl">
+        <input type="text" id="ownerTitle" placeholder="主人" style="max-width:150px">
+        <span class="hint">她会这样叫你</span>
+      </div></div>
+
+      <div class="row"><label>你的名字</label><div class="ctl">
+        <input type="text" id="ownerDisplayName" placeholder="比如：小明" style="max-width:180px">
+        <span class="hint">她可以主动说出这个名字</span>
+      </div></div>
+
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:8px">你的微信昵称</label>
+        <div class="ctl" style="flex-direction:column;align-items:stretch;gap:8px">
+          <div id="ownerNames" class="target-list"><span class="hint">加载中…</span></div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="ownerNameInput" placeholder="昵称，如 小明">
+            <button class="ghost sm" onclick="addOwnerName()">添加</button>
+            <button class="ghost sm" onclick="loadOwnerCandidates()">从聊天记录识别</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:8px">wxid（最可靠）</label>
+        <div class="ctl" style="flex-direction:column;align-items:stretch;gap:8px">
+          <div class="hint">wxid 别人改不了，比昵称可靠。不确定可以先只填昵称。</div>
+          <div id="ownerWxids" class="target-list"><span class="hint">未配置</span></div>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="ownerWxidInput" placeholder="wxid_xxxxxxxx">
+            <button class="ghost sm" onclick="addOwnerWxid()">添加</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>图片收藏权限</h2>
+      <div class="hint" style="margin-bottom:12px">
+        控制谁能往素材库里塞图片。防止被陌生人发图塞满磁盘。
+      </div>
+
+      <div class="row"><label>自动收藏</label><div class="ctl">
+        <div class="switch" id="swCollect" onclick="toggleSw('swCollect')"></div>
+        <span class="hint">关闭后完全不收图</span>
+      </div></div>
+
+      <div class="row" style="align-items:flex-start">
+        <label style="padding-top:8px">谁能发图过来</label>
+        <div class="ctl" style="flex-direction:column;align-items:stretch;gap:10px">
+          <label class="radio-line">
+            <input type="radio" name="collectScope" value="all" onchange="onCollectScopeChange()">
+            <span>所有人 <span class="hint">（默认，谁发都收）</span></span>
+          </label>
+          <label class="radio-line">
+            <input type="radio" name="collectScope" value="owner" onchange="onCollectScopeChange()">
+            <span>只收主人的 <span class="hint">（最安全，不用再填）</span></span>
+          </label>
+          <label class="radio-line">
+            <input type="radio" name="collectScope" value="custom" onchange="onCollectScopeChange()">
+            <span>只收指定的人</span>
+          </label>
+
+          <div id="collectCustomBox" style="display:none;padding-left:24px">
+            <div id="collectList" class="target-list" style="margin-bottom:8px">
+              <span class="hint">还没指定</span>
+            </div>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="collectInput" placeholder="昵称或 wxid">
+              <button class="ghost sm" onclick="addCollect()">添加</button>
+              <button class="ghost sm" onclick="useOwnerAsCollect()">用主人账号</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>主人权限</h2>
+      <div class="hint" style="margin-bottom:12px">
+        勾上的功能只有主人能触发。非主人请求会被直接拒绝。
+      </div>
+      <div class="row"><label>工具调用</label><div class="ctl">
+        <div class="switch" id="privTools" onclick="toggleSw('privTools')"></div>
+        <span class="hint">读写文件、执行白名单命令</span>
+      </div></div>
+      <div class="row"><label>调用 DSH</label><div class="ctl">
+        <div class="switch" id="privDsh" onclick="toggleSw('privDsh')"></div>
+        <span class="hint">让 DSH 处理复杂编程任务</span>
+      </div></div>
+      <div class="row"><label>管理接口</label><div class="ctl">
+        <div class="switch" id="privAdmin" onclick="toggleSw('privAdmin')"></div>
+        <span class="hint">改配置能力</span>
+      </div></div>
+    </div>
+
+    <div class="card">
+      <h2>测试</h2>
+      <div class="row">
+        <label>模拟身份</label>
+        <div class="ctl">
+          <select id="ownerTestAs" style="max-width:180px">
+            <option value="owner">用主人身份</option>
+            <option value="stranger">用陌生人身份</option>
+          </select>
+          <input type="text" id="ownerTestName" placeholder="昵称" style="max-width:140px">
+        </div>
+      </div>
+      <div class="row">
+        <label>问她</label>
+        <div class="ctl">
+          <input type="text" id="ownerTestMsg" value="你的主人是谁" style="max-width:280px">
+          <button onclick="testOwner()" id="btnOwnerTest">发送</button>
+        </div>
+      </div>
+      <div class="hint" id="ownerTestResult" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;gap:10px;align-items:center">
+        <button onclick="saveOwner()">保存</button>
+        <span class="hint" id="ownerSaveHint"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-memory">
+    <h1>记忆</h1>
+
+    <div class="card">
+      <h2>这是什么<span class="chip" id="memChip"></span></h2>
+      <div class="hint" style="line-height:2">
+        她有三层记忆：<br>
+        <b>1. 短期</b> —— 最近 20 轮对话原文，超出的会自动压成摘要<br>
+        <b>2. 摘要</b> —— 聊过的要点，最多保留 10 条<br>
+        <b>3. 事实</b> —— 你的信息、风格要求（比如「以后别用网络用语」）<br>
+        <br>
+        说「以后别用网络用语」「叫我老板」这类话，她会自动记下来，跨会话不忘。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>手动记一条 <span class="hint">不用等她学</span></h2>
+      <div class="row">
+        <label>哪个会话</label>
+        <div class="ctl">
+          <input type="text" id="memSessionId" placeholder="private:wxid_xxx 或 group:123@chatroom">
+        </div>
+      </div>
+      <div class="row">
+        <label>键</label>
+        <div class="ctl">
+          <input type="text" id="memKey" placeholder="比如：说话风格 / 名字 / 讨厌的东西">
+        </div>
+      </div>
+      <div class="row">
+        <label>值</label>
+        <div class="ctl">
+          <input type="text" id="memValue" placeholder="比如：简短一点，别说太多">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
+        <button onclick="addMemoryFact()" id="btnAddMem">记住</button>
+        <span class="hint" id="memAddResult"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>有记忆的会话
+        <span class="sp"></span>
+        <button class="ghost sm" onclick="loadMemory()">刷新</button>
+      </h2>
+      <div id="memList"><div class="hint">加载中…</div></div>
+    </div>
+
+    <div class="card" id="memDetailCard" style="display:none">
+      <h2><span id="memDetailTitle">记忆详情</span>
+        <span class="sp"></span>
+        <button class="ghost sm" onclick="openMemoryFile()">打开文件</button>
+        <button class="ghost sm" onclick="clearMemory()">清空</button>
+      </h2>
+      <div class="hint" id="memFilePath" style="margin-bottom:10px;word-break:break-all"></div>
+      <div id="memDetail"></div>
+    </div>
+
+    <div class="card">
+      <h2>存储位置</h2>
+      <div class="hint" style="line-height:1.9">
+        记忆存在本地 JSON 文件里，一个会话一个文件：<br>
+        <code id="memDirPath">data/memory/</code>
+        <button class="ghost sm" onclick="openMemoryDir()">打开目录</button>
+        <br><br>
+        每个文件结构：
+      </div>
+      <pre class="preview-box" style="margin-top:10px">{
+  "id": "private:wxid_xxx",
+  "facts": { "说话风格": "简短一点" },
+  "summaries": [ { "text": "聊了天气和工作", "at": 1234567890 } ],
+  "createdAt": 1234567890,
+  "updatedAt": 1234567890
+}</pre>
+    </div>
+  </div>
+
+  <div class="page" id="page-words">
+    <h1>词库</h1>
+
+    <div class="card">
+      <h2>词库开关</h2>
+      <div class="hint" style="margin-bottom:12px">
+        只有启用的词库会被拼进提示词。关闭后她不看那个词库。
+      </div>
+      <div id="bankToggles"><div class="hint">加载中…</div></div>
+    </div>
+
+    <div class="card">
+      <h2>手动添加词条</h2>
+      <div class="row">
+        <label>目标词库</label>
+        <div class="ctl">
+          <select id="addBank" style="max-width:180px">
+            <option value="slang">网络用语</option>
+            <option value="clapback">回怼库</option>
+            <option value="abbrev">缩写对照</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <label>词条</label>
+        <div class="ctl">
+          <input type="text" id="addWord" placeholder="比如：栓Q">
+          <span class="hint">最多 30 字</span>
+        </div>
+      </div>
+      <div class="row">
+        <label>解释</label>
+        <div class="ctl">
+          <input type="text" id="addExplain" placeholder="比如：无语、服了（可留空）">
+          <span class="hint">最多 100 字</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
+        <button onclick="addWordEntry()" id="btnAddWord">添加</button>
+        <span class="hint" id="addWordResult"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>词库文件 <span class="sp"></span>
+        <button class="ghost sm" onclick="loadWords()">刷新</button>
+        <button class="ghost sm" onclick="createBank()">新建词库</button>
+      </h2>
+      <div id="bankList"><div class="hint">加载中…</div></div>
+    </div>
+
+    <div class="card" id="wordEditor" style="display:none">
+      <h2><span id="wordTitle">编辑词库</span><span class="sp"></span>
+        <span class="hint" id="wordMeta"></span>
+        <button class="ghost sm" onclick="deleteBank()" title="只能删自己建的库">删除词库</button>
+      </h2>
+      <div class="hint" style="margin-bottom:8px">
+        每行一条，格式 <code>词条｜一句话解释</code>。<code>#</code> 开头是注释，不会被当词条。
+      </div>
+      <textarea id="wordContent" rows="20" style="width:100%" placeholder="每行一条，# 开头为注释"></textarea>
+      <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
+        <button onclick="saveWords()">保存</button>
+        <button class="ghost" onclick="openBank(currentBank)">重新加载</button>
+        <span class="hint" id="wordSaveHint"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-bridge">
+    <h1>微信桥接</h1>
+    <div class="card">
+      <h2>桥接状态</h2>
+      <div class="grid" id="bridgeGrid"><div class="stat"><div class="k">状态</div><div class="v">检测中…</div></div></div>
+      <div style="margin-top:14px"><button class="ghost" onclick="loadBridge()">刷新</button></div>
+    </div>
+    <div class="card">
+      <h2>启动说明</h2>
+      <div class="hint" style="line-height:2">
+        <p>桥接需要<b>管理员权限</b>（读取微信进程模块）。</p>
+        <p>双击项目根目录的 <b>一键启动桥接.bat</b>，会自动请求提权。</p>
+        <p>桥接端口 <b>8896</b>，监听微信消息转发给鲸鲸（8899）。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-logs">
+    <h1>日志</h1>
+    <div class="card">
+      <h2>主服务<span class="sp"></span><button class="ghost sm" onclick="loadLogs()">刷新</button></h2>
+      <pre id="logMain">加载中…</pre>
+    </div>
+    <div class="card">
+      <h2>桥接</h2>
+      <pre id="logBridge">加载中…</pre>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function toast(msg, kind = 'ok') {
+  const el = $('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + kind;
+  setTimeout(() => (el.className = 'toast'), 2800);
+}
+
+async function api(path, opts = {}) {
+  const headers = {};
+  if (opts.body) headers['content-type'] = 'application/json';
+  // 本地令牌：服务端渲染时注入，防跨站伪造请求
+  if (window.__TOKEN__) headers['x-local-token'] = window.__TOKEN__;
+
+  const res = await fetch('/api/admin/' + path, {
+    method: opts.method || 'GET',
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+
+  if (res.status === 403) {
+    showTokenExpired(path);
+    throw new Error('未授权：页面已过期，正在自动刷新');
+  }
+
+  const j = await res.json();
+  if (!res.ok) throw new Error(j.error || 'HTTP ' + res.status);
+  return j;
+}
+
+/**
+ * 令牌失效时的处理。
+ *
+ * 为什么要有这个：浏览器标签页开太久（或服务重启过），页面里注入的 token
+ * 就是旧的，之后所有保存都会被 403 拒掉 —— 表现就是「我明明点了保存，
+ * 怎么配置还是空的」。光在 hint 里写一行小字没人会注意，所以：
+ *   1. 顶部弹一条醒目的红条，说清楚发生了什么、正在自动刷新
+ *   2. 1.5 秒后自动 reload，拿到新 token
+ */
+let tokenExpiredHandled = false;
+
+function showTokenExpired(path) {
+  if (tokenExpiredHandled) return;
+  tokenExpiredHandled = true;
+
+  const bar = document.createElement('div');
+  bar.id = 'tokenExpiredBar';
+  bar.style.cssText = [
+    'position:fixed',
+    'top:0',
+    'left:0',
+    'right:0',
+    'z-index:99999',
+    'padding:14px 20px',
+    'background:#d1242f',
+    'color:#fff',
+    'font-size:14px',
+    'line-height:1.6',
+    'box-shadow:0 2px 12px rgba(0,0,0,.4)',
+  ].join(';');
+  bar.innerHTML =
+    '<b>页面已过期，这次操作没有保存。</b><br>' +
+    `被拒绝的请求：<code>${path}</code><br>` +
+    '正在自动刷新页面拿新令牌…… 刷新后请重新填一次。';
+  document.body.appendChild(bar);
+
+  setTimeout(() => location.reload(), 1500);
+}
+
+document.querySelectorAll('aside nav a').forEach((a) => {
+  a.onclick = () => {
+    document.querySelectorAll('aside nav a').forEach((x) => x.classList.remove('active'));
+    document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
+    a.classList.add('active');
+    $('page-' + a.dataset.page).classList.add('active');
+    if (a.dataset.page === 'logs') loadLogs();
+    if (a.dataset.page === 'bridge') loadBridge();
+    if (a.dataset.page === 'active') loadActive();
+    if (a.dataset.page === 'stickers') {
+      // 图片和表情包合成一个列表显示
+      loadMediaAll();
+      loadMedia('generated');
+      loadStickerChance();
+      loadStickerIndex();
+    }
+    if (a.dataset.page === 'learn') loadLearn();
+    if (a.dataset.page === 'owner') loadOwner();
+    if (a.dataset.page === 'memory') loadMemory();
+  };
+});
+
+function toggleSw(id) { $(id).classList.toggle('on'); }
+function setSw(id, on) { const el = $(id); if (el) el.className = 'switch' + (on ? ' on' : ''); }
+
+// ===== 能力测试 =====
+
+function setTestState(name, state, text) {
+  const box = $('test-' + name);
+  const res = $('res-' + name);
+  if (!box) return;
+  box.className = 'test-item ' + state;
+  res.textContent = text;
+}
+
+async function testOne(name) {
+  setTestState(name, 'loading', '测试中…');
+
+  // 把界面上填的 Key 一起送过去，支持「先测后存」
+  const payload = {};
+  if (name === 'llm') {
+    payload.baseUrl = $('llmBaseUrl').value.trim();
+    payload.model = $('llmModel').value.trim();
+    const k = $('llmKey').value.trim();
+    if (k) payload.apiKey = k;
+  } else if (name === 'vision') {
+    payload.model = $('visionModel').value.trim();
+    const k = $('visionKey').value.trim();
+    if (k) payload.apiKey = k;
+  } else if (name === 'search') {
+    payload.query = '今天的日期';
+  } else if (name === 'imagegen') {
+    payload.prompt = '一只蓝色胖鲸鱼，卡通风格，白底';
+  }
+
+  try {
+    const j = await api('test/' + name, { method: 'POST', body: payload });
+
+    if (j.ok) {
+      let detail = '';
+      if (name === 'llm') detail = `${j.ms}ms · ${(j.reply || '').slice(0, 40)}`;
+      else if (name === 'vision') detail = `${j.ms}ms · 识别「${j.answer}」${j.correct ? ' ✓' : ''}`;
+      else if (name === 'search') detail = `${j.ms}ms · ${j.count} 条结果`;
+      else if (name === 'voice') detail = `${j.ms}ms · ${j.text || '连通'}`;
+      else if (name === 'imagegen') detail = `${(j.names || []).length} 张 · ${j.names?.[0] || ''}`;
+      setTestState(name, 'ok', detail);
+    } else if (j.skipped) {
+      // 未启用的能力：显示为「未启用」而不是失败
+      setTestState(name, 'skip', j.error || '未启用');
+    } else {
+      setTestState(name, 'fail', j.error || '失败');
+    }
+  } catch (e) {
+    setTestState(name, 'fail', e.message);
+  }
+}
+
+async function testAll() {
+  const btn = $('btnTestAll');
+  btn.disabled = true;
+  btn.textContent = '测试中…';
+
+  const all = ['llm', 'vision', 'search', 'voice', 'imagegen'];
+  all.forEach((n) => setTestState(n, 'loading', '测试中…'));
+
+  try {
+    const j = await api('test/all', { method: 'POST', body: {} });
+
+    const apply = (name, r, fmt) => {
+      if (r?.ok) setTestState(name, 'ok', fmt(r));
+      else if (r?.skipped) setTestState(name, 'skip', r.error || '未启用');
+      else setTestState(name, 'fail', r?.error || '失败');
+    };
+
+    apply('llm', j.llm, (r) => `${r.ms}ms · ${(r.reply || '').slice(0, 40)}`);
+    apply('vision', j.vision, (r) => `${r.ms}ms · 识别「${r.answer}」${r.correct ? ' ✓' : ''}`);
+    apply('search', j.search, (r) => `${r.ms}ms · ${r.count} 条结果`);
+    apply('voice', j.voice, (r) => `${r.ms}ms · ${r.text || '连通'}`);
+    apply('imagegen', j.imagegen, (r) => `${(r.names || []).length} 张`);
+  } catch (e) {
+    all.forEach((n) => setTestState(n, 'fail', e.message));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '全部测试';
+  }
+}
+
+/**
+ * 停止服务。
+ *
+ * 关网页不会停服务，所以给一个明确入口，省得去任务管理器里翻 node.exe。
+ */
+async function stopService() {
+  if (!confirm('确定停止鲸鲸服务？\n\n停止后微信不会自动回复，需要重新双击「鲸鲸.bat」启动。')) return;
+
+  try {
+    await api('shutdown', { method: 'POST', body: {} });
+  } catch (e) {
+    // 服务退出时连接会断，报错是正常的
+  }
+
+  document.body.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:center;height:100vh;' +
+    'font-family:system-ui;font-size:15px;color:#8b949e;text-align:center;line-height:2">' +
+    '<div>服务已停止<br><br>' +
+    '<span style="font-size:13px">想重新启动就双击 <b>鲸鲸.bat</b><br>' +
+    '可以关掉这个页面了</span></div></div>';
+}
+
+/**
+ * 重启服务。
+ *
+ * 浏览器没法直接拉起本地进程，所以做法是：
+ *   1. 告诉服务「重启」（服务自己退出，由启动器接管）
+ *   2. 页面轮询，等服务重新起来后自动刷新
+ * 如果服务不是由启动器托管的，就只能停掉，提示用户手动启动。
+ */
+async function restartService() {
+  if (!confirm('重启服务？大约需要 15 秒，期间微信不会回复。')) return;
+
+  try {
+    await api('restart', { method: 'POST', body: {} });
+  } catch {}
+
+  document.body.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:center;height:100vh;' +
+    'font-family:system-ui;font-size:15px;color:#8b949e;text-align:center;line-height:2">' +
+    '<div>正在重启…<br><br>' +
+    '<span style="font-size:13px" id="restartHint">等待服务回来</span></div></div>';
+
+  // 轮询：能访问到 /api/status 就说明起来了
+  let tries = 0;
+  const timer = setInterval(async () => {
+    tries++;
+    try {
+      const r = await fetch('/api/status', { cache: 'no-store' });
+      if (r.ok) {
+        clearInterval(timer);
+        location.reload();
+        return;
+      }
+    } catch {}
+
+    const hint = document.getElementById('restartHint');
+    if (hint && tries > 10) {
+      hint.innerHTML =
+        '服务没有自动起来。<br>请手动双击 <b>鲸鲸.bat</b> 重新启动。';
+    }
+    if (tries > 40) clearInterval(timer);
+  }, 1000);
+}
+
+async function loadStatus() {
+  try {
+    const s = await api('status');
+    $('brandSub').textContent = s.model || '';
+
+    // 页面构建时间：如果和实际不符，说明浏览器在吃缓存，按 Ctrl+Shift+R
+    const pb = $('pageBuild');
+    if (pb) {
+      pb.innerHTML =
+        `页面版本 ${window.__PAGE_BUILT__ || '未知'}<br>` +
+        `<span style="color:var(--dim)">设置没生效？按 Ctrl+Shift+R 强制刷新</span>`;
+    }
+
+    const f = s.features || {};
+    $('statusGrid').innerHTML = `
+      <div class="stat"><div class="k">运行时长</div><div class="v">${s.uptimeText || '—'}</div></div>
+      <div class="stat"><div class="k">模型</div><div class="v" style="font-size:13px">${s.model || '—'}</div></div>
+      <div class="stat"><div class="k">API Key</div><div class="v ${s.hasKey ? 'ok' : 'off'}">${s.hasKey ? '已配置' : '未配置'}</div></div>
+      <div class="stat"><div class="k">活跃会话</div><div class="v">${s.sessions?.count ?? 0}</div></div>
+      <div class="stat"><div class="k">通道</div><div class="v" style="font-size:12px">${(s.channels || []).join(' / ') || '无'}</div></div>
+      <div class="stat"><div class="k">能力</div><div class="v" style="font-size:12px">
+        ${f.vision ? '看图 ' : ''}${f.voice ? '语音 ' : ''}${f.search ? '联网 ' : ''}${f.tools ? '工具' : ''}
+      </div></div>`;
+  } catch (e) { toast('状态加载失败: ' + e.message, 'err'); }
+}
+
+async function testModel() {
+  toast('测试中…');
+  try {
+    const j = await api('test', { method: 'POST', body: { target: 'llm' } });
+    toast(j.ok ? `✓ 正常（${j.ms}ms）: ${j.reply}` : '✗ ' + j.error, j.ok ? 'ok' : 'err');
+  } catch (e) { toast('✗ ' + e.message, 'err'); }
+}
+
+// ===== 服务商预设 =====
+
+const PRESETS = {
+  llm: {
+    deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
+    zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+    moonshot: { baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+    openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  },
+  vision: {
+    'zhipu-flash': { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4v-flash' },
+    'zhipu-air': { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4v-air' },
+    deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash-vision-exp' },
+  },
+};
+
+/** 各服务商的 Key 申请地址。 */
+const KEY_HELP = {
+  llm: {
+    deepseek: 'https://platform.deepseek.com/api_keys',
+    zhipu: 'https://open.bigmodel.cn/usercenter/apikeys',
+    moonshot: 'https://platform.moonshot.cn/console/api-keys',
+    openai: 'https://platform.openai.com/api-keys',
+  },
+  search: {
+    bocha: { name: '博查', url: 'https://open.bochaai.com', tip: '注册后创建 Key，有免费额度' },
+    serper: { name: 'Serper', url: 'https://serper.dev', tip: '谷歌搜索代理，免费 2500 次' },
+    tavily: { name: 'Tavily', url: 'https://tavily.com', tip: '专为 AI 设计，免费 1000 次/月' },
+  },
+};
+
+function applyPreset(kind) {
+  const sel = $(kind === 'llm' ? 'llmPreset' : 'visionPreset');
+  const key = sel.value;
+  if (!key || key === 'custom') return;
+
+  const p = PRESETS[kind]?.[key];
+  if (!p) return;
+
+  if (kind === 'llm') {
+    $('llmBaseUrl').value = p.baseUrl;
+    $('llmModel').value = p.model;
+  } else {
+    $('visionModel').value = p.model;
+  }
+  toast('已填入 ' + p.model + '，记得填 Key');
+}
+
+function onProviderChange() {
+  const p = $('searchProvider').value;
+  const info = KEY_HELP.search[p];
+  const el = $('searchHelp');
+
+  if (info) {
+    el.innerHTML = `在 <a href="${info.url}" target="_blank">${info.name}</a> 申请 Key · ${info.tip}`;
+  } else {
+    el.innerHTML = '';
+  }
+}
+
+/** 显示某个 Key 是否已配置。 */
+function showKeyState(kind, hasKey, masked, fallback) {
+  const el = $('state-' + kind);
+  if (!el) return;
+
+  // 输入框本身永远不回显 Key（安全），所以「已配置」必须靠这行文字说清楚，
+  // 否则用户会以为空输入框 = 没配 Key。
+  const input = $(kind + 'Key');
+  if (input) {
+    input.placeholder = hasKey ? `已保存（${masked || '****'}），改的话粘贴新 Key` : '粘贴 Key';
+  }
+
+  if (hasKey) {
+    el.className = 'keystate set';
+    el.innerHTML =
+      `<span class="hint" style="color:var(--ok)">` +
+      `<b>✓ 已配置</b> ${masked || ''}` +
+      `<span style="color:var(--dim);margin-left:8px">（输入框空着是正常的，不会显示已保存的 Key）</span>` +
+      `</span>`;
+  } else if (fallback) {
+    el.className = 'keystate';
+    el.innerHTML = `<span class="hint"><span class="mark"></span>${fallback}</span>`;
+  } else {
+    el.className = 'keystate';
+    el.innerHTML =
+      '<span class="hint" style="color:var(--warn)"><b>✗ 未配置</b>，请粘贴 Key 后点「保存」</span>';
+  }
+}
+
+/** 清空某个 Key。 */
+async function clearKey(kind) {
+  const names = { llm: '对话模型', vision: '看图', search: '联网搜索', voice: '语音', imagegen: '画图' };
+  if (!confirm(`确定删除「${names[kind] || kind}」的 Key？删除后该功能不可用。`)) return;
+
+  try {
+    // 用明确标志，避免「空字符串」被误认为清空
+    const patch = {};
+    patch[kind] = { clearApiKey: true };
+    await api('config', { method: 'POST', body: patch });
+    toast('已删除 Key');
+    await loadModel();
+    if (kind === 'imagegen') await loadImagegen();
+  } catch (e) {
+    toast('删除失败: ' + e.message, 'err');
+  }
+}
+
+async function loadModel() {
+  try {
+    const c = await api('config');
+
+    // 对话模型
+    $('llmBaseUrl').value = c.llm.baseUrl || '';
+    $('llmModel').value = c.llm.model || '';
+    $('llmTemp').value = c.llm.temperature ?? 1;
+    $('modelChip').textContent = c.llm.hasKey ? '已配置' : '未配置';
+    $('modelChip').className = 'chip ' + (c.llm.hasKey ? 'on' : 'off');
+    $('llmKey').value = '';
+    showKeyState('llm', c.llm.hasKey, c.llm.apiKeyMasked);
+
+    // 能力开关
+    setSw('swVision', c.vision.enabled);
+    setSw('swVoice', c.voice.enabled);
+    setSw('swSearch', c.search.enabled);
+    setSw('swEmoji', c.reply.emoji?.enabled !== false);
+    setSw('swTools', c.tools?.enabled);
+    setSw('swDsh', c.tools?.dsh?.enabled);
+
+    // 各能力
+    $('visionModel').value = c.vision.model || '';
+    $('voiceModel').value = c.voice.model || '';
+    $('searchProvider').value = c.search.provider || 'bocha';
+    onProviderChange();
+
+    $('visionKey').value = '';
+    showKeyState(
+      'vision',
+      c.vision.hasKey,
+      c.vision.apiKeyMasked,
+      c.llm.hasKey ? '未单独配置，将复用对话模型的 Key' : '未配置',
+    );
+
+    $('searchKey').value = '';
+    showKeyState('search', c.search.hasKey, c.search.apiKeyMasked);
+
+    // 自动联网 + 节流
+    setSw('swAutoSearch', c.search.autoDetect !== false);
+    $('searchMaxPerHour').value = c.search.maxPerHour ?? 10;
+
+    const sst = c.search.searchStatus || {};
+    $('searchStatusBox').innerHTML =
+      `本小时已搜 ${sst.hourCount ?? 0} 次（上限 ${c.search.maxPerHour ?? 10}），累计 ${sst.total ?? 0} 次`;
+
+    $('voiceKey').value = '';
+    showKeyState('voice', c.voice.hasKey, c.voice.apiKeyMasked);
+
+    // 回复风格
+    $('replyMaxChars').value = c.reply.maxChars;
+    $('replyBubbles').value = c.reply.maxBubbles;
+    $('replyDelay').value = c.reply.bubbleDelayMs;
+  } catch (e) { toast('配置加载失败: ' + e.message, 'err'); }
+}
+
+async function saveModel() {
+  const hint = $('modelSaveHint');
+  hint.textContent = '保存中…';
+
+  const patch = {
+    llm: {
+      baseUrl: $('llmBaseUrl').value.trim(),
+      model: $('llmModel').value.trim(),
+      temperature: Number($('llmTemp').value),
+    },
+    vision: { enabled: $('swVision').classList.contains('on'), model: $('visionModel').value.trim() },
+    voice: { enabled: $('swVoice').classList.contains('on'), model: $('voiceModel').value.trim() },
+    search: { enabled: $('swSearch').classList.contains('on'), provider: $('searchProvider').value },
+    searchAuto: {
+      autoDetect: $('swAutoSearch').classList.contains('on'),
+      maxPerHour: Number($('searchMaxPerHour').value),
+    },
+    reply: {
+      maxChars: Number($('replyMaxChars').value),
+      maxBubbles: Number($('replyBubbles').value),
+      bubbleDelayMs: Number($('replyDelay').value),
+      emoji: { enabled: $('swEmoji').classList.contains('on') },
+    },
+    tools: {
+      enabled: $('swTools').classList.contains('on'),
+      dsh: { enabled: $('swDsh').classList.contains('on') },
+    },
+  };
+
+  // 自动联网 + 节流合并进 search
+  patch.search.autoDetect = patch.searchAuto.autoDetect;
+  patch.search.maxPerHour = patch.searchAuto.maxPerHour;
+  delete patch.searchAuto;
+
+  // 各 Key 只在填了才提交
+  const llmKey = $('llmKey').value.trim();
+  if (llmKey) patch.llm.apiKey = llmKey;
+
+  const vk = $('visionKey').value.trim();
+  if (vk) patch.vision.apiKey = vk;
+
+  const sk = $('searchKey').value.trim();
+  if (sk) patch.search.apiKey = sk;
+
+  const vok = $('voiceKey').value.trim();
+  if (vok) patch.voice.apiKey = vok;
+
+  // 记下这次想存哪些 Key，存完要逐个核对
+  const expect = {};
+  if (llmKey) expect.llm = llmKey;
+  if (vk) expect.vision = vk;
+  if (sk) expect.search = sk;
+  if (vok) expect.voice = vok;
+
+  try {
+    const j = await api('config', { method: 'POST', body: patch });
+
+    // 保存后立刻回读核对：光看接口返回 ok 不够，
+    // Key 被别的东西清空过好几次，必须确认真的落盘了。
+    const after = await api('config');
+    const failed = [];
+    for (const k of Object.keys(expect)) {
+      if (!after[k]?.hasKey) failed.push(k);
+    }
+
+    if (failed.length) {
+      hint.textContent = '✗ 保存后核对失败：' + failed.join('、') + ' 没存进去';
+      toast('Key 没存进去，请重试', 'err');
+      return;
+    }
+
+    const savedKeys = Object.keys(expect);
+    hint.textContent =
+      '✓ ' + (j.message || '已保存') + (savedKeys.length ? `（已验证：${savedKeys.join('、')}）` : '');
+
+    toast(savedKeys.length ? `已保存并验证：${savedKeys.join('、')}` : '已保存');
+
+    // 清空 Key 输入框，placeholder 会更新成「已配置」
+    $('llmKey').value = '';
+    $('visionKey').value = '';
+    $('searchKey').value = '';
+    $('voiceKey').value = '';
+    await loadModel();
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+    toast('保存失败: ' + e.message, 'err');
+  }
+}
+
+let currentCardId = null;
+
+async function loadCards() {
+  try {
+    const j = await api('cards');
+    const cards = j.cards || [];
+    currentCardId = j.current;
+    if (!cards.length) {
+      $('cardList').innerHTML = '<div class="hint">还没有角色卡，点右上角新建</div>';
+      return;
+    }
+    $('cardList').innerHTML = cards.map((c) => {
+      const active = c.id === currentCardId;
+      return `<div class="item ${active ? 'active' : ''}">
+        <div style="flex:1" onclick="editCard('${c.id}')">
+          <div class="nm">${c.name} ${active ? '<span class="chip on">使用中</span>' : ''}</div>
+          <div class="meta">${c.id}</div>
+        </div>
+        <button class="ghost sm" onclick="editCard('${c.id}')">编辑</button>
+        ${active ? '' : `<button class="ghost sm" onclick="useCard('${c.id}')">切换</button>`}
+        ${active ? '' : `<button class="ghost sm" onclick="delCard('${c.id}')">删除</button>`}
+      </div>`;
+    }).join('');
+  } catch (e) { $('cardList').innerHTML = `<div class="hint">加载失败: ${e.message}</div>`; }
+}
+
+function newCard() {
+  $('cardEditor').style.display = 'block';
+  $('cardEditorTitle').textContent = '新建角色';
+  $('ceId').value = '';
+  $('ceId').disabled = false;
+  ['ceName','ceSpeaker','ceDesc','cePersonality','ceRules','ceFirst'].forEach((i) => ($(i).value = ''));
+  $('cardSaveHint').textContent = '';
+}
+
+async function editCard(id) {
+  try {
+    const j = await api('card/' + encodeURIComponent(id));
+    $('cardEditor').style.display = 'block';
+    $('cardEditorTitle').textContent = '编辑：' + j.data.name;
+    $('ceId').value = id;
+    $('ceId').disabled = true;
+    $('ceName').value = j.data.name || '';
+    $('ceSpeaker').value = j.data.speaker || '';
+    $('ceDesc').value = j.data.description || '';
+    $('cePersonality').value = j.data.personality || '';
+    $('ceRules').value = j.data.system_prompt || '';
+    $('ceFirst').value = j.data.first_mes || '';
+    $('cardSaveHint').textContent = '';
+  } catch (e) { toast('读取失败: ' + e.message, 'err'); }
+}
+
+function hideCardEditor() { $('cardEditor').style.display = 'none'; }
+
+async function saveCard() {
+  const id = $('ceId').value.trim();
+  const name = $('ceName').value.trim();
+  const hint = $('cardSaveHint');
+  if (!/^[a-zA-Z0-9_-]{1,40}$/.test(id)) return (hint.textContent = '✗ ID 只能用英文、数字、下划线');
+  if (!name) return (hint.textContent = '✗ 请填角色名');
+  hint.textContent = '保存中…';
+  try {
+    const j = await api('card/save', {
+      method: 'POST',
+      body: { id, data: {
+        name,
+        speaker: $('ceSpeaker').value.trim(),
+        description: $('ceDesc').value.trim(),
+        personality: $('cePersonality').value.trim(),
+        system_prompt: $('ceRules').value.trim(),
+        first_mes: $('ceFirst').value.trim(),
+      }},
+    });
+    hint.textContent = '✓ ' + j.message;
+    toast(j.message);
+    await loadCards();
+    setTimeout(hideCardEditor, 900);
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+    toast('保存失败: ' + e.message, 'err');
+  }
+}
+
+async function useCard(id) {
+  try {
+    const j = await api('card', { method: 'POST', body: { id } });
+    toast(j.message || '已切换');
+    await loadCards();
+  } catch (e) { toast('切换失败: ' + e.message, 'err'); }
+}
+
+async function delCard(id) {
+  if (!confirm(`确定删除角色「${id}」？`)) return;
+  try {
+    const j = await api('card/delete', { method: 'POST', body: { id } });
+    toast(j.message || '已删除');
+    await loadCards();
+  } catch (e) { toast('删除失败: ' + e.message, 'err'); }
+}
+
+let currentBank = null;
+
+// ===== 主动功能 =====
+
+let chatList = []; // 可选会话
+let careTargetsSel = [];
+let shareTargetsSel = [];
+
+/** 拉取会话列表。 */
+async function refreshChats() {
+  try {
+    const j = await api('chats');
+    chatList = j.chats || [];
+    careTargetsSel = j.selected?.care || [];
+    shareTargetsSel = j.selected?.share || [];
+    renderTargets('care');
+    renderTargets('share');
+  } catch (e) {
+    toast('会话列表加载失败: ' + e.message, 'err');
+  }
+}
+
+/** 渲染会话选择标签。 */
+function renderTargets(kind) {
+  const box = $(kind + 'Targets');
+  if (!box) return;
+
+  const selected = kind === 'care' ? careTargetsSel : shareTargetsSel;
+
+  // 合并：日志里出现的 + 已选的（可能已选但近期没消息）
+  const names = Array.from(new Set([...chatList.map((c) => c.name), ...selected]));
+
+  if (!names.length) {
+    box.innerHTML = '<span class="hint">还没有可选会话（桥接收到消息后会自动出现）</span>';
+    return;
+  }
+
+  box.innerHTML = names
+    .map((n) => {
+      const on = selected.includes(n);
+      return `<span class="target-item ${on ? 'on' : ''}" onclick="toggleTarget('${kind}','${n.replace(/'/g, "\\'")}')">
+        ${on ? '✓ ' : ''}${n}
+      </span>`;
+    })
+    .join('');
+}
+
+/** 切换某个会话的选中状态。 */
+function toggleTarget(kind, name) {
+  const arr = kind === 'care' ? careTargetsSel : shareTargetsSel;
+  const i = arr.indexOf(name);
+
+  if (i >= 0) arr.splice(i, 1);
+  else arr.push(name);
+
+  renderTargets(kind);
+}
+
+/** 手动添加一个会话名。 */
+function addTarget(kind) {
+  const input = $(kind + 'TargetInput');
+  const name = input.value.trim();
+  if (!name) return;
+
+  const arr = kind === 'care' ? careTargetsSel : shareTargetsSel;
+  if (!arr.includes(name)) arr.push(name);
+
+  input.value = '';
+  renderTargets(kind);
+  toast('已添加：' + name);
+}
+
+/** 内容来源切换。 */
+function onSourceChange() {
+  const type = $('shareSourceType').value;
+  $('shareCustomBox').style.display = type === 'custom' ? 'block' : 'none';
+
+  if (type === 'custom') {
+    toast('⚠ 只填你信任的网站地址');
+  }
+}
+
+async function loadActive() {
+  try {
+    const c = await api('config');
+    const care = c.care || {};
+    const share = c.share || {};
+
+    // 搭话
+    setSw('swCare', care.enabled !== false);
+    $('careInterval').value = care.minIntervalMinutes ?? 120;
+    $('careMaxPerDay').value = care.maxPerDay ?? 3;
+    $('careQuietStart').value = care.quietHours?.start ?? 23;
+    $('careQuietEnd').value = care.quietHours?.end ?? 9;
+
+    const careOn = care.enabled !== false;
+    $('careChip').textContent = careOn ? '已开启' : '已关闭';
+    $('careChip').className = 'chip ' + (careOn ? 'on' : 'off');
+
+    // 分享
+    setSw('swShare', Boolean(share.enabled));
+    $('shareInterval').value = share.intervalHours ?? 2;
+
+    $('shareChip').textContent = share.enabled ? '已开启' : '已关闭';
+    $('shareChip').className = 'chip ' + (share.enabled ? 'on' : 'off');
+
+    // 来源
+    const src = share.source || {};
+    $('shareSourceType').value = src.type || 'bilibili';
+    $('shareSourceUrl').value = src.url || '';
+    $('shareSourceCategories').value = (src.categories || []).join(', ');
+    onSourceChange();
+
+    await refreshChats();
+    await checkCareNow();
+  } catch (e) {
+    toast('加载失败: ' + e.message, 'err');
+  }
+}
+
+async function checkCareNow() {
+  const el = $('careStatus');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/care/due?last=0&sentToday=0');
+    const j = await r.json();
+    el.textContent = j.due ? '✓ 现在可以搭话（' + j.reason + '）' : '· ' + j.reason;
+    el.style.color = j.due ? 'var(--ok)' : 'var(--dim)';
+  } catch {
+    el.textContent = '检测失败';
+  }
+}
+
+async function testShare() {
+  const el = $('shareTestResult');
+  el.textContent = '获取中…';
+  try {
+    const r = await fetch('/api/share');
+    const j = await r.json();
+    if (j.video) {
+      el.innerHTML = `✓ ${j.video.title.slice(0, 30)}`;
+      el.style.color = 'var(--ok)';
+      if (j.comment) toast(`评论：${j.comment.slice(0, 50)}`);
+    } else {
+      el.textContent = '✗ ' + (j.error || '没拿到内容');
+      el.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    el.textContent = '✗ ' + e.message;
+    el.style.color = 'var(--err)';
+  }
+}
+
+async function saveActive() {
+  const hint = $('activeSaveHint');
+  hint.textContent = '保存中…';
+
+  // 自定义来源要校验
+  const srcType = $('shareSourceType').value;
+  const srcUrl = $('shareSourceUrl').value.trim();
+
+  if (srcType === 'custom' && srcUrl && !/^https?:\/\//i.test(srcUrl)) {
+    hint.textContent = '✗ 网站地址必须以 http:// 或 https:// 开头';
+    return;
+  }
+
+  const patch = {
+    care: {
+      enabled: $('swCare').classList.contains('on'),
+      minIntervalMinutes: Number($('careInterval').value),
+      maxPerDay: Number($('careMaxPerDay').value),
+      quietHours: {
+        start: Number($('careQuietStart').value),
+        end: Number($('careQuietEnd').value),
+      },
+      targets: careTargetsSel,
+    },
+    share: {
+      enabled: $('swShare').classList.contains('on'),
+      intervalHours: Number($('shareInterval').value),
+      targets: shareTargetsSel,
+      source: {
+        type: srcType,
+        url: srcUrl,
+        categories: $('shareSourceCategories')
+          .value.split(/[,，]/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+      },
+    },
+  };
+
+  try {
+    const j = await api('config', { method: 'POST', body: patch });
+    hint.textContent = '✓ ' + (j.message || '已保存');
+    toast('已保存');
+    await loadActive();
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+    toast('保存失败: ' + e.message, 'err');
+  }
+}
+
+// ===== 素材库 =====
+
+/**
+ * 统一素材视图：图片和表情包混在一起显示。
+ *
+ * 后端还是分两个目录存（images / stickers），但用户只该看到一个列表 ——
+ * 之前分成两块，"收到的图片"和"表情包"得分开放，找一张图根本不知道该去哪看。
+ */
+async function loadMediaAll() {
+  const grid = $('mediaGrid');
+  const chip = $('mediaCount');
+  const filter = $('mediaFilter')?.value || 'all';
+  if (!grid) return;
+
+  const KINDS = filter === 'all' ? ['images', 'stickers'] : [filter];
+  const LABEL = { images: '图片', stickers: '表情包' };
+
+  try {
+    const all = [];
+
+    for (const kind of KINDS) {
+      const j = await api('media/' + kind);
+      for (const it of j.items || []) {
+        all.push({ ...it, kind });
+      }
+    }
+
+    // 新的排前面
+    all.sort((a, b) => (b.mtime || b.size || 0) - (a.mtime || a.size || 0));
+
+    if (chip) {
+      chip.textContent = all.length + ' 个';
+      chip.className = 'chip ' + (all.length ? 'on' : 'off');
+    }
+
+    if (!all.length) {
+      grid.innerHTML =
+        '<div class="hint">还没有素材。别人发图片或表情包后会自动出现在这里。</div>';
+      return;
+    }
+
+    grid.innerHTML = all
+      .map(
+        (s, i) => `
+      <div class="sticker-cell">
+        <span class="del" onclick="delMedia('${s.kind}','${s.name}')" title="删除">×</span>
+        <span class="kindtag">${LABEL[s.kind] || s.kind}</span>
+        <img data-idx="${i}" alt="">
+        <div class="nm">${(s.size / 1024).toFixed(0)}KB</div>
+      </div>`,
+      )
+      .join('');
+
+    for (let i = 0; i < all.length; i++) {
+      const s = all[i];
+      const img = grid.querySelector(`img[data-idx="${i}"]`);
+      if (!img) continue;
+      try {
+        const res = await fetch(
+          `/api/media/${s.kind}/${encodeURIComponent(s.name)}?token=${window.__TOKEN__ || ''}`,
+        );
+        if (res.ok) {
+          img.src = URL.createObjectURL(await res.blob());
+        } else {
+          img.alt = '✗';
+        }
+      } catch {
+        img.alt = '✗';
+      }
+    }
+  } catch (e) {
+    grid.innerHTML = `<div class="hint">加载失败: ${e.message}</div>`;
+  }
+}
+
+/** 上传/下载/删除后刷新 —— 统一列表和「她画的图」各刷各的。 */
+async function refreshMedia(kind) {
+  if (kind === 'generated') {
+    await loadMedia('generated');
+  } else {
+    await loadMediaAll();
+  }
+}
+
+async function loadMedia(kind) {
+  // images / stickers 已经合并进 loadMediaAll 的统一列表，这里只处理她画的图
+  const MAP = {
+    generated: { grid: 'generatedGrid', chip: 'generatedCount', label: '她画的图' },
+  };
+  const m = MAP[kind];
+  if (!m) return;
+
+  const grid = $(m.grid);
+  const chip = $(m.chip);
+  if (!grid) return;
+
+  try {
+    const j = await api('media/' + kind);
+    const list = j.items || [];
+
+    if (chip) {
+      chip.textContent = list.length + ' 个';
+      chip.className = 'chip ' + (list.length ? 'on' : 'off');
+    }
+
+    if (!list.length) {
+      const empty = {
+        images: '还没有图片。别人发图后会出现在这里。',
+        stickers: '还没有表情包。收到表情包时会自动收藏。',
+        generated: '她还没画过图。跟她说「画一只橘猫」试试。',
+      };
+      grid.innerHTML = `<div class="hint">${empty[kind] || '还没有内容。'}</div>`;
+      return;
+    }
+
+    grid.innerHTML = list
+      .map(
+        (s) => `
+      <div class="sticker-cell">
+        <span class="del" onclick="delMedia('${kind}','${s.name}')" title="删除">×</span>
+        <img data-name="${s.name}" alt="">
+        <div class="nm">${(s.size / 1024).toFixed(0)}KB</div>
+      </div>`,
+      )
+      .join('');
+
+    for (const s of list) {
+      const img = grid.querySelector(`img[data-name="${s.name}"]`);
+      if (!img) continue;
+      try {
+        const res = await fetch(
+          `/api/media/${kind}/${encodeURIComponent(s.name)}?token=${window.__TOKEN__ || ''}`,
+        );
+        if (res.ok) {
+          img.src = URL.createObjectURL(await res.blob());
+        } else {
+          img.alt = '✗';
+        }
+      } catch {
+        img.alt = '✗';
+      }
+    }
+  } catch (e) {
+    grid.innerHTML = `<div class="hint">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function delMedia(kind, name) {
+  if (!confirm(`确定删除 ${name}？`)) return;
+
+  try {
+    // 用路径传参，比 DELETE body 可靠
+    const j = await api(`media/${kind}/${encodeURIComponent(name)}`, { method: 'DELETE' });
+
+    if (j?.ok) {
+      toast('已删除');
+    } else {
+      toast('删除失败：' + (j?.error || '未知原因'), 'err');
+    }
+    await refreshMedia(kind);
+    // 统一视图也要跟着刷新
+    if ($('mediaGrid')) await loadMediaAll();
+  } catch (e) {
+    toast('删除失败: ' + e.message, 'err');
+  }
+}
+
+async function saveStickerChance() {
+  const v = Number($('stickerChance').value) / 100;
+  try {
+    await api('config', { method: 'POST', body: { wechat: { stickerChance: v } } });
+    toast('已保存：' + Math.round(v * 100) + '% 概率发表情包');
+  } catch (e) {
+    toast('保存失败: ' + e.message, 'err');
+  }
+}
+
+// ===== 素材库查重 =====
+
+function renderDedupe(j) {
+  const box = $('dedupeResult');
+  const chip = $('dedupeChip');
+  if (!box) return;
+
+  if (chip) {
+    chip.textContent = j.duplicateGroups ? `${j.duplicateGroups} 组重复` : '无重复';
+    chip.className = 'chip ' + (j.duplicateGroups ? 'off' : 'on');
+  }
+
+  if (!j.duplicateGroups) {
+    box.innerHTML =
+      `<span style="color:var(--ok)">✓ 没有发现重复</span>` +
+      `<br><span style="color:var(--dim)">共检查 ${j.scanned} 个文件</span>`;
+    return;
+  }
+
+  const rows = j.groups
+    .map(
+      (g, i) => `
+      <div style="margin:8px 0;padding:8px;background:var(--bg2);border-radius:6px">
+        <b>第 ${i + 1} 组</b>　保留：<span style="color:var(--ok)">${g.keep?.name || '?'}</span>
+        ${g.files
+          .map(
+            (f) =>
+              `<div style="padding-left:10px;color:var(--dim);font-size:11px">` +
+              `${f.kind}/${f.name}　${(f.size / 1024).toFixed(0)}KB</div>`,
+          )
+          .join('')}
+      </div>`,
+    )
+    .join('');
+
+  box.innerHTML =
+    `发现 <b style="color:var(--warn)">${j.duplicateGroups}</b> 组重复，` +
+    `可清理 <b>${j.duplicateFiles}</b> 个文件` +
+    (j.removed ? `，<b style="color:var(--ok)">已清理 ${j.removed} 个</b>` : '') +
+    rows;
+}
+
+async function checkDedupe() {
+  const box = $('dedupeResult');
+  if (box) box.textContent = '正在比对，请稍候（要逐个算指纹）…';
+
+  try {
+    const j = await api('media/dedupe', { method: 'POST', body: { dryRun: true } });
+    renderDedupe(j);
+  } catch (e) {
+    if (box) box.textContent = '检查失败: ' + e.message;
+  }
+}
+
+async function runDedupe() {
+  if (!confirm('清理所有重复素材？保留优先级：表情包 > 她画的 > 收到的图片。\n删掉的文件不会进回收站。')) {
+    return;
+  }
+
+  const box = $('dedupeResult');
+  if (box) box.textContent = '正在清理…';
+
+  try {
+    const j = await api('media/dedupe', { method: 'POST', body: { dryRun: false } });
+    renderDedupe(j);
+    toast(j.message || '已清理');
+    await loadMediaAll();
+    await loadStickerIndex();
+  } catch (e) {
+    if (box) box.textContent = '清理失败: ' + e.message;
+  }
+}
+
+// ===== 表情包描述索引 =====
+
+function escapeAttr(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+}
+
+async function loadStickerIndex() {
+  const grid = $('siGrid');
+  const stats = $('siStats');
+  const chip = $('siChip');
+  if (!grid) return;
+
+  try {
+    const j = await api('sticker-index');
+    const entries = j.entries || [];
+
+    if (chip) {
+      chip.textContent = `${j.indexed}/${j.total}`;
+      chip.className = 'chip ' + (j.missing ? 'off' : 'on');
+    }
+
+    const tagText = Object.entries(j.tagCount || {})
+      .map(([k, v]) => `${k}×${v}`)
+      .join('  ');
+
+    stats.innerHTML =
+      `共 <b>${j.total}</b> 张，已描述 <b style="color:var(--ok)">${j.indexed}</b> 张` +
+      (j.missing ? `，<b style="color:var(--warn)">${j.missing}</b> 张待补` : '') +
+      (tagText ? `<br><span style="color:var(--dim)">标签分布：${tagText}</span>` : '');
+
+    if (!entries.length) {
+      grid.innerHTML = '<div class="hint">素材库还是空的。</div>';
+      return;
+    }
+
+    grid.innerHTML = entries
+      .map(
+        (e, i) => `
+      <div class="si-row">
+        <img class="si-thumb" data-idx="${i}" alt="">
+        <div class="si-main">
+          <div class="si-name">
+            <b>${e.name}</b>
+            <span class="chip ${e.indexed ? 'on' : 'off'}" style="font-size:10px">${e.indexed ? '已描述' : '待补'}</span>
+            <span style="color:var(--dim);font-size:11px">${e.kind}</span>
+          </div>
+          <input class="si-desc" data-idx="${i}" value="${escapeAttr(e.desc)}"
+                 placeholder="还没有描述，点「重建缺失的」或自己填">
+          <input class="si-tags" data-idx="${i}" value="${escapeAttr(e.tags.join(' '))}"
+                 placeholder="情绪标签，空格分隔（开心 难过 困倦…）">
+        </div>
+        <button class="ghost sm" onclick="saveStickerEntry(${i})">保存</button>
+      </div>`,
+      )
+      .join('');
+
+    window.__siEntries = entries;
+
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const img = grid.querySelector(`img[data-idx="${i}"]`);
+      if (!img) continue;
+      try {
+        const res = await fetch(
+          `/api/media/${e.kind}/${encodeURIComponent(e.name)}?token=${window.__TOKEN__ || ''}`,
+        );
+        if (res.ok) img.src = URL.createObjectURL(await res.blob());
+        else img.alt = '✗';
+      } catch {
+        img.alt = '✗';
+      }
+    }
+  } catch (e) {
+    grid.innerHTML = `<div class="hint">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function saveStickerEntry(idx) {
+  const entries = window.__siEntries || [];
+  const e = entries[idx];
+  if (!e) return;
+
+  const desc = document.querySelector(`input.si-desc[data-idx="${idx}"]`)?.value || '';
+  const tagsRaw = document.querySelector(`input.si-tags[data-idx="${idx}"]`)?.value || '';
+  const tags = tagsRaw.split(/[\s,，]+/).filter(Boolean);
+
+  try {
+    const j = await api('sticker-index/save', {
+      method: 'POST',
+      body: { name: e.name, desc, tags },
+    });
+    if (j.ok) {
+      toast(j.message || '已保存');
+      await loadStickerIndex();
+    } else {
+      toast(j.error || '保存失败', 'err');
+    }
+  } catch (err) {
+    toast('保存失败: ' + err.message, 'err');
+  }
+}
+
+async function rebuildStickerIndex() {
+  const n = prompt('这次补多少张的描述？（1-50）', '10');
+  if (!n) return;
+
+  toast('正在生成描述，请稍候…');
+
+  try {
+    const j = await api('sticker-index/rebuild', {
+      method: 'POST',
+      body: { limit: Number(n) || 10 },
+    });
+    toast(j.message || `完成 ${j.done} 张`);
+    await loadStickerIndex();
+  } catch (e) {
+    toast('重建失败: ' + e.message, 'err');
+  }
+}
+
+async function clearStickerIndex() {
+  if (!confirm('清空所有描述？之后就只能随机发表情包了。')) return;
+
+  try {
+    const j = await api('sticker-index/clear', { method: 'POST', body: {} });
+    toast(j.message || '已清空');
+    await loadStickerIndex();
+  } catch (e) {
+    toast('清空失败: ' + e.message, 'err');
+  }
+}
+
+/** 读当前的发表情概率。 */
+async function loadStickerChance() {
+  try {
+    const c = await api('config');
+    const v = c.wechat?.stickerChance ?? 0.3;
+    $('stickerChance').value = Math.round(v * 100);
+  } catch {}
+}
+
+/** 上传本地图片（可多选）。 */
+async function uploadFiles() {
+  const input = $('upFile');
+  const btn = $('btnUpload');
+  const res = $('upResult');
+
+  const files = Array.from(input.files || []);
+  if (!files.length) {
+    res.textContent = '请先选择文件';
+    res.style.color = 'var(--warn)';
+    return;
+  }
+
+  const kind = $('upKind').value;
+  btn.disabled = true;
+  btn.textContent = '上传中…';
+
+  let ok = 0;
+  const errors = [];
+
+  for (const f of files) {
+    try {
+      if (f.size > 8 * 1024 * 1024) {
+        errors.push(`${f.name} 太大`);
+        continue;
+      }
+
+      const b64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const r = String(reader.result);
+          resolve(r.slice(r.indexOf(',') + 1));
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(f);
+      });
+
+      const j = await api('media/upload', { method: 'POST', body: { kind, data: b64 } });
+      if (j.ok) ok++;
+      else errors.push(`${f.name}: ${j.error}`);
+    } catch (e) {
+      errors.push(`${f.name}: ${e.message}`);
+    }
+  }
+
+  res.textContent = ok ? `✓ 成功 ${ok} 个${errors.length ? `，失败 ${errors.length}` : ''}` : '✗ 全部失败';
+  res.style.color = ok ? 'var(--ok)' : 'var(--err)';
+
+  if (errors.length) toast(errors[0], 'err');
+
+  input.value = '';
+  btn.disabled = false;
+  btn.textContent = '上传';
+
+  if (ok) await refreshMedia(kind);
+}
+
+/** 从免费源下载。 */
+async function fetchFree() {
+  const btn = $('btnFree');
+  const res = $('freeResult');
+
+  const source = $('freeSource').value;
+  const count = Number($('freeCount').value) || 3;
+  const kind = $('upKind').value;
+
+  btn.disabled = true;
+  btn.textContent = '下载中…';
+  res.textContent = '正在下载…';
+
+  try {
+    const j = await api('media/fetch', { method: 'POST', body: { source, count, kind } });
+    if (j.ok) {
+      res.textContent = `✓ 下载 ${j.downloaded.length} 张`;
+      res.style.color = 'var(--ok)';
+      await refreshMedia(kind);
+    } else {
+      res.textContent = '✗ ' + (j.error || '失败');
+      res.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.style.color = 'var(--err)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '下载';
+  }
+}
+
+// ===== 联网学习 =====
+
+let pendingWords = [];
+
+// ===== 每日热点摘要 =====
+
+function renderDigest(d) {
+  if (!d) return;
+
+  setSw('swDigest', d.enabled === true);
+  $('digestInterval').value = d.intervalHours ?? 24;
+  $('digestPoints').value = d.maxPoints ?? 5;
+
+  const chip = $('digestChip');
+  const ready = d.enabled && d.feeds > 0;
+  chip.textContent = ready ? '已开启' : d.enabled ? '缺订阅源' : '已关闭';
+  chip.className = 'chip ' + (ready ? 'on' : 'off');
+
+  const box = $('digestResult');
+  if (!box) return;
+
+  const lines = [];
+  lines.push(`订阅源：${d.feeds} 个`);
+  lines.push(`已存进记忆：${d.saved?.summaries ?? 0} 条摘要`);
+
+  if (d.lastTs) {
+    const ago = Math.round((Date.now() - d.lastTs) / 60000);
+    lines.push(`上次更新：${ago < 60 ? ago + ' 分钟前' : Math.round(ago / 60) + ' 小时前'}`);
+  } else {
+    lines.push('还没跑过');
+  }
+
+  if (d.lastPoints?.length) {
+    lines.push('');
+    lines.push('<b>上次总结：</b>');
+    d.lastPoints.forEach((p) => lines.push(`· ${escapeHtml(p)}`));
+  }
+
+  box.className = 'hint';
+  box.innerHTML = lines.join('<br>');
+}
+
+async function saveDigest() {
+  const hint = $('digestSaveHint');
+  hint.textContent = '保存中…';
+
+  try {
+    const j = await api('learning/digest', {
+      method: 'POST',
+      body: {
+        digest: {
+          enabled: $('swDigest').classList.contains('on'),
+          intervalHours: Number($('digestInterval').value),
+          maxPoints: Number($('digestPoints').value),
+        },
+      },
+    });
+
+    if (j.ok) {
+      hint.textContent = '✓ 已保存';
+      toast('每日摘要设置已保存');
+      await loadLearn();
+    } else {
+      hint.textContent = '✗ ' + (j.error || '失败');
+    }
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+  }
+}
+
+async function runDigest() {
+  const btn = $('btnRunDigest');
+  const box = $('digestResult');
+
+  btn.disabled = true;
+  btn.textContent = '跑着…';
+  box.innerHTML = '<span class="hint">正在抓取并总结（约 10-30 秒）…</span>';
+
+  const t0 = Date.now();
+
+  try {
+    const j = await api('learning/digest/run', { method: 'POST', body: {} });
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+
+    if (j.ok) {
+      box.innerHTML =
+        `<span style="color:var(--ok)">✓ ${secs}s，${j.items} 个条目 → ${(j.points || []).length} 条要点</span><br><br>` +
+        (j.points || []).map((p) => `· ${escapeHtml(p)}`).join('<br>');
+      toast('摘要已更新');
+      await loadLearn();
+    } else {
+      const detail = (j.details || [])
+        .filter((d) => !d.ok)
+        .slice(0, 3)
+        .map((d) => `${d.url}: ${d.error}`)
+        .join('<br>');
+      box.innerHTML = `<span style="color:var(--err)">✗ ${escapeHtml(j.error || '失败')}</span>${detail ? '<br>' + detail : ''}`;
+    }
+  } catch (e) {
+    box.innerHTML = `<span style="color:var(--err)">✗ ${escapeHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '立即跑一次';
+  }
+}
+
+// ===== 学到的词自动进词库 =====
+
+function renderAutoMerge(m) {
+  if (!m) return;
+
+  setSw('swAutoMerge', m.enabled === true);
+  $('autoMergeBank').value = m.bank || 'learned';
+
+  const chip = $('autoMergeChip');
+  chip.textContent = m.enabled ? '已开启' : '已关闭';
+  chip.className = 'chip ' + (m.enabled ? 'on' : 'off');
+}
+
+async function saveAutoMerge() {
+  const hint = $('autoMergeHint');
+  hint.textContent = '保存中…';
+
+  try {
+    const j = await api('config', {
+      method: 'POST',
+      body: {
+        learning: {
+          autoMerge: {
+            enabled: $('swAutoMerge').classList.contains('on'),
+            bank: $('autoMergeBank').value.trim() || 'learned',
+          },
+        },
+      },
+    });
+
+    if (j.ok) {
+      hint.textContent = '✓ 已保存';
+      toast('已保存');
+      await loadLearn();
+    } else {
+      hint.textContent = '✗ ' + (j.error || '失败');
+    }
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+  }
+}
+
+// ===== 对话时自动学习 =====
+
+function renderAutoLearn(a, status) {
+  if (!a) return;
+
+  setSw('swAutoLearn', a.enabled === true);
+  $('autoEvery').value = a.everyNTurns ?? 15;
+  $('autoInterval').value = a.minIntervalMinutes ?? 30;
+  $('autoMaxPerDay').value = a.maxPerDay ?? 6;
+  $('autoMode').value = a.mode || 'words';
+  $('autoMaxPerRun').value = a.maxPerRun ?? 10;
+
+  const chip = $('autoLearnChip');
+  chip.textContent = a.enabled ? '已开启' : '已关闭';
+  chip.className = 'chip ' + (a.enabled ? 'on' : 'off');
+
+  const box = $('autoStatusBox');
+  if (!box) return;
+
+  if (!status) {
+    box.textContent = '';
+    return;
+  }
+
+  const lines = [];
+  lines.push(`今天已自动学 ${status.todayCount ?? 0} 次（上限 ${a.maxPerDay}）`);
+  lines.push(`累计 ${status.totalRuns ?? 0} 次`);
+
+  if (status.lastAt) {
+    const ago = Math.round((Date.now() - status.lastAt) / 60000);
+    lines.push(`上次：${ago < 1 ? '刚刚' : ago + ' 分钟前'}`);
+    if (status.lastResult?.error) {
+      lines.push(`<span style="color:var(--err)">上次失败：${status.lastResult.error}</span>`);
+    } else if (status.lastResult) {
+      lines.push(
+        `上次结果：词 ${status.lastResult.words || 0}，图 ${status.lastResult.images || 0}`,
+      );
+    }
+  } else {
+    lines.push('还没自动学过');
+  }
+
+  if (status.running) lines.push('<span style="color:var(--warn)">正在学…</span>');
+
+  box.innerHTML = lines.join('<br>');
+}
+
+async function saveAutoLearn() {
+  const hint = $('autoSaveHint');
+  hint.textContent = '保存中…';
+
+  try {
+    const j = await api('config', {
+      method: 'POST',
+      body: {
+        learning: {
+          auto: {
+            enabled: $('swAutoLearn').classList.contains('on'),
+            everyNTurns: Number($('autoEvery').value),
+            minIntervalMinutes: Number($('autoInterval').value),
+            maxPerDay: Number($('autoMaxPerDay').value),
+            mode: $('autoMode').value,
+            maxPerRun: Number($('autoMaxPerRun').value),
+          },
+        },
+      },
+    });
+
+    if (j.ok) {
+      hint.textContent = '✓ 已保存';
+      toast('自动学习设置已保存');
+      await loadLearn();
+    } else {
+      hint.textContent = '✗ ' + (j.error || '失败');
+    }
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+  }
+}
+
+// ===== 定向网站学习 =====
+
+// ===== RSS 订阅 =====
+
+let rssList = [];
+
+function renderRss() {
+  const box = $('rssList');
+  const chip = $('rssChip');
+  if (!box) return;
+
+  if (chip) {
+    chip.textContent = rssList.length ? rssList.length + ' 个' : '未配置';
+    chip.className = 'chip ' + (rssList.length ? 'on' : 'off');
+  }
+
+  if (!rssList.length) {
+    box.innerHTML = '<span class="hint">还没添加订阅</span>';
+    return;
+  }
+
+  box.innerHTML = rssList
+    .map(
+      (s, i) => `
+    <span class="target-item on" title="${s.url}">
+      ${s.note || s.url.replace(/^https?:\/\//, '').slice(0, 30)}
+      <span class="x" onclick="removeRss(${i})">×</span>
+    </span>`,
+    )
+    .join('');
+}
+
+function addRss() {
+  const url = $('rssUrlInput').value.trim();
+  const note = $('rssNoteInput').value.trim();
+
+  if (!url) return;
+
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol)) throw new Error('协议');
+  } catch {
+    toast('网址格式不对，要 http:// 或 https:// 开头', 'err');
+    return;
+  }
+
+  if (rssList.some((s) => s.url === url)) {
+    toast('这个订阅已经加过了');
+    return;
+  }
+
+  rssList.push({ url, note });
+  $('rssUrlInput').value = '';
+  $('rssNoteInput').value = '';
+  renderRss();
+  saveRss();
+}
+
+function removeRss(i) {
+  rssList.splice(i, 1);
+  renderRss();
+  saveRss();
+}
+
+async function saveRss() {
+  try {
+    const j = await api('learning/rss/feeds', { method: 'POST', body: { feeds: rssList } });
+    if (j.ok) {
+      rssList = j.feeds || rssList;
+      renderRss();
+    } else {
+      toast('保存失败: ' + (j.error || ''), 'err');
+    }
+  } catch (e) {
+    toast('保存失败: ' + e.message, 'err');
+  }
+}
+
+/** 预览订阅条目。 */
+async function previewRss() {
+  const url = $('rssUrlInput').value.trim() || (rssList[0] && rssList[0].url) || '';
+
+  if (!url) {
+    toast('先填个 RSS 地址', 'err');
+    return;
+  }
+
+  const btn = $('btnPreviewRss');
+  btn.disabled = true;
+  btn.textContent = '抓取中…';
+
+  try {
+    const j = await api('learning/rss/preview', { method: 'POST', body: { url } });
+
+    const box = $('rssPreviewBox');
+    const list = $('rssPreviewList');
+    box.style.display = 'block';
+
+    if (j.ok) {
+      $('rssPreviewTitle').textContent = `${j.title || '(无标题)'} · ${j.count} 条`;
+      list.innerHTML = (j.samples || [])
+        .map(
+          (s) => `
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="font-size:13px;color:var(--text)">${s.title || '(无标题)'}</div>
+          <div class="hint" style="margin-top:3px">${s.text || '(无正文)'}</div>
+          <div class="hint" style="margin-top:3px;color:var(--dim)">
+            ${s.date || ''} ${s.images ? '· ' + s.images + ' 张图' : ''}
+          </div>
+        </div>`,
+        )
+        .join('');
+      toast(`抓到 ${j.count} 条`);
+    } else {
+      $('rssPreviewTitle').textContent = '抓取失败';
+      list.innerHTML = `<div class="hint">${j.error || '未知错误'}</div>`;
+      toast('抓取失败: ' + (j.error || ''), 'err');
+    }
+  } catch (e) {
+    toast('失败: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '先看看条目';
+  }
+}
+
+/** 从所有订阅学习。 */
+async function learnFromRss() {
+  if (!rssList.length) {
+    toast('先添加至少一个订阅', 'err');
+    return;
+  }
+
+  const btn = $('btnLearnRss');
+  const res = $('rssResult');
+
+  btn.disabled = true;
+  btn.textContent = '学习中…';
+  res.textContent = '正在抓取订阅…';
+  res.style.color = 'var(--text2)';
+
+  try {
+    const j = await api('learning/rss', {
+      method: 'POST',
+      body: {
+        mode: $('rssMode').value,
+        kind: $('rssKind').value,
+        max: Number($('learnMax').value) || 20,
+      },
+    });
+
+    if (j.ok) {
+      const parts = [];
+      if (j.words) parts.push(`学到 ${j.words} 条词`);
+      if (j.images) parts.push(`下载 ${j.images} 张图`);
+      res.textContent = `✓ ${parts.join('，') || '完成'}（共 ${j.items} 个条目）`;
+      res.style.color = 'var(--ok)';
+      toast(parts.join('，') || '完成');
+      await loadLearn();
+    } else {
+      const detail = (j.details || [])
+        .filter((d) => !d.ok)
+        .slice(0, 3)
+        .map((d) => `${d.url}: ${d.error}`)
+        .join('\n');
+      res.innerHTML = `✗ ${j.error}${detail ? `<br><span class="hint" style="white-space:pre-line">${detail}</span>` : ''}`;
+      res.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.style.color = 'var(--err)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '开始学习';
+  }
+}
+
+// ===== 定向网页抓图 =====
+
+let mediaSiteList = [];
+
+function renderMediaSites() {
+  const box = $('mediaSiteList');
+  const chip = $('mediaSiteChip');
+  if (!box) return;
+
+  if (chip) {
+    chip.textContent = mediaSiteList.length ? mediaSiteList.length + ' 个' : '未配置';
+    chip.className = 'chip ' + (mediaSiteList.length ? 'on' : 'off');
+  }
+
+  if (!mediaSiteList.length) {
+    box.innerHTML = '<span class="hint">还没添加网站</span>';
+    return;
+  }
+
+  box.innerHTML = mediaSiteList
+    .map(
+      (s, i) => `
+    <span class="target-item on" title="${s.url}">
+      ${s.note || s.url.replace(/^https?:\/\//, '').slice(0, 28)}
+      <span class="x" onclick="removeMediaSite(${i})">×</span>
+    </span>`,
+    )
+    .join('');
+}
+
+function addMediaSite() {
+  const url = $('mediaSiteUrlInput').value.trim();
+  const note = $('mediaSiteNoteInput').value.trim();
+
+  if (!url) return;
+
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol)) throw new Error('协议');
+  } catch {
+    toast('网址格式不对，要 http:// 或 https:// 开头', 'err');
+    return;
+  }
+
+  if (mediaSiteList.some((s) => s.url === url)) {
+    toast('这个网页已经加过了');
+    return;
+  }
+
+  mediaSiteList.push({ url, note });
+  $('mediaSiteUrlInput').value = '';
+  $('mediaSiteNoteInput').value = '';
+  renderMediaSites();
+  saveMediaSites();
+}
+
+function removeMediaSite(i) {
+  mediaSiteList.splice(i, 1);
+  renderMediaSites();
+  saveMediaSites();
+}
+
+async function saveMediaSites() {
+  try {
+    const j = await api('learning/media/sites', {
+      method: 'POST',
+      body: { sites: mediaSiteList },
+    });
+    if (j.ok) {
+      mediaSiteList = j.sites || mediaSiteList;
+      renderMediaSites();
+    } else {
+      toast('保存失败: ' + (j.error || ''), 'err');
+    }
+  } catch (e) {
+    toast('保存失败: ' + e.message, 'err');
+  }
+}
+
+/** 预览网页里有几张图（不下载）。 */
+async function previewMediaSite() {
+  const url = $('mediaSiteUrlInput').value.trim() || (mediaSiteList[0] && mediaSiteList[0].url) || '';
+
+  if (!url) {
+    toast('先填个网址', 'err');
+    return;
+  }
+
+  const btn = $('btnPreviewMediaSite');
+  btn.disabled = true;
+  btn.textContent = '抓取中…';
+
+  try {
+    const j = await api('learning/media/site/preview', { method: 'POST', body: { url } });
+
+    const box = $('mediaSitePreviewBox');
+    const grid = $('mediaSitePreviewGrid');
+    box.style.display = 'block';
+
+    if (j.ok) {
+      $('mediaSitePreviewTitle').textContent = `找到 ${j.count} 张图`;
+      grid.innerHTML = (j.samples || [])
+        .map(
+          (u) => `
+        <div class="sticker-cell">
+          <img src="${u}" alt="" loading="lazy" referrerpolicy="no-referrer"
+               onerror="this.style.opacity=.2;this.alt='加载失败'">
+        </div>`,
+        )
+        .join('');
+      toast(`找到 ${j.count} 张图`);
+    } else {
+      $('mediaSitePreviewTitle').textContent = '抓取失败';
+      grid.innerHTML = `<div class="hint">${j.error || '未知错误'}</div>`;
+      toast('抓取失败: ' + (j.error || ''), 'err');
+    }
+  } catch (e) {
+    toast('失败: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '先看看有几张图';
+  }
+}
+
+/** 从所有配置的网站抓图。 */
+async function learnMediaFromSites() {
+  if (!mediaSiteList.length) {
+    toast('先添加至少一个网页', 'err');
+    return;
+  }
+
+  const btn = $('btnLearnMediaSites');
+  const res = $('mediaSiteResult');
+
+  btn.disabled = true;
+  btn.textContent = '抓取中…';
+  res.textContent = '正在下载…';
+  res.style.color = 'var(--text2)';
+
+  try {
+    const j = await api('learning/media/site', {
+      method: 'POST',
+      body: {
+        kind: $('mediaSiteKind').value,
+        limit: Number($('mediaSiteLimit').value) || 5,
+      },
+    });
+
+    if (j.ok) {
+      res.textContent = `✓ 下载 ${j.downloaded.length} 张（共发现 ${j.candidates} 个链接）`;
+      res.style.color = 'var(--ok)';
+      toast(`下载了 ${j.downloaded.length} 张`);
+      await loadLearn();
+    } else {
+      const detail = (j.failed || []).slice(0, 3).join('\n');
+      res.innerHTML = `✗ ${j.error}${detail ? `<br><span class="hint" style="white-space:pre-line">${detail}</span>` : ''}`;
+      res.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.style.color = 'var(--err)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '抓取所有网站';
+  }
+}
+
+let siteList = [];
+
+function renderSites() {
+  const box = $('siteList');
+  const chip = $('siteChip');
+  if (!box) return;
+
+  if (chip) {
+    chip.textContent = siteList.length ? siteList.length + ' 个' : '未配置';
+    chip.className = 'chip ' + (siteList.length ? 'on' : 'off');
+  }
+
+  if (!siteList.length) {
+    box.innerHTML = '<span class="hint">还没添加网站</span>';
+    return;
+  }
+
+  box.innerHTML = siteList
+    .map(
+      (s, i) => `
+    <span class="target-item on" title="${s.url}">
+      ${s.note || s.url.replace(/^https?:\/\//, '').slice(0, 28)}
+      <span class="x" onclick="removeSite(${i})">×</span>
+    </span>`,
+    )
+    .join('');
+}
+
+function addSite() {
+  const url = $('siteUrlInput').value.trim();
+  const note = $('siteNoteInput').value.trim();
+
+  if (!url) return;
+
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol)) throw new Error('只支持 http/https');
+  } catch {
+    toast('网址格式不对，要 http:// 或 https:// 开头', 'err');
+    return;
+  }
+
+  if (siteList.some((s) => s.url === url)) {
+    toast('这个网站已经加过了');
+    return;
+  }
+
+  siteList.push({ url, note });
+  $('siteUrlInput').value = '';
+  $('siteNoteInput').value = '';
+  renderSites();
+
+  // 自动保存
+  saveSites();
+}
+
+function removeSite(i) {
+  siteList.splice(i, 1);
+  renderSites();
+  saveSites();
+}
+
+async function saveSites() {
+  try {
+    const j = await api('learning/sites', { method: 'POST', body: { sites: siteList } });
+    if (j.ok) {
+      siteList = j.sites || siteList;
+      renderSites();
+    } else {
+      toast('保存失败: ' + (j.error || ''), 'err');
+    }
+  } catch (e) {
+    toast('保存失败: ' + e.message, 'err');
+  }
+}
+
+/** 预览抓取效果（不学词，只看抓到什么）。 */
+async function previewSite() {
+  const url =
+    $('siteUrlInput').value.trim() ||
+    (siteList[0] && siteList[0].url) ||
+    '';
+
+  if (!url) {
+    toast('先填个网址', 'err');
+    return;
+  }
+
+  const btn = $('btnPreviewSite');
+  btn.disabled = true;
+  btn.textContent = '抓取中…';
+
+  try {
+    const j = await api('learning/site/preview', { method: 'POST', body: { url } });
+
+    const box = $('sitePreviewBox');
+    box.style.display = 'block';
+
+    if (j.ok) {
+      $('sitePreviewTitle').textContent = `${j.title || '(无标题)'} · ${j.chars} 字`;
+      $('sitePreviewText').textContent = j.preview;
+      toast('抓取成功');
+    } else {
+      $('sitePreviewTitle').textContent = '抓取失败';
+      $('sitePreviewText').textContent = j.error || '未知错误';
+      toast('抓取失败: ' + (j.error || ''), 'err');
+    }
+  } catch (e) {
+    toast('失败: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '先预览抓取效果';
+  }
+}
+
+/** 从所有配置的网站学词。 */
+async function learnFromSites() {
+  if (!siteList.length) {
+    toast('先添加至少一个网站', 'err');
+    return;
+  }
+
+  const btn = $('btnLearnSites');
+  const res = $('siteLearnResult');
+
+  btn.disabled = true;
+  btn.textContent = '学习中…';
+  res.textContent = '正在抓取并提炼…';
+  res.style.color = 'var(--text2)';
+
+  try {
+    const j = await api('learning/site', { method: 'POST', body: {} });
+
+    if (j.ok) {
+      res.textContent = `✓ 学到 ${j.learned} 条（共 ${j.chars} 字，新增 ${j.added} 条）`;
+      res.style.color = 'var(--ok)';
+
+      // 显示每站结果
+      if (j.details?.length) {
+        const lines = j.details
+          .map((d) =>
+            d.ok
+              ? `· ${d.url.replace(/^https?:\/\//, '').slice(0, 40)} → ${d.learned} 条（${d.chars} 字）`
+              : `· ${d.url.replace(/^https?:\/\//, '').slice(0, 40)} → ✗ ${d.error}`,
+          )
+          .join('\n');
+        res.innerHTML = `✓ 学到 ${j.learned} 条<br><div class="hint" style="margin-top:6px;white-space:pre-line">${lines}</div>`;
+      }
+
+      await loadLearn();
+    } else {
+      res.textContent = '✗ ' + (j.error || '失败');
+      res.style.color = 'var(--err)';
+
+      if (j.details?.length) {
+        const lines = j.details
+          .filter((d) => !d.ok)
+          .map((d) => `· ${d.url} → ${d.error}`)
+          .join('\n');
+        res.innerHTML = `✗ ${j.error}<br><div class="hint" style="margin-top:6px;white-space:pre-line">${lines}</div>`;
+      }
+    }
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.style.color = 'var(--err)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '学习所有网站';
+  }
+}
+
+async function loadLearn() {
+  try {
+    const j = await api('learning');
+
+    setSw('swLearn', j.enabled);
+    $('learnChip').textContent = j.enabled ? '已开启' : '已关闭';
+    $('learnChip').className = 'chip ' + (j.enabled ? 'on' : 'off');
+
+    $('learnMax').value = j.maxPerRun ?? 20;
+    $('learnQueries').value = (j.queries || []).join('\n');
+
+    // 对话时自动学习
+    renderAutoLearn(j.auto, j.autoStatus);
+
+    // 学到的词自动进词库
+    renderAutoMerge(j.autoMerge);
+
+    // 每日热点摘要
+    renderDigest(j.digest);
+
+    // 定向网站
+    siteList = (j.sites || []).map((s) => (typeof s === 'string' ? { url: s, note: '' } : s));
+    renderSites();
+
+    // 定向抓图站点
+    mediaSiteList = (j.mediaSites || []).map((s) =>
+      typeof s === 'string' ? { url: s, note: '' } : s,
+    );
+    renderMediaSites();
+
+    // RSS 订阅
+    rssList = (j.rssFeeds || []).map((s) => (typeof s === 'string' ? { url: s, note: '' } : s));
+    renderRss();
+
+    // 待审词条
+    pendingWords = j.words || [];
+    renderPending();
+
+    // 目标词库下拉
+    const sel = $('applyBank');
+    if (sel && j.banks) {
+      sel.innerHTML = j.banks.map((b) => `<option value="${b}">${b}</option>`).join('');
+      if (j.banks.includes('slang')) sel.value = 'slang';
+    }
+  } catch (e) {
+    toast('加载失败: ' + e.message, 'err');
+  }
+}
+
+function renderPending() {
+  const box = $('pendingBox');
+  const list = $('pendingList');
+
+  if (!pendingWords.length) {
+    box.style.display = 'none';
+    return;
+  }
+
+  box.style.display = 'block';
+  $('pendingCount').textContent = pendingWords.length + ' 条';
+  $('pendingCount').className = 'chip on';
+
+  list.innerHTML = pendingWords
+    .map((w) => `<span class="word-tag" title="${w.explain}">${w.word}</span>`)
+    .join('');
+}
+
+async function saveLearn() {
+  const hint = $('learnSaveHint');
+  hint.textContent = '保存中…';
+
+  const queries = $('learnQueries')
+    .value.split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  try {
+    await api('config', {
+      method: 'POST',
+      body: {
+        learning: {
+          enabled: $('swLearn').classList.contains('on'),
+          maxPerRun: Number($('learnMax').value),
+          queries,
+        },
+      },
+    });
+    hint.textContent = '✓ 已保存';
+    toast('已保存');
+    await loadLearn();
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+  }
+}
+
+async function learnWords() {
+  const btn = $('btnLearnWords');
+  const res = $('learnWordsResult');
+
+  btn.disabled = true;
+  btn.textContent = '学习中…';
+  res.textContent = '正在搜索并提炼，可能要 10-30 秒…';
+
+  try {
+    const j = await api('learning/words', { method: 'POST', body: {} });
+
+    if (j.ok) {
+      res.innerHTML = `✓ 搜到 ${j.searchCount} 条资料，提炼出 ${j.learned} 个词条`;
+      res.style.color = 'var(--ok)';
+      await loadLearn();
+    } else {
+      res.textContent = '✗ ' + j.error;
+      res.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.style.color = 'var(--err)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '开始学习';
+  }
+}
+
+async function applyLearned() {
+  const bank = $('applyBank').value;
+  try {
+    const j = await api('learning/apply', { method: 'POST', body: { bank } });
+    if (j.ok) {
+      toast(j.message);
+      await loadLearn();
+      await loadWords();
+    } else {
+      toast('✗ ' + j.error, 'err');
+    }
+  } catch (e) {
+    toast('合并失败: ' + e.message, 'err');
+  }
+}
+
+async function discardLearned() {
+  if (!confirm('丢弃所有待审词条？')) return;
+  try {
+    await api('learning/discard', { method: 'POST', body: {} });
+    toast('已丢弃');
+    await loadLearn();
+  } catch (e) {
+    toast('失败: ' + e.message, 'err');
+  }
+}
+
+async function learnMedia() {
+  const btn = $('btnLearnMedia');
+  const res = $('learnMediaResult');
+
+  const kind = $('mediaKind').value;
+  const query = $('mediaQuery').value.trim();
+  const limit = Number($('mediaLimit').value) || 5;
+
+  if (!query) {
+    res.textContent = '请填关键词';
+    res.style.color = 'var(--warn)';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '下载中…';
+  res.textContent = '正在搜索并下载…';
+
+  try {
+    const j = await api('learning/media', {
+      method: 'POST',
+      body: { kind, query, limit },
+    });
+
+    if (j.ok) {
+      res.innerHTML = `✓ 找到 ${j.foundUrls} 个链接，成功下载 ${j.downloaded.length} 张`;
+      res.style.color = 'var(--ok)';
+      await refreshMedia(kind);
+    } else {
+      res.textContent = '✗ ' + j.error;
+      res.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.style.color = 'var(--err)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '下载';
+  }
+}
+
+// ===== 画图 =====
+
+async function loadImagegen() {
+  try {
+    const c = await api('config');
+    const ig = c.imagegen || {};
+
+    setSw('swImagegen', ig.enabled === true);
+    $('igBaseUrl').value = ig.baseUrl || 'https://open.bigmodel.cn/api/paas/v4';
+    $('igModel').value = ig.model || 'cogview-3-flash';
+    $('igSize').value = ig.size || '1024x1024';
+
+    const chip = $('imagegenChip');
+    const usable = ig.enabled && (ig.hasKey || c.vision?.hasKey);
+    chip.textContent = usable ? '可用' : ig.enabled ? '缺 Key' : '已关闭';
+    chip.className = 'chip ' + (usable ? 'on' : 'off');
+
+    $('igKeyHint').textContent = ig.hasKey
+      ? `已配置（${ig.apiKeyMasked || '****'}）`
+      : c.vision?.hasKey
+        ? '未单独配置，将复用看图模型的 Key'
+        : '还没配置 Key';
+
+    // 主动画图
+    const pd = ig.proactive || {};
+    setSw('swProactiveDraw', pd.enabled === true);
+    $('pdChance').value = Math.round((pd.chance ?? 0.05) * 100);
+    $('pdInterval').value = pd.minIntervalMinutes ?? 60;
+    $('pdMaxPerDay').value = pd.maxPerDay ?? 2;
+
+    const pdChip = $('proactiveDrawChip');
+    const pdOn = pd.enabled === true && usable;
+    pdChip.textContent = pdOn ? '已开启' : pd.enabled ? '缺 Key' : '已关闭';
+    pdChip.className = 'chip ' + (pdOn ? 'on' : 'off');
+  } catch (e) {
+    console.error('loadImagegen', e);
+  }
+}
+
+async function saveProactiveDraw() {
+  const hint = $('pdSaveHint');
+  hint.textContent = '保存中…';
+
+  try {
+    const j = await api('config', {
+      method: 'POST',
+      body: {
+        imagegen: {
+          proactive: {
+            enabled: $('swProactiveDraw').classList.contains('on'),
+            chance: Number($('pdChance').value) / 100,
+            minIntervalMinutes: Number($('pdInterval').value),
+            maxPerDay: Number($('pdMaxPerDay').value),
+          },
+        },
+      },
+    });
+
+    if (j.ok) {
+      hint.textContent = '✓ 已保存';
+      toast('主动画图设置已保存');
+      await loadImagegen();
+    } else {
+      hint.textContent = '✗ ' + (j.error || '失败');
+    }
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+  }
+}
+
+async function saveImagegen() {
+  const hint = $('igSaveHint');
+  hint.textContent = '保存中…';
+
+  const body = {
+    imagegen: {
+      enabled: $('swImagegen').classList.contains('on'),
+      baseUrl: $('igBaseUrl').value.trim(),
+      model: $('igModel').value.trim() || 'cogview-3-flash',
+      size: $('igSize').value,
+    },
+  };
+
+  // Key 留空表示不改
+  const key = $('igApiKey').value.trim();
+  if (key) body.imagegen.apiKey = key;
+
+  try {
+    const j = await api('config', { method: 'POST', body });
+    if (j.ok) {
+      hint.textContent = '✓ 已保存' + (j.needsRestart ? '（重启后生效）' : '');
+      $('igApiKey').value = '';
+      toast('画图设置已保存');
+      await loadImagegen();
+    } else {
+      hint.textContent = '✗ ' + (j.error || '失败');
+    }
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+  }
+}
+
+async function testImageGen() {
+  const btn = $('btnTestDraw');
+  const res = $('igTestResult');
+
+  btn.disabled = true;
+  btn.textContent = '画图中…';
+  res.textContent = '正在生成（大约 10 秒）…';
+  res.style.color = 'var(--text2)';
+
+  const t0 = Date.now();
+
+  try {
+    const j = await api('imagegen/test', {
+      method: 'POST',
+      body: { prompt: '一只蓝色胖鲸鱼，卡通风格，白底' },
+    });
+
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+
+    if (j.ok) {
+      res.innerHTML =
+        `✓ 画好了（${secs}s）<br>` +
+        `<div style="margin-top:8px;color:var(--text2)">${j.names?.join(', ') || ''}</div>` +
+        (j.url
+          ? `<img src="${j.url}" style="max-width:240px;border-radius:8px;margin-top:10px;border:1px solid var(--border)">`
+          : '');
+      res.style.color = 'var(--ok)';
+      toast('画图成功');
+    } else {
+      res.textContent = `✗ ${j.error || '失败'}`;
+      res.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.style.color = 'var(--err)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '试画一张';
+  }
+}
+
+// ===== 记忆 =====
+
+let memCurrentId = '';
+let memCurrentFile = '';
+
+async function loadMemory() {
+  try {
+    const j = await api('memory');
+
+    $('memChip').textContent = j.enabled ? '已启用' : '未启用';
+    $('memChip').className = 'chip ' + (j.enabled ? 'on' : 'off');
+
+    // 显示实际存储目录
+    if (j.dir && $('memDirPath')) {
+      $('memDirPath').textContent = j.dir;
+    }
+
+    const list = j.sessions || [];
+
+    if (!list.length) {
+      $('memList').innerHTML =
+        '<div class="hint">还没有记忆。聊几句、或说「以后别用网络用语」这类话，就会自动记下来。</div>';
+      return;
+    }
+
+    $('memList').innerHTML = list
+      .map(
+        (s) => `
+      <div class="item" onclick="openMemory('${s.id.replace(/'/g, "\\'")}')">
+        <div style="flex:1">
+          <div class="nm">${s.label || s.id}</div>
+          <div class="meta">
+            ${s.facts} 条事实 · ${s.summaries} 条摘要
+            ${s.updatedAt ? ' · ' + new Date(s.updatedAt).toLocaleString('zh-CN') : ''}
+          </div>
+        </div>
+        <span class="hint">查看</span>
+      </div>`,
+      )
+      .join('');
+  } catch (e) {
+    $('memList').innerHTML = `<div class="hint">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function openMemory(id) {
+  memCurrentId = id;
+
+  try {
+    const j = await api('memory/' + encodeURIComponent(id));
+
+    $('memDetailCard').style.display = 'block';
+    $('memDetailTitle').textContent = id;
+    $('memSessionId').value = id;
+
+    memCurrentFile = j.file || '';
+
+    $('memFilePath').innerHTML = j.file
+      ? `文件：<code>${j.file}</code> ${j.bytes ? `（${(j.bytes / 1024).toFixed(1)}KB）` : ''}` +
+        (j.fileExists ? '' : ' <span style="color:var(--warn)">（还没写盘，加一条记忆就会生成）</span>')
+      : '';
+
+    // 逐条展示事实，每条可单独删
+    const factLines = (j.factList || [])
+      .map(
+        (f) => `
+      <div class="mem-item">
+        <div style="flex:1">
+          <div class="mem-k">${escapeHtml(f.key)}</div>
+          <div class="mem-v">${escapeHtml(f.value)}</div>
+          ${f.at ? `<div class="mem-t">${new Date(f.at).toLocaleString('zh-CN')}</div>` : ''}
+        </div>
+        <span class="mem-x" onclick="removeMemoryFact('${escapeAttr(f.key)}')" title="删除这条">×</span>
+      </div>`,
+      )
+      .join('');
+
+    const sumLines = (j.summaryList || [])
+      .map(
+        (s) => `
+      <div class="mem-item">
+        <div style="flex:1">
+          <div class="mem-v">· ${escapeHtml(s.text)}</div>
+          ${s.at ? `<div class="mem-t">${new Date(s.at).toLocaleString('zh-CN')}</div>` : ''}
+        </div>
+      </div>`,
+      )
+      .join('');
+
+    $('memDetail').innerHTML = `
+      <div style="margin-bottom:14px">
+        <h2 style="font-size:13px;margin-bottom:8px">事实（${(j.factList || []).length} 条）</h2>
+        ${factLines || '<div class="hint">还没有记住任何事</div>'}
+      </div>
+      <div style="margin-bottom:14px">
+        <h2 style="font-size:13px;margin-bottom:8px">摘要（${(j.summaryList || []).length} 条）</h2>
+        ${sumLines || '<div class="hint">还没有摘要（聊超过 20 轮才会生成）</div>'}
+      </div>
+      <div>
+        <h2 style="font-size:13px;margin-bottom:8px">实际注入提示词的内容</h2>
+        <pre class="preview-box" style="max-height:200px">${escapeHtml(j.rendered || '（空）')}</pre>
+      </div>`;
+  } catch (e) {
+    toast('读取失败: ' + e.message, 'err');
+  }
+}
+
+/** 删除单条事实。 */
+async function removeMemoryFact(key) {
+  if (!memCurrentId) return;
+  if (!confirm(`删除记忆「${key}」？`)) return;
+
+  try {
+    const j = await api('memory/fact/remove', {
+      method: 'POST',
+      body: { id: memCurrentId, key },
+    });
+
+    if (j.ok) {
+      toast(j.message || '已删除');
+      await openMemory(memCurrentId);
+      await loadMemory();
+    } else {
+      toast('删除失败: ' + (j.error || ''), 'err');
+    }
+  } catch (e) {
+    toast('删除失败: ' + e.message, 'err');
+  }
+}
+
+/** 在文件管理器里定位当前记忆文件。 */
+async function openMemoryFile() {
+  if (!memCurrentFile) {
+    toast('这个会话还没有记忆文件', 'err');
+    return;
+  }
+
+  try {
+    const j = await api('reveal', { method: 'POST', body: { path: memCurrentFile } });
+    if (j.ok) toast('已在文件管理器中打开');
+    else toast(j.error || '打开失败', 'err');
+  } catch (e) {
+    toast('打开失败: ' + e.message, 'err');
+  }
+}
+
+/** 打开记忆目录。 */
+async function openMemoryDir() {
+  try {
+    const j = await api('reveal', { method: 'POST', body: { path: 'data/memory' } });
+    if (j.ok) toast('已打开记忆目录');
+    else toast(j.error || '打开失败', 'err');
+  } catch (e) {
+    toast('打开失败: ' + e.message, 'err');
+  }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function escapeAttr(s) {
+  return String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+async function clearMemory() {
+  if (!memCurrentId) return;
+  if (!confirm(`确定清空 ${memCurrentId} 的全部记忆？`)) return;
+
+  try {
+    await api('memory/clear', { method: 'POST', body: { id: memCurrentId } });
+    toast('已清空');
+    $('memDetailCard').style.display = 'none';
+    memCurrentId = '';
+    await loadMemory();
+  } catch (e) {
+    toast('清空失败: ' + e.message, 'err');
+  }
+}
+
+async function addMemoryFact() {
+  const id = $('memSessionId').value.trim();
+  const key = $('memKey').value.trim();
+  const value = $('memValue').value.trim();
+  const res = $('memAddResult');
+
+  if (!id || !key || !value) {
+    res.textContent = '三栏都要填';
+    res.style.color = 'var(--warn)';
+    return;
+  }
+
+  try {
+    const j = await api('memory/fact', { method: 'POST', body: { id, key, value } });
+    if (j.ok) {
+      res.textContent = '✓ ' + j.message;
+      res.style.color = 'var(--ok)';
+      $('memKey').value = '';
+      $('memValue').value = '';
+      await loadMemory();
+    } else {
+      res.textContent = '✗ ' + j.error;
+      res.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.style.color = 'var(--err)';
+  }
+}
+
+// ===== 主人设置 =====
+
+let ownerNames = [];
+let ownerWxids = [];
+let collectList = [];
+
+function renderCollect() {
+  const box = $('collectList');
+  if (!box) return;
+
+  if (!collectList.length) {
+    box.innerHTML = '<span class="hint">全部账号（不限）</span>';
+    return;
+  }
+
+  box.innerHTML = collectList
+    .map(
+      (v) => `<span class="target-item on">${v}
+      <span class="x" onclick="removeCollect('${String(v).replace(/'/g, "\\'")}')">×</span>
+    </span>`,
+    )
+    .join('');
+}
+
+function removeCollect(v) {
+  collectList = collectList.filter((x) => x !== v);
+  renderCollect();
+}
+
+function addCollect() {
+  const v = $('collectInput').value.trim();
+  if (!v) return;
+  if (!collectList.includes(v)) collectList.push(v);
+  $('collectInput').value = '';
+  renderCollect();
+}
+
+/** 一键把主人账号也加进收藏白名单。 */
+function useOwnerAsCollect() {
+  let added = 0;
+  for (const v of [...ownerWxids, ...ownerNames]) {
+    if (v && !collectList.includes(v)) {
+      collectList.push(v);
+      added++;
+    }
+  }
+  renderCollect();
+  toast(added ? `已加入 ${added} 个` : '主人账号已在名单里');
+}
+
+/**
+ * 安全等级「中」时，自动查找可绑定的 wxid 并给出按钮。
+ *
+ * 逻辑：在聊天记录里找昵称与已配置主人昵称匹配、且带 wxid 的记录。
+ */
+async function autoSuggestBind() {
+  const el = $('bindHint');
+  if (!el) return;
+
+  try {
+    const j = await api('owner/candidates');
+    const list = j.candidates || [];
+
+    // 找昵称匹配且带 wxid 的
+    const match = list.find(
+      (c) => c.verified && c.wxid && ownerNames.includes(c.senderName),
+    );
+
+    if (!match) {
+      el.innerHTML =
+        '没找到你的 wxid。用微信给她发条消息，然后点「从聊天记录识别」。';
+      el.style.color = 'var(--warn)';
+      return;
+    }
+
+    el.innerHTML =
+      `检测到你的 wxid：<code>${match.wxid}</code> ` +
+      `<button class="ghost sm" onclick="bindWxid('${match.wxid}')">一键绑定</button>`;
+    el.style.color = 'var(--ok)';
+  } catch {
+    el.textContent = '查找 wxid 失败';
+  }
+}
+
+/** 一键把 wxid 加进主人名单并保存。 */
+async function bindWxid(wxid) {
+  if (!wxid) return;
+  if (!ownerWxids.includes(wxid)) ownerWxids.push(wxid);
+  renderOwnerList('wxids');
+
+  try {
+    await saveOwner();
+    toast('已绑定 wxid，安全等级升为「高」，工具权限已解锁');
+  } catch (e) {
+    toast('绑定失败: ' + e.message, 'err');
+  }
+}
+
+async function loadOwner() {
+  try {
+    const j = await api('owner');
+
+    setSw('swOwner', j.enabled);
+    $('ownerChip').textContent = j.enabled ? '已启用' : '已关闭';
+    $('ownerChip').className = 'chip ' + (j.enabled ? 'on' : 'off');
+
+    $('ownerTitle').value = j.title || '主人';
+    $('ownerDisplayName').value = j.displayName || '';
+
+    ownerNames = j.names || [];
+    ownerWxids = j.wxids || [];
+
+    renderOwnerList('names');
+    renderOwnerList('wxids');
+
+    setSw('privTools', j.privileges.tools);
+    setSw('privDsh', j.privileges.dsh);
+    setSw('privAdmin', j.privileges.admin);
+    setSw('swTrustNickname', j.trustNicknameForTools === true);
+
+    // 图片收藏设置
+    const w = j.wechat || {};
+    setSw('swCollect', w.mediaCollect !== false);
+    collectList = w.collectOnlyFrom || [];
+    renderCollect();
+
+    // 收藏范围回填（后端只存 collectOnlyFrom，"只收主人"= 名单与主人 wxid 完全一致）
+    const scope = w.collectScope || (collectList.length ? 'custom' : 'all');
+    const radio = document.querySelector(`input[name="collectScope"][value="${scope}"]`);
+    if (radio) radio.checked = true;
+    onCollectScopeChange();
+
+    // 安全等级提示
+    const box = $('ownerSecBox');
+    const hint = $('ownerSecHint');
+    const lvl = j.securityLevel || 'low';
+
+    box.className = 'secbox ' + lvl;
+
+    if (lvl === 'high') {
+      hint.innerHTML = '🔒 <b>安全等级：高</b><br>已配置 wxid，别人改昵称也冒充不了。';
+    } else if (lvl === 'medium') {
+      hint.innerHTML =
+        '⚠ <b>安全等级：中</b><br>只配了昵称。昵称谁都能改，<b>当前不会给她工具权限</b>。<br>' +
+        '<span id="bindHint">正在查找你的 wxid…</span>';
+      // 异步尝试找可绑定的 wxid
+      autoSuggestBind();
+    } else {
+      hint.innerHTML =
+        '❌ <b>安全等级：低</b><br>还没配置主人。现在私聊一律当主人，<b>不设防</b>。<br>' +
+        '建议填上昵称或 wxid。';
+    }
+  } catch (e) {
+    toast('加载失败: ' + e.message, 'err');
+  }
+}
+
+function renderOwnerList(kind) {
+  const box = $(kind === 'names' ? 'ownerNames' : 'ownerWxids');
+  const arr = kind === 'names' ? ownerNames : ownerWxids;
+
+  if (!arr.length) {
+    box.innerHTML = '<span class="hint">未配置</span>';
+    return;
+  }
+
+  box.innerHTML = arr
+    .map(
+      (v) => `<span class="target-item on">${v}
+      <span class="x" onclick="removeOwnerItem('${kind}','${String(v).replace(/'/g, "\\'")}')">×</span>
+    </span>`,
+    )
+    .join('');
+}
+
+function removeOwnerItem(kind, value) {
+  if (kind === 'names') ownerNames = ownerNames.filter((x) => x !== value);
+  else ownerWxids = ownerWxids.filter((x) => x !== value);
+  renderOwnerList(kind);
+}
+
+function addOwnerName() {
+  const v = $('ownerNameInput').value.trim();
+  if (!v) return;
+  if (!ownerNames.includes(v)) ownerNames.push(v);
+  $('ownerNameInput').value = '';
+  renderOwnerList('names');
+}
+
+function addOwnerWxid() {
+  const v = $('ownerWxidInput').value.trim();
+  if (!v) return;
+  if (!ownerWxids.includes(v)) ownerWxids.push(v);
+  $('ownerWxidInput').value = '';
+  renderOwnerList('wxids');
+}
+
+/** 从聊天记录里识别候选主人（昵称 + wxid）。 */
+async function loadOwnerCandidates() {
+  try {
+    const j = await api('owner/candidates');
+    const list = j.candidates || [];
+
+    if (!list.length) {
+      toast('聊天记录里没找到发送者，先给她发条消息试试', 'err');
+      return;
+    }
+
+    let addedNames = 0;
+    let addedWxids = 0;
+
+    for (const c of list) {
+      // 优先用 wxid（更安全）
+      if (c.wxid && c.verified) {
+        if (!ownerWxids.includes(c.wxid)) {
+          ownerWxids.push(c.wxid);
+          addedWxids++;
+        }
+      }
+      // 昵称也加上（作为补充）
+      if (c.senderName && !ownerNames.includes(c.senderName)) {
+        ownerNames.push(c.senderName);
+        addedNames++;
+      }
+    }
+
+    renderOwnerList('names');
+    renderOwnerList('wxids');
+
+    if (addedWxids > 0) {
+      toast(`✓ 识别到 ${addedWxids} 个 wxid（安全等级可升级为「高」），记得点保存`);
+    } else if (addedNames > 0) {
+      toast(`识别到 ${addedNames} 个昵称。想要工具权限，需要 wxid`);
+    } else {
+      toast('都对上了，没有新增');
+    }
+  } catch (e) {
+    toast('识别失败: ' + e.message, 'err');
+  }
+}
+
+async function saveOwner() {
+  const hint = $('ownerSaveHint');
+  hint.textContent = '保存中…';
+
+  try {
+    const j = await api('owner', {
+      method: 'POST',
+      body: {
+        enabled: $('swOwner').classList.contains('on'),
+        title: $('ownerTitle').value.trim(),
+        displayName: $('ownerDisplayName').value.trim(),
+        names: ownerNames,
+        wxids: ownerWxids,
+        privileges: {
+          tools: $('privTools').classList.contains('on'),
+          dsh: $('privDsh').classList.contains('on'),
+          admin: $('privAdmin').classList.contains('on'),
+        },
+        trustNicknameForTools: $('swTrustNickname').classList.contains('on'),
+
+        // 图片收藏权限也要一起提交，否则这个页面的保存会把它覆盖没
+        wechat: {
+          mediaCollect: $('swCollect').classList.contains('on'),
+          collectScope: currentCollectScope(),
+          collectOnlyFrom: collectList,
+        },
+      },
+    });
+
+    if (j.ok) {
+      hint.textContent = '✓ 已保存';
+      toast('已保存，立即生效');
+      await loadOwner();
+    } else {
+      hint.textContent = '✗ ' + (j.error || '失败');
+    }
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+  }
+}
+
+/** 当前选中的收藏范围。 */
+function currentCollectScope() {
+  const el = document.querySelector('input[name="collectScope"]:checked');
+  return el ? el.value : 'all';
+}
+
+/** 切换收藏范围时，显示/隐藏自定义名单。 */
+function onCollectScopeChange() {
+  const scope = currentCollectScope();
+  const box = $('collectCustomBox');
+  if (box) box.style.display = scope === 'custom' ? 'block' : 'none';
+}
+
+/** 测试主人识别。 */
+async function testOwner() {
+  const asOwner = $('ownerTestAs').value === 'owner';
+  const name = $('ownerTestName').value.trim() || (asOwner ? ownerNames[0] || '未知' : '陌生人');
+  const msg = $('ownerTestMsg').value.trim() || '你的主人是谁';
+
+  const btn = $('btnOwnerTest');
+  const res = $('ownerTestResult');
+
+  btn.disabled = true;
+  btn.textContent = '发送中…';
+  res.textContent = '等待回复…';
+
+  try {
+    const r = await fetch('/api/wechat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: 'test_' + name,
+        chat_type: 'private',
+        senderId: 'test_' + name,
+        senderName: name,
+        text: msg,
+        msg_id: 'ot-' + Date.now(),
+      }),
+    });
+    const j = await r.json();
+    const reply = (j.bubbles || []).join('');
+
+    res.innerHTML = `<b>${name}</b> 问「${msg}」<br>她答：${reply || '（无回复）'}`;
+    res.style.color = 'var(--text)';
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.style.color = 'var(--err)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '发送';
+  }
+}
+
+async function loadWords() {
+  try {
+    const j = await api('words');
+    if (!j.banks.length) {
+      $('bankList').innerHTML = '<div class="hint">还没有词库</div>';
+      $('bankToggles').innerHTML = '<div class="hint">还没有词库</div>';
+      return;
+    }
+
+    // 词库开关
+    $('bankToggles').innerHTML = j.banks
+      .map(
+        (b) => `
+      <div class="row">
+        <label>${b.label || b.name}</label>
+        <div class="ctl">
+          <div class="switch ${b.enabled ? 'on' : ''}" onclick="toggleBank('${b.name}', ${!b.enabled})"></div>
+          <span class="hint">${b.entries} 条${b.enabled ? '' : ' · 已关闭，不进提示词'}</span>
+        </div>
+      </div>`,
+      )
+      .join('');
+
+    // 文件列表
+    $('bankList').innerHTML = j.banks
+      .map(
+        (b) => `
+      <div class="item ${b.name === currentBank ? 'active' : ''}" onclick="openBank('${b.name}')">
+        <div style="flex:1">
+          <div class="nm">${b.label || b.name} ${b.enabled ? '' : '<span class="chip off">未启用</span>'}</div>
+          <div class="meta">${b.name} · ${b.entries} 条 · ${(b.size / 1024).toFixed(1)} KB</div>
+        </div>
+      </div>`,
+      )
+      .join('');
+  } catch (e) {
+    $('bankList').innerHTML = `<div class="hint">加载失败: ${e.message}</div>`;
+  }
+}
+
+/** 开关某个词库。 */
+async function toggleBank(name, enabled) {
+  try {
+    const j = await api('words/toggle', { method: 'POST', body: { bank: name, enabled } });
+    toast(j.message || '已更新');
+    await loadWords();
+  } catch (e) {
+    toast('切换失败: ' + e.message, 'err');
+  }
+}
+
+/** 手动添加词条。 */
+async function addWordEntry() {
+  const bank = $('addBank').value;
+  const word = $('addWord').value.trim();
+  const explain = $('addExplain').value.trim();
+  const res = $('addWordResult');
+  const btn = $('btnAddWord');
+
+  if (!word) {
+    res.textContent = '请填词条';
+    res.style.color = 'var(--warn)';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '添加中…';
+
+  try {
+    const j = await api('words/add', { method: 'POST', body: { bank, word, explain } });
+    if (j.ok) {
+      res.textContent = '✓ ' + j.message;
+      res.style.color = 'var(--ok)';
+      $('addWord').value = '';
+      $('addExplain').value = '';
+      await loadWords();
+      // 如果正在编辑这个词库，刷新内容
+      if (currentBank === bank) await openBank(bank);
+    } else {
+      res.textContent = '✗ ' + j.error;
+      res.style.color = 'var(--err)';
+    }
+  } catch (e) {
+    res.textContent = '✗ ' + e.message;
+    res.style.color = 'var(--err)';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '添加';
+  }
+}
+
+async function openBank(name) {
+  try {
+    const j = await api('words/' + encodeURIComponent(name));
+    currentBank = name;
+    $('wordEditor').style.display = 'block';
+    $('wordTitle').textContent = name;
+    $('wordMeta').textContent = `${j.entries} 条`;
+    $('wordContent').value = j.content;
+    $('wordSaveHint').textContent = '';
+    await loadWords();
+  } catch (e) { toast('读取失败: ' + e.message, 'err'); }
+}
+
+async function saveWords() {
+  if (!currentBank) return;
+  const hint = $('wordSaveHint');
+  hint.textContent = '保存中…';
+
+  try {
+    const content = $('wordContent').value;
+    const j = await api('words/save', {
+      method: 'POST',
+      body: { name: currentBank, content },
+    });
+
+    if (j.ok) {
+      hint.textContent = '✓ ' + j.message;
+      toast(j.message);
+      // 保存后核对真的写进去了
+      const back = await api('words/read', { method: 'POST', body: { name: currentBank } });
+      if (back.ok && back.entries !== j.entries) {
+        hint.textContent = `⚠ 保存了但核对不一致（${j.entries} vs ${back.entries}）`;
+      }
+      await loadWords();
+    } else {
+      hint.textContent = '✗ ' + (j.error || '保存失败');
+      toast('保存失败: ' + (j.error || ''), 'err');
+    }
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+    toast('保存失败: ' + e.message, 'err');
+  }
+}
+
+/** 新建词库。 */
+async function createBank() {
+  const name = prompt('新词库的名字（英文/数字/下划线）：\n例如 mywords');
+  if (!name) return;
+
+  const title = prompt('显示名称（可留空）：', name) || name;
+
+  try {
+    const j = await api('words/create', { method: 'POST', body: { name: name.trim(), title } });
+    if (j.ok) {
+      toast(j.message);
+      await loadWords();
+      await openBank(j.name);
+    } else {
+      toast(j.error || '创建失败', 'err');
+    }
+  } catch (e) {
+    toast('创建失败: ' + e.message, 'err');
+  }
+}
+
+/** 删除当前词库。 */
+async function deleteBank() {
+  if (!currentBank) return;
+
+  if (['slang', 'clapback', 'abbrev'].includes(currentBank)) {
+    toast('内置词库不能删除，可以关掉开关', 'err');
+    return;
+  }
+
+  if (!confirm(`确定删除词库「${currentBank}」？文件会被删除。`)) return;
+
+  try {
+    const j = await api('words/delete', { method: 'POST', body: { name: currentBank } });
+    if (j.ok) {
+      toast(j.message);
+      $('wordEditor').style.display = 'none';
+      currentBank = null;
+      await loadWords();
+    } else {
+      toast(j.error || '删除失败', 'err');
+    }
+  } catch (e) {
+    toast('删除失败: ' + e.message, 'err');
+  }
+}
+
+async function loadBridge() {
+  try {
+    const b = await api('bridge');
+    const s = b.stats || {};
+
+    $('bridgeGrid').innerHTML = `
+      <div class="stat"><div class="k">桥接进程</div><div class="v ${b.online ? 'ok' : 'off'}">${b.online ? '运行中' : '未运行'}</div></div>
+      <div class="stat"><div class="k">登录账号</div><div class="v ${b.account ? 'ok' : 'off'}" style="font-size:13px">${b.account || '未知'}</div></div>
+      <div class="stat"><div class="k">消息监听</div><div class="v ${b.listening ? 'ok' : 'warn'}">${b.listening ? '监听中' : '未开启'}</div></div>
+      <div class="stat"><div class="k">发送通道</div><div class="v ${b.uiaOk ? 'ok' : 'warn'}">${b.uiaOk ? 'UIA 可用' : 'OCR 兜底'}</div></div>
+      <div class="stat"><div class="k">最近消息</div><div class="v">${s.recentMessages || 0} 条</div></div>
+      <div class="stat"><div class="k">最后活动</div><div class="v" style="font-size:12px">${b.lastActivity || '-'}</div></div>`;
+
+    if (!b.online) {
+      $('bridgeGrid').innerHTML += `
+        <div class="stat" style="grid-column:1/-1">
+          <div class="k">提示</div>
+          <div class="v" style="font-size:12px;color:var(--warn)">
+            ${b.error || '桥接未运行'}<br>
+            双击「启动微信桥接.bat」启动（需要管理员权限）
+          </div>
+        </div>`;
+    }
+  } catch (e) {
+    toast('桥接检测失败: ' + e.message, 'err');
+  }
+}
+
+async function loadLogs() {
+  try {
+    const j = await api('logs');
+    $('logMain').textContent = (j.out || '（无日志）').split('\n').slice(-60).join('\n');
+  } catch (e) { $('logMain').textContent = '读取失败: ' + e.message; }
+  $('logBridge').textContent = '（桥接日志：data/pybridge.log）';
+}
+
+const chatSession = 'console-' + Math.random().toString(36).slice(2, 10);
+
+function addMsg(who, text) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + who;
+  d.textContent = text;
+  $('chatLog').appendChild(d);
+  $('chatLog').scrollTop = $('chatLog').scrollHeight;
+}
+
+function clearChat() { $('chatLog').innerHTML = ''; }
+
+async function sendChat() {
+  const input = $('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  addMsg('user', text);
+  input.value = '';
+  $('chatBtn').disabled = true;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg bot';
+  bubble.textContent = '…';
+  $('chatLog').appendChild(bubble);
+
+  let full = '';
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: chatSession, text }),
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split('\n\n');
+      buf = events.pop() || '';
+      for (const evt of events) {
+        let name = 'message', data = '';
+        for (const l of evt.split('\n')) {
+          if (l.startsWith('event:')) name = l.slice(6).trim();
+          else if (l.startsWith('data:')) data += l.slice(5).trim();
+        }
+        if (!data) continue;
+        try {
+          const o = JSON.parse(data);
+          if (name === 'delta') { full += o.text; bubble.textContent = full; }
+          else if (name === 'done' && o.bubbles) bubble.textContent = o.bubbles.join(' ');
+          else if (name === 'error') bubble.textContent = '（错误：' + o.message + '）';
+        } catch {}
+      }
+    }
+    if (!full && bubble.textContent === '…') bubble.textContent = '（无回复）';
+  } catch (e) {
+    bubble.textContent = '（失败：' + e.message + '）';
+  } finally {
+    $('chatBtn').disabled = false;
+  }
+}
+
+async function loadAll() {
+  await Promise.all([
+    loadStatus(),
+    loadModel(),
+    loadCards(),
+    loadWords(),
+    loadActive(),
+    loadOwner(),
+    loadMemory(),
+    loadImagegen(),
+    loadBridge(),
+  ]);
+}
+
+loadAll();
+setInterval(loadStatus, 10000);
+</script>
+</body>
+</html>

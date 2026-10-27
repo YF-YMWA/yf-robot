@@ -1,0 +1,37 @@
+{
+  "name": "jingjing",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "鲸鲸 —— 人设化 AI 助手，支持微信接入、角色卡、长期记忆、看图/画图/语音/联网学习",
+  "keywords": [
+    "ai",
+    "chatbot",
+    "wechat",
+    "character-card",
+    "llm",
+    "deepseek",
+    "agent"
+  ],
+  "license": "MIT",
+  "author": "jingjing contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-name/jingjing.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-name/jingjing/issues"
+  },
+  "homepage": "https://github.com/your-name/jingjing#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node app.mjs",
+    "test": "node --test tests/",
+    "doctor": "node app.mjs --doctor",
+    "check": "node tools/check-all.mjs",
+    "pack": "node tools/pack.mjs",
+    "pack:lite": "node tools/pack.mjs --no-runtime"
+  }
+}

@@ -1,0 +1,63 @@
+# 第三方组件声明
+
+本项目（鲸鲸）以 MIT 许可证发布，但运行时会用到以下第三方组件。
+它们各自的许可证如下，分发时请一并保留本文件。
+
+---
+
+## wechatauto-replica
+
+- **用途**：微信 4.x 客户端自动化（数据库解密读取、UIA 消息发送、媒体下载）
+- **版本**：1.2.7.0
+- **许可证**：Apache License 2.0
+- **源码**：https://github.com/fanyuantaier/wechatauto-replica
+- **说明**：本项目**不包含**其源码，只在 `bridge_wg/` 里通过 pip 安装后调用其公开 API
+  （`WeChatDB`、`MediaDownloader`、`WeChatGUI`、`Listener` 等）。
+  发行包里的 `runtime/python/Lib/site-packages/wechatauto/` 是其原始分发包，
+  许可证全文见同目录 `wechatauto_replica-*.dist-info/licenses/`。
+
+## Node.js
+
+- **用途**：服务运行时
+- **许可证**：MIT
+- **网址**：https://nodejs.org/
+
+## Python
+
+- **用途**：微信桥接运行时
+- **许可证**：PSF License
+- **网址**：https://www.python.org/
+
+## Python 第三方库
+
+发行包 `runtime/python/Lib/site-packages/` 内包含：
+
+| 组件 | 许可证 |
+|---|---|
+| Pillow | HPND |
+| numpy | BSD-3-Clause |
+| pywin32 | PSF |
+| comtypes | MIT |
+| cryptography | Apache-2.0 / BSD-3-Clause |
+
+各自的许可证文件都在对应的 `*.dist-info/licenses/` 目录里。
+
+## ffmpeg
+
+- **用途**：图片/视频转码（wxgf 动图转 GIF、HEVC 转 JPEG）
+- **许可证**：取决于构建版本（LGPL 2.1+ 或 GPL）
+- **说明**：本项目**不打包** ffmpeg，需要用户自行安装并加入 PATH。
+  未安装时会影响：wxgf 动图转码、部分格式转换。核心聊天功能不受影响。
+
+## Character Card V2 规范
+
+- **用途**：角色卡 JSON 格式
+- **许可证**：MIT
+- **源码**：https://github.com/malfoyslastname/character-card-spec-v2
+
+---
+
+## 关于 DeepSeek Harness
+
+本项目通过 ACP（Agent Client Protocol）协议调用 DeepSeek Harness 完成复杂任务，
+属于进程间调用，不包含其代码。DeepSeek Harness 的许可证见其官方仓库。
