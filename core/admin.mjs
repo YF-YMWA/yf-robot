@@ -463,6 +463,23 @@ export class AdminApi {
         return { code: 200, body: this.#uploadMedia(body) };
       }
 
+      // ===== 插件 =====
+      if (method === 'GET' && pathname === '/api/admin/plugins') {
+        return {
+          code: 200,
+          body: {
+            plugins: this.engine.plugins?.list?.() || [],
+            tools: this.engine.plugins?.definitions?.().map((d) => d.function.name) || [],
+          },
+        };
+      }
+      if (method === 'POST' && pathname === '/api/admin/plugins/toggle') {
+        const id = String(body?.id || '');
+        const enabled = Boolean(body?.enabled);
+        const r = this.engine.plugins?.setEnabled?.(id, enabled) || { ok: false, error: '插件未启用' };
+        return { code: 200, body: r };
+      }
+
       // ===== 知识库 =====
       if (method === 'GET' && pathname === '/api/admin/kb') {
         return {

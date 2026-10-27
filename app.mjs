@@ -475,6 +475,21 @@ async function main() {
   }
 
   // 逐个启动，单个失败不影响其他
+  // 加载插件（别人给她加的功能）。失败不影响主流程。
+  try {
+    await engine.plugins.load();
+    const list = engine.plugins.list();
+    const okCount = list.filter((x) => x.state === 'loaded').length;
+    if (list.length) {
+      console.log(`[plugin] ${okCount}/${list.length} 个插件已加载`);
+      for (const x of list) {
+        if (x.state === 'error') console.warn(`[plugin] ${x.id} 出错：${x.error}`);
+      }
+    }
+  } catch (e) {
+    console.warn(`[plugin] 加载失败（不影响运行）：${e.message}`);
+  }
+
   let webUrl = null;
   for (const ch of channels) {
     try {

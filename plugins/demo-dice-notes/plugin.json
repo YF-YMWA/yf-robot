@@ -1,0 +1,36 @@
+{
+  "name": "示例插件 · 掷骰子与便签",
+  "version": "1.0.0",
+  "description": "演示插件能做什么：提供两个工具（掷骰子、记便签），并挂一个 onMessage 钩子",
+  "author": "YF-Robot",
+  "homepage": "",
+  "tools": [
+    {
+      "name": "roll_dice",
+      "description": "掷骰子。可以指定面数（默认 6）和投掷次数（默认 1）",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sides": { "type": "integer", "description": "骰子面数，默认 6" },
+          "times": { "type": "integer", "description": "投几次，默认 1，最多 10" }
+        }
+      }
+    },
+    {
+      "name": "save_note",
+      "description": "把一句话记进便签本，下次还能查。适合记「明天要买菜」这种",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "要记的内容" }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "list_notes",
+      "description": "列出便签本里记过的所有内容",
+      "parameters": { "type": "object", "properties": {} }
+    }
+  ]
+}

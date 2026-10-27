@@ -17,6 +17,7 @@ import { LlmClient, inspectOutput, LlmError } from './llm.mjs';
 import { SessionStore, extractFacts, isEcho } from './session.mjs';
 import { MemoryStore, extractPreferences } from './memory.mjs';
 import { KnowledgeBase } from './kb.mjs';
+import { PluginHost } from './plugins.mjs';
 import { renderSystemPrompt } from './persona.mjs';
 import { renderWordBanks } from './words.mjs';
 import { OwnerService } from './owner.mjs';
@@ -103,7 +104,21 @@ export class ChatEngine {
         }
       }
 
+      /**
+       * 插件宿主。
+       *
+       * 加载是异步的（要 import 插件模块），所以这里先建对象，
+       * 由 app.mjs 在启动时 await this.plugins.load()。
+       * 没加载完之前 definitions() 返回空数组，不影响正常聊天。
+       */
+      this.plugins = new PluginHost({
+        root: config.root || process.cwd(),
+        config,
+        log: (m) => logger.info?.(m),
+      });
+
       this.tools = new ToolKit({
+        plugins: this.plugins,
         sandbox: config.tools.sandbox || path.join(config.root || '.', 'agent-workspace'),
         logger,
         dsh,
@@ -355,6 +370,59 @@ export class ChatEngine {
           ? `${text}\n（附带一条语音，转写失败：${e.message}）`
           : `（收到一条语音，转写失败：${e.message}）`;
       }
+    }
+
+    /**
+     * 插件钩子：onMessage。
+     *
+     * 在「消息定型之后、进模型之前」给插件一次机会：
+     *   · 返回字符串 → 替换这条消息（比如做关键词转换、补充上下文）
+     *   · 返回 { text } → 同上
+     *   · 返回 { block: '原因' } → 这条不回了（插件自己决定怎么处理）
+     *   · 返回别的 / 不返回 → 不干预
+     *
+     * 多个插件时按加载顺序串联，后一个看到的是前一个改过的结果。
+     */
+    let blockedBy = '';
+    if (this.plugins) {
+      try {
+        const outs = await this.plugins.runHook('onMessage', {
+          text: userText,
+          sessionId,
+          speakerName,
+          isOwner,
+          images,
+          audio,
+        });
+        for (const { id, result } of outs) {
+          if (!result) continue;
+          if (typeof result === 'string') {
+            userText = result;
+            this.log.info?.(`[plugin] ${id} 改写了消息`);
+            continue;
+          }
+          if (typeof result.block === 'string') {
+            blockedBy = result.block || id;
+            this.log.info?.(`[plugin] ${id} 拦下了这条消息：${blockedBy}`);
+            break;
+          }
+          if (typeof result.text === 'string') {
+            userText = result.text;
+            this.log.info?.(`[plugin] ${id} 改写了消息`);
+          }
+        }
+      } catch (e) {
+        this.log.warn?.(`[plugin] onMessage 钩子异常（已忽略）：${e.message}`);
+      }
+    }
+
+    if (blockedBy) {
+      return {
+        bubbles: [],
+        action: 'ignore',
+        reason: `插件拦截：${blockedBy}`,
+        images: [],
+      };
     }
 
     // 联网：按需搜索并拼进上下文

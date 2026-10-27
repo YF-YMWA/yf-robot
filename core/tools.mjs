@@ -52,6 +52,9 @@ export class ToolKit {
     this.cmdTimeout = opts.cmdTimeout || 30000;
     this.maxOutput = opts.maxOutput || 8000;
 
+    /** 插件宿主（可选，由外部注入）——插件提供的工具从这里来 */
+    this.plugins = opts.plugins || null;
+
     /** DSH 客户端（可选，由外部注入） */
     this.dsh = opts.dsh || null;
     this.dshEnabled = Boolean(opts.dsh);
@@ -309,6 +312,15 @@ export class ToolKit {
       },
     });
 
+    // 插件提供的工具（别人给她加的功能）
+    if (this.plugins) {
+      try {
+        defs.push(...this.plugins.definitions());
+      } catch (e) {
+        this.log.warn?.(`[tool] 插件工具加载失败: ${e.message}`);
+      }
+    }
+
     return defs;
   }
 
@@ -398,6 +410,10 @@ export class ToolKit {
             }
           }
         default:
+          // 内置里没有 → 问插件（别人给她加的功能）
+          if (this.plugins?.hasTool?.(name)) {
+            return await this.plugins.runTool(name, args);
+          }
           return `（未知工具：${name}）`;
       }
     } catch (e) {

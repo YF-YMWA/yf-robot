@@ -302,6 +302,7 @@
     <a data-page="stickers">素材库</a>
     <a data-page="learn">联网学习</a>
     <a data-page="kb">知识库</a>
+    <a data-page="plugins">插件</a>
     <a data-page="bridge">接入状态</a>
     <a data-page="logs">日志</a>
   </nav>
@@ -1016,6 +1017,37 @@
       <div class="hint" style="margin-top:8px;line-height:1.7">
         语音由阿里云百炼合成（和「语音转写」共用同一个 Key）。<br>
         微信自动化只能把音频<b>作为文件</b>发出去，不是语音条气泡 —— 对方点开就能听。
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-plugins">
+    <h1>插件</h1>
+
+    <div class="card">
+      <h2>已安装<span class="sp"></span><button class="ghost sm" onclick="loadPlugins()">刷新</button></h2>
+      <div class="hint" style="line-height:1.8;margin-bottom:10px">
+        插件放在项目根目录的 <code>plugins/</code> 下，一个目录一个插件。<br>
+        插件能给她<b>加工具</b>（模型可以调用），也能挂钩子改消息流程。
+        <b>插件和核心同进程运行，只能装你信任的</b>。
+      </div>
+      <div class="hint" id="plugHint">加载中…</div>
+      <table id="plugTable" style="display:none">
+        <thead><tr><th>插件</th><th>状态</th><th>工具</th><th>版本</th><th></th></tr></thead>
+        <tbody id="plugRows"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>怎么自己写一个</h2>
+      <div class="hint" style="line-height:1.9">
+        1. 在 <code>plugins/</code> 下建个目录，比如 <code>plugins/my-plugin/</code><br>
+        2. 写 <code>plugin.json</code>：声明名字和提供哪些工具<br>
+        3. 写 <code>index.mjs</code>：实现同名函数<br>
+        4. 重启服务，模型就能调用了<br>
+        <br>
+        完整说明见 <code>docs/plugin-api.md</code>；
+        现成例子见 <code>plugins/demo-dice-notes/</code>（掷骰子 + 便签本）。
       </div>
     </div>
   </div>
@@ -2916,6 +2948,63 @@ async function saveVoiceChance() {
   }
 }
 
+
+
+// ===== 插件 =====
+
+async function loadPlugins() {
+  try {
+    const j = await api('plugins');
+    const list = j.plugins || [];
+    const hint = $('plugHint');
+    const table = $('plugTable');
+    const rows = $('plugRows');
+
+    if (!list.length) {
+      hint.style.display = '';
+      hint.textContent = '还没有插件。想加功能就照上面的说明写一个。';
+      table.style.display = 'none';
+      return;
+    }
+
+    hint.style.display = 'none';
+    table.style.display = '';
+    rows.innerHTML = list
+      .map((p) => {
+        const stateTag =
+          p.state === 'loaded'
+            ? '<span class="chip on">已加载</span>'
+            : p.state === 'disabled'
+              ? '<span class="chip off">已禁用</span>'
+              : '<span class="chip" style="color:var(--warn)">出错</span>';
+        const toggle =
+          p.state === 'disabled'
+            ? `<button class="ghost sm" onclick="togglePlugin('${p.id}', true)">启用</button>`
+            : `<button class="ghost sm" onclick="togglePlugin('${p.id}', false)">禁用</button>`;
+        return `<tr>
+          <td>${escapeHtml(p.name)}${p.error ? `<div class="hint" style="color:var(--warn)">${escapeHtml(p.error)}</div>` : ''}</td>
+          <td>${stateTag}</td>
+          <td style="font-size:12px">${(p.tools || []).join(', ') || '-'}</td>
+          <td style="font-size:12px">${escapeHtml(p.version || '-')}</td>
+          <td>${toggle}</td>
+        </tr>`;
+      })
+      .join('');
+  } catch (e) {
+    $('plugHint').textContent = '加载失败：' + e.message;
+  }
+}
+
+async function togglePlugin(id, enabled) {
+  try {
+    const j = await api('plugins/toggle', { method: 'POST', body: { id, enabled } });
+    if (!j.ok) throw new Error(j.error || '操作失败');
+    toast(j.note || '已保存');
+    loadPlugins();
+  } catch (e) {
+    toast('操作失败：' + e.message, 'err');
+  }
+}
 
 // ===== 知识库 =====
 
