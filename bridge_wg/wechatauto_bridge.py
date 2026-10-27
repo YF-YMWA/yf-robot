@@ -1805,27 +1805,8 @@ def main():
                 log("@ 成员异常：", repr(e))
         return False
 
-    def _is_collect_allowed(chat_username, sender_id):
-        """判断这个会话/发送者发的图要不要收藏。
-
-        规则（按顺序）：
-          1. 配置里 collectOnlyFrom 为空 → 全收（旧行为）
-          2. 会话 wxid 在白名单 → 收
-          3. 发送者 wxid 在白名单 → 收
-          4. 否则 → 不收
-        """
-        if not COLLECT_WHITELIST:
-            return True
-
-        candidates = {str(chat_username or ""), str(sender_id or "")}
-        for c in candidates:
-            if c and c in COLLECT_WHITELIST:
-                return True
-
-        return False
-
     # 收藏用的目录和文件名前缀，图片和表情包共用一套规则。
-    # 唯一来源是 media_store.KINDS，下面拿到之后再赋给 COLLECT_KINDS。
+    # 唯一来源是 media_store.KINDS。
 
     # 素材库存取逻辑已抽到 media_store.py —— 抽出去是为了**能被测试直接调用**。
     # 以前这段嵌在 main() 里，外面调不到，每次改完只能看日志猜，
@@ -1834,8 +1815,16 @@ def main():
         KINDS as _STORE_KINDS,
         MediaStore as _MediaStore,
         hamming as _hamming_fn,
+        is_collect_allowed as _collect_allowed_fn,
         perceptual_hash as _perceptual_hash_fn,
     )
+
+    def _is_collect_allowed(chat_username, sender_id):
+        """判断这个会话/发送者发的图要不要收藏。
+
+        规则见 media_store.is_collect_allowed（那里是纯函数，能直接测）。
+        """
+        return _collect_allowed_fn(COLLECT_WHITELIST, chat_username, sender_id)
 
     # 目录/前缀的唯一来源是 media_store.KINDS，这里只做个别名
     COLLECT_KINDS = _STORE_KINDS
@@ -2617,6 +2606,39 @@ def main():
             log("表情包裁剪跳过：%r" % (e,))
             return img
 
+    def ensure_weixin_foreground(timeout=1.2):
+        """截图前先把微信窗口弄到前台。
+
+        为什么必须有这一步：
+           表情包是**按屏幕坐标截**的（gui._grab_screen(rect)），
+           截的是「那块屏幕区域现在是什么」。如果此刻微信被别的窗口
+           （浏览器、Steam、终端…）挡住，截到的就是别人 ——
+           实测素材库里出现过「一张 Steam 页面的截图」被当成表情包存起来。
+
+        @returns 微信是否在前台
+        """
+        try:
+            import win32gui
+
+            hwnd = find_weixin_hwnd()
+            if not hwnd:
+                return False
+
+            if win32gui.GetForegroundWindow() == hwnd:
+                return True
+
+            force_foreground(hwnd)
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                if win32gui.GetForegroundWindow() == hwnd:
+                    return True
+                time.sleep(0.1)
+
+            return win32gui.GetForegroundWindow() == hwnd
+        except Exception as e:                      # noqa: BLE001
+            log("表情包截图：置前微信失败", repr(e))
+            return False
+
     def capture_sticker_frames(who, count=8, interval=0.12):
         """连续截同一块区域，用来还原动图表情。
 
@@ -2632,6 +2654,11 @@ def main():
         """
         rect = locate_sticker_rect(who)
         if not rect:
+            return b"", b""
+
+        # 截之前确认微信在前台，否则截到的是挡住它的那个窗口（实测截到过 Steam）
+        if not ensure_weixin_foreground():
+            log("表情包截图：微信不在前台，这次不截（避免存进别的窗口画面）")
             return b"", b""
 
         left, top, right, bottom = rect
@@ -2667,6 +2694,22 @@ def main():
 
             # 引用过图片时这一行会并排两个东西，只留最大那块
             shot = crop_to_main_blob(shot)
+
+            # 比例离谱的不要。
+            #
+            # 表情包基本是方形/接近方形。如果截出来是 1682x234 这种长条，
+            # 说明截的不是表情包，而是整个窗口的一条（实测存进过
+            # 「一张 Steam 页面的截图」，1682x234，宽高比 7.19）。
+            # 这种图存进素材库只会占位，而且看着能用实际毫无意义。
+            try:
+                bw, bh = shot.size
+                ratio = bw / max(1, bh)
+                if ratio > 4.0 or ratio < 0.25:
+                    log("表情包截图：比例异常（%dx%d，宽高比 %.2f），判定截歪，放弃" % (
+                        bw, bh, ratio))
+                    return b"", b""
+            except Exception:
+                pass
 
             frames.append(shot)
             if i < count - 1:
@@ -2897,11 +2940,12 @@ def main():
         import re as _re
 
         t = str(s or "").strip()
-        t = _re.sub(r'^[“"\'\\s]+|[”"\'\\s]+$', '', t)
+        # 引号可能只出现一边（实测有 "YF”的表情包 这种），所以逐字符剥
+        t = t.strip('“”"\'‘’ \t\r\n')
         t = _re.sub(r"<[^>]{0,40}>", "", t)
         t = _re.sub(r"主体是[^，,。；;]{0,20}[，,]?", "", t)
-        t = _re.sub(r"\\s+", " ", t)
-        t = _re.sub(r"^[，,。；;、\\s]+", "", t).strip()
+        t = _re.sub(r"\s+", " ", t)
+        t = t.strip('“”"\'‘’ \t\r\n，,。；;、')
         return t
 
     def index_sticker(filename, desc):

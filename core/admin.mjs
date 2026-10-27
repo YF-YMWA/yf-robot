@@ -1634,14 +1634,17 @@ print('%016x' % bits)
      */
     const cleanDesc = (s) => {
       let t = String(s || '').trim();
-      // 去掉包着的引号
-      t = t.replace(/^[“"'\s]+|[”"'\s]+$/g, '');
+      // 引号可能只出现一边（"YF”的表情包 这种），逐字符剥掉
+      t = t.replace(/^[“”"'‘’\s]+|[“”"'‘’\s]+$/g, '');
       // 去掉 <...> 这种模板残留
       t = t.replace(/<[^>]{0,40}>/g, '');
       // 把「主体是XXX」这种空话去掉
       t = t.replace(/主体是[^，,。；;]{0,20}[，,]?/g, '');
       // 收尾清理
-      t = t.replace(/\s+/g, ' ').replace(/^[，,。；;、\s]+/, '').trim();
+      t = t
+        .replace(/\s+/g, ' ')
+        .replace(/^[“”"'‘’，,。；;、\s]+|[“”"'‘’，,。；;、\s]+$/g, '')
+        .trim();
       return t;
     };
 
@@ -3864,6 +3867,17 @@ print('%016x' % bits)
       wechat: {
         stickerChance: c.wechat?.stickerChance ?? 0,
         mediaCollect: c.wechat?.mediaCollect !== false,
+        /**
+         * 收藏白名单。
+         *
+         * 空数组 = 全收（默认）；填了 wxid = 只收这些会话/发送者发的图。
+         * 以前这里没暴露，界面上既看不到也改不了，
+         * 于是「为什么别人的图也被收进来了」只能去翻配置文件。
+         */
+        collectOnlyFrom: c.wechat?.collectOnlyFrom || [],
+        collectScope:
+          c.wechat?.collectScope ||
+          ((c.wechat?.collectOnlyFrom || []).length ? 'custom' : 'all'),
       },
       imagegen: {
         enabled: c.imagegen?.enabled === true,
@@ -4108,7 +4122,7 @@ print('%016x' % bits)
       }
     }
 
-    // 微信桥接相关（表情包概率、是否收藏图片）
+    // 微信桥接相关（表情包概率、是否收藏图片、收藏白名单）
     if (patch.wechat) {
       const w = patch.wechat;
       current.wechat = current.wechat || {};
@@ -4116,6 +4130,23 @@ print('%016x' % bits)
         current.wechat.stickerChance = clamp(w.stickerChance, 0, 1);
       }
       if (typeof w.mediaCollect === 'boolean') current.wechat.mediaCollect = w.mediaCollect;
+
+      /**
+       * 收藏白名单。
+       *
+       * 支持两种写法，前端给哪个都能用：
+       *   collectOnlyFrom: ['wxid_a', ...]   —— 直接给名单
+       *   collectScope: 'all' | 'custom'     —— all 视为清空名单
+       */
+      if (Array.isArray(w.collectOnlyFrom)) {
+        current.wechat.collectOnlyFrom = w.collectOnlyFrom
+          .map((s) => String(s).trim())
+          .filter(Boolean)
+          .slice(0, 100);
+      }
+      if (w.collectScope === 'all') {
+        current.wechat.collectOnlyFrom = [];
+      }
 
       // 这些参数桥接进程要读，所以同步写进 bridge_wg/config.json
       try {
@@ -4125,6 +4156,9 @@ print('%016x' % bits)
           bc.wechat = bc.wechat || {};
           if (Number.isFinite(w.stickerChance)) bc.wechat.stickerChance = clamp(w.stickerChance, 0, 1);
           if (typeof w.mediaCollect === 'boolean') bc.wechat.mediaCollect = w.mediaCollect;
+          if (Array.isArray(current.wechat.collectOnlyFrom)) {
+            bc.wechat.collectOnlyFrom = current.wechat.collectOnlyFrom;
+          }
           fs.writeFileSync(bridgeCfg, JSON.stringify(bc, null, 2), 'utf8');
         }
       } catch (e) {

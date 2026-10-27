@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(_ROOT, 'runtime', 'python', 'Lib', 'site-package
 
 from PIL import Image, ImageDraw, ImageSequence
 
-from media_store import MediaStore, hamming, perceptual_hash
+from media_store import MediaStore, hamming, is_collect_allowed, perceptual_hash
 
 
 def make_png(color=(60, 120, 200), size=(120, 120)):
@@ -212,6 +212,38 @@ class MediaStoreTest(unittest.TestCase):
         self.store.allow = lambda kind, chat, sender: True
         name = self.store.save(make_png(), '.png', 'sticker')
         self.assertTrue(name)
+
+    # ---------- 收藏白名单 ----------
+
+    def test_whitelist_empty_collects_all(self):
+        """白名单为空 = 全收（默认行为，不能因为改了权限就把默认弄没了）"""
+        self.assertTrue(is_collect_allowed([], 'wxid_any', 'wxid_any'))
+        self.assertTrue(is_collect_allowed(None, 'wxid_any', 'wxid_any'))
+
+    def test_whitelist_by_chat(self):
+        """会话在名单里 → 收（群里别人发的也收）"""
+        wl = ['wxid_owner']
+        self.assertTrue(is_collect_allowed(wl, 'wxid_owner', 'wxid_stranger'))
+
+    def test_whitelist_by_sender(self):
+        """发送者在名单里 → 收（私聊时 chat 和 sender 通常一样）"""
+        wl = ['wxid_owner']
+        self.assertTrue(is_collect_allowed(wl, '', 'wxid_owner'))
+
+    def test_whitelist_blocks_outsider(self):
+        """都不在名单里 → 不收"""
+        wl = ['wxid_owner']
+        self.assertFalse(is_collect_allowed(wl, 'wxid_other', 'wxid_stranger'))
+
+    def test_whitelist_ignores_blank_entries(self):
+        """名单里有空字符串/空格，不该变成「谁都能收」"""
+        wl = ['', '  ', 'wxid_owner']
+        self.assertFalse(is_collect_allowed(wl, 'wxid_other', 'wxid_stranger'))
+        self.assertTrue(is_collect_allowed(wl, 'wxid_owner', 'x'))
+
+    def test_whitelist_only_blanks_collects_all(self):
+        """名单全是空白 → 视为空名单（全收），和配置里没填一样"""
+        self.assertTrue(is_collect_allowed(['', '   '], 'wxid_any', ''))
 
     # ---------- 真实素材（可选） ----------
 

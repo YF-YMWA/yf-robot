@@ -68,6 +68,36 @@ def hamming(a, b):
         return 64
 
 
+def is_collect_allowed(whitelist, chat_username="", sender_id=""):
+    """这个会话/发送者发的图要不要收藏。
+
+    规则（按顺序）：
+      1. 白名单为空 → 全收（旧行为，默认）
+      2. 会话 wxid 在白名单 → 收
+      3. 发送者 wxid 在白名单 → 收
+      4. 否则 → 不收
+
+    为什么单独拿出来：权限判定错了要么什么都收不进来、要么把别人的图
+    收进自己库，两种都很难在界面上看出来。放成纯函数就能直接测。
+
+    @param {Iterable<string>} whitelist
+    @returns {boolean}
+    """
+    try:
+        allowed = {str(x).strip() for x in (whitelist or []) if str(x).strip()}
+    except Exception:
+        allowed = set()
+
+    if not allowed:
+        return True
+
+    for c in (chat_username, sender_id):
+        s = str(c or "").strip()
+        if s and s in allowed:
+            return True
+    return False
+
+
 class MediaStore:
     """素材库。
 
