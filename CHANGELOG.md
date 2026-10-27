@@ -5,6 +5,30 @@
 
 ---
 
+## [0.6.0] - 2026-10-28
+
+### 新增
+
+- 打包可加 `--with-adapter`：把微信适配器一起塞进 `dist/adapter/`，
+  产出「开箱就能接微信」的完整包。默认仍是不带（主仓保持纯框架）。
+  适配器启动脚本现在能自动在三种布局里找 Python：
+  自带 runtime / 上一级的 runtime（打包形态）/ 隔壁项目（开发形态）。
+
+### 变更
+
+- 目录改名 `jingjing` → `YF-Robot`，配置里的绝对路径、适配器里的引用同步更新。
+- 产品名残留清理：`package.json` 的 author、`config.example.json` 的默认卡片、
+  开机自启脚本名、README 里的发行包文件名和路径示例。
+- 群聊事件里写死的角色名改成读人设（换角色卡后不会再叫旧名字）。
+
+### 修复
+
+- CI 三处失败：`node --test` 的两种写法在 Windows/Node 20 上都不行
+  （新增 `tools/run-tests.mjs` 自己列文件）、干净检出里 `.tmp` 父目录不存在、
+  `tools/check-console-*.mjs` 被 gitignore 挡住导致 CI 找不到。
+- 公开仓库泄露真实 wxid（`tools/feature-matrix.mjs` 写死），
+  改为从配置读取，并用 filter-branch 从全部历史中抹除。
+
 ## [0.5.0] - 2026-10-28
 
 ### 新增

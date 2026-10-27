@@ -26,6 +26,17 @@ const WITH_PYTHON = !process.argv.includes('--no-python');
 /** 是否生成 zip */
 const MAKE_ZIP = process.argv.includes('--zip');
 
+/**
+ * 要不要把微信适配器一起打进去。
+ *
+ * 默认**不打**：主仓是纯框架，适配器在另一个仓库（yf-robot-wechat-adapter），
+ * 这样「主仓不含平台自动化代码」这句话才成立。
+ *
+ * 加 --with-adapter 会去旁边的 yf-robot-wechat-adapter 目录把它复制进
+ * dist/adapter/，产出一个「开箱就能接微信」的完整包（给自己/熟人用）。
+ */
+const WITH_ADAPTER = process.argv.includes('--with-adapter');
+
 /** 要复制的目录/文件。 */
 const INCLUDE = [
   'app.mjs',
@@ -722,6 +733,59 @@ console.log('  ✓ 干净');
 console.log('');
 
 // 8. 完整性自检：关键文件一个都不能少，否则对方拿到手打不开
+// 7.5 可选：把微信适配器一起打包
+if (WITH_ADAPTER) {
+  console.log('【7.5】打包微信适配器（--with-adapter）…');
+  const adpSrc = path.join(path.dirname(ROOT), 'yf-robot-wechat-adapter');
+  const adpDst = path.join(DIST, 'adapter');
+
+  if (!fs.existsSync(adpSrc)) {
+    console.log(`  ✗ 找不到适配器目录：${adpSrc}`);
+    console.log('    先把 yf-robot-wechat-adapter 克隆到这个位置，或者去掉 --with-adapter');
+    process.exit(1);
+  }
+
+  // 只带运行需要的东西：源码 + 示例配置 + 启动脚本
+  const ADP_INCLUDE = [
+    'wechatauto_bridge.py', 'media_store.py', 'msg_route.py', 'wechat_xml.py',
+    'uia_compat.py', 'diagnose.py', 'requirements.txt',
+    'config.example.json', '启动桥接.bat', 'README.md', 'LICENSE',
+    'tools',
+  ];
+  // 绝不带：真实配置、运行时数据、缓存
+  const ADP_SKIP = [
+    /^config\.json$/, /^data\//, /^__pycache__\//, /\.pyc$/,
+    /^tools\/__pycache__\//, /\.log$/,
+  ];
+
+  let copied = 0;
+  const copyOne = (rel) => {
+    const src = path.join(adpSrc, rel);
+    if (!fs.existsSync(src)) return;
+    const stat = fs.statSync(src);
+    if (stat.isDirectory()) {
+      for (const n of fs.readdirSync(src)) copyOne(path.join(rel, n));
+      return;
+    }
+    if (ADP_SKIP.some((re) => re.test(rel.split(path.sep).join("/")))) return;
+    const dst = path.join(adpDst, rel);
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.copyFileSync(src, dst);
+    copied++;
+  };
+  for (const item of ADP_INCLUDE) copyOne(item);
+
+  // 适配器的 config.json 从 example 生成（Key 全空）
+  try {
+    const ex = JSON.parse(fs.readFileSync(path.join(adpSrc, 'config.example.json'), 'utf8'));
+    fs.writeFileSync(path.join(adpDst, 'config.json'), JSON.stringify(ex, null, 2), 'utf8');
+  } catch {}
+
+  console.log(`  已复制 ${copied} 个文件到 dist/adapter/`);
+  console.log('  注意：这个包含微信自动化代码，只给自己/熟人用，别公开分发');
+  console.log('');
+}
+
 console.log('【8】完整性检查…');
 
 const MUST_HAVE = [
@@ -740,6 +804,11 @@ const MUST_HAVE = [
   ['docs/adapter-protocol.md', '适配器协议'],
   ['examples/adapter-skeleton/adapter.mjs', '适配器骨架'],
 ];
+
+if (WITH_ADAPTER) {
+  MUST_HAVE.push(['adapter/wechatauto_bridge.py', '微信适配器主程序']);
+  MUST_HAVE.push(['adapter/启动桥接.bat', '适配器启动脚本']);
+}
 
 if (WITH_RUNTIME) {
   MUST_HAVE.push(['runtime/node.exe', 'Node 运行时（没有就跑不起来）']);
