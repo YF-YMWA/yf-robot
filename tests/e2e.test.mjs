@@ -21,9 +21,10 @@ import { loadPersona, PERSONA_DEFAULTS } from '../core/persona.mjs';
  *
  * 放在工作区内的 .tmp（本机沙箱不允许 node 写系统临时目录）。
  */
-const TEST_DATA_DIR = fs.mkdtempSync(
-  path.join(process.cwd(), '.tmp', 'e2e-'),
-);
+const _tmpRoot = path.join(process.cwd(), '.tmp');
+// 干净检出里没有 .tmp —— 先建，否则 mkdtemp 报 ENOENT
+fs.mkdirSync(_tmpRoot, { recursive: true });
+const TEST_DATA_DIR = fs.mkdtempSync(path.join(_tmpRoot, 'e2e-'));
 process.on('exit', () => {
   try {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });

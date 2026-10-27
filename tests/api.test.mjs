@@ -15,7 +15,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /** 测试用的独立根目录：配置、数据都写这里，不碰真实 data/ 和 config.json */
-const TEST_ROOT = fs.mkdtempSync(path.join(process.cwd(), '.tmp', 'api-test-'));
+const _tmpRoot = path.join(process.cwd(), '.tmp');
+// 干净检出（clone）里没有 .tmp，mkdtemp 会 ENOENT —— 先建父目录
+fs.mkdirSync(_tmpRoot, { recursive: true });
+const TEST_ROOT = fs.mkdtempSync(path.join(_tmpRoot, 'api-test-'));
 fs.mkdirSync(path.join(TEST_ROOT, 'data'), { recursive: true });
 
 // 写一份最小 config.json：管理接口保存时会读它，没有就会 500
