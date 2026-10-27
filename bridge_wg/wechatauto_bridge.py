@@ -1820,8 +1820,8 @@ def main():
     )
     from wechat_xml import (
         extract_emoticon_md5 as _extract_emoticon_md5,
-        is_emoji_appmsg as _is_emoji_appmsg,
     )
+    from msg_route import route_message
 
     def _is_collect_allowed(chat_username, sender_id):
         """判断这个会话/发送者发的图要不要收藏。
@@ -3427,10 +3427,6 @@ def main():
             log("表情包识别异常：", repr(e))
             return _sticker_label(str(msg.get("content") or ""))
 
-    def is_emoji_appmsg(content):
-        """这条 appmsg 是不是「表情/GIF」而不是链接卡片（实现见 wechat_xml.py）。"""
-        return _is_emoji_appmsg(content)
-
     def on_message_inner(msg, listener):
         try:
             username = msg.get("username") or ""
@@ -3438,7 +3434,19 @@ def main():
                 return
             mtype = msg.get("type") or ""
             content = (msg.get("content") or "").strip()
-            if mtype == "图片":
+
+            # 统一决策：这条消息走哪条路（实现和用例都在 msg_route.py）
+            route = route_message(mtype, content)
+            if route != mtype:
+                log("消息路由：type=%r → %s（local_id=%s）" % (
+                    mtype, route, msg.get("local_id")))
+
+            if "移出群聊" in content or "移出" in content:
+                dead_chats.add(username)
+                log("被移出群聊，停掉这个会话：", display_name(username))
+                return
+
+            if route == "image":
                 desc = describe_image(msg)
                 if not desc:
                     # 识别失败（内容审查 / 格式不支持）也要回一句，
@@ -3446,45 +3454,30 @@ def main():
                     content = "（对方发了一张图片，但你这会儿看不清图里是什么。诚实地告诉对方看不清，别编内容。）"
                 else:
                     content = "（对方发了一张图片，图里是：%s）" % desc
-            if mtype == "语音":
+
+            elif route == "voice":
                 said = transcribe_voice(msg)
                 if not said:
                     log("语音没识别出内容，先不说话")
                     return
                 content = "（对方发了一条语音，说的是：%s）" % said
-            if mtype in ("表情", "动画表情"):
+
+            elif route == "sticker":
                 desc = describe_sticker(msg)
                 if not desc:
-                    content = "（对方发了一个表情包，但你没看清是什么。随便应一声就行，别编具体内容。）"
+                    content = "（对方发了一个表情包/动图，但你没看清是什么。随便应一声就行，别编具体内容。）"
                 else:
-                    content = "（对方刚刚新发了一个表情包，内容是：%s）" % desc
+                    content = "（对方刚刚发来一个表情包/动图，内容是：%s）" % desc
 
-            # GIF 被微信当成 appmsg(type=8) 发过来时，类型会落到「文件/链接/卡片」。
-            # 以前这里只认带 <url> 的链接卡片，这类消息整条被丢掉 ——
-            # 用户看到的就是「直接发的动图她没反应」。
-            if mtype not in ("文本", "语音", "图片", "表情", "动画表情") and is_emoji_appmsg(content):
-                log("收到 appmsg 形式的表情/GIF（local_id=%s）" % msg.get("local_id"))
-                desc = describe_sticker(msg)
-                if not desc:
-                    content = "（对方发了一个动图/表情，但画面上没认出内容。随便应一声，别编。）"
-                else:
-                    content = "（对方刚刚发来一个动图或表情，内容是：%s）" % desc
-                mtype = "表情"   # 后续按表情处理
-
-            if mtype not in ("文本", "语音", "图片", "表情", "动画表情"):
-                if "移出群聊" in content or "移出" in content:
-                    dead_chats.add(username)
-                    log("被移出群聊，停掉这个会话：", display_name(username))
-                    return
-                # 链接卡片 / 分享卡片：从 XML 里把 url 和 title 抠出来，当成一句带链接的话
+            elif route == "link":
                 import re as _re
                 mu = _re.search(r"<url>(.*?)</url>", content, _re.S)
                 mt = _re.search(r"<title>(.*?)</title>", content, _re.S)
-                if mu:
-                    title = (mt.group(1).strip() if mt else "")[:60]
-                    content = "分享了一个链接：%s %s" % (title, mu.group(1).strip())
-                else:
-                    return
+                title = (mt.group(1).strip() if mt else "")[:60]
+                content = "分享了一个链接：%s %s" % (title, mu.group(1).strip())
+
+            elif route == "ignore":
+                return
             if ONLY_CHATS:
                 try:
                     if display_name(username) not in ONLY_CHATS:
