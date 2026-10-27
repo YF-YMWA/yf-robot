@@ -920,13 +920,19 @@
       <h2>表情包描述索引 <span class="chip" id="siChip"></span>
         <span class="sp"></span>
         <button class="ghost sm" onclick="loadStickerIndex()">刷新</button>
-        <button class="ghost sm" onclick="rebuildStickerIndex()">重建缺失的</button>
+        <button class="ghost sm" onclick="rebuildStickerIndex('missing')">补缺失的</button>
+        <button class="ghost sm" onclick="rebuildStickerIndex('untagged')">重新识别无标签的</button>
         <button class="ghost sm" onclick="clearStickerIndex()">清空</button>
       </h2>
       <div class="hint" style="margin-bottom:12px">
-        她按「语气」挑表情包，靠的就是这里的描述。<br>
+        她按「语气」挑表情包，靠的就是这里的描述和标签。<br>
         没描述过的图只能随机发，有描述的才能挑到贴合当前情绪那张。<br>
-        <span style="color:var(--dim)">她自己也会在后台慢慢补（启动后 1 分钟开始，每 10 分钟补一批）。</span>
+        <span style="color:var(--dim)">她自己也会在后台慢慢补（启动后 1 分钟开始，每 10 分钟补一批）。</span><br>
+        <span style="color:var(--warn)">
+          「有描述但没标签」的图最坑：看着已收录，实际永远挑不中
+          —— 早期截图把引用缩略图一起截进去了，描述成「包含两个部分」，抽不出情绪词。
+          点「重新识别无标签的」可以修好这些。
+        </span>
       </div>
 
       <div id="siStats" class="hint" style="margin-bottom:10px"></div>
@@ -2745,8 +2751,9 @@ async function loadStickerIndex() {
     const entries = j.entries || [];
 
     if (chip) {
+      const bad = (j.missing || 0) + (j.untagged || 0);
       chip.textContent = `${j.indexed}/${j.total}`;
-      chip.className = 'chip ' + (j.missing ? 'off' : 'on');
+      chip.className = 'chip ' + (bad ? 'off' : 'on');
     }
 
     const tagText = Object.entries(j.tagCount || {})
@@ -2756,6 +2763,9 @@ async function loadStickerIndex() {
     stats.innerHTML =
       `共 <b>${j.total}</b> 张，已描述 <b style="color:var(--ok)">${j.indexed}</b> 张` +
       (j.missing ? `，<b style="color:var(--warn)">${j.missing}</b> 张待补` : '') +
+      (j.untagged
+        ? `，<b style="color:var(--warn)">${j.untagged}</b> 张有描述但没标签（挑不中）`
+        : '') +
       (tagText ? `<br><span style="color:var(--dim)">标签分布：${tagText}</span>` : '');
 
     if (!entries.length) {
@@ -2830,16 +2840,32 @@ async function saveStickerEntry(idx) {
   }
 }
 
-async function rebuildStickerIndex() {
-  const n = prompt('这次补多少张的描述？（1-50）', '10');
+/**
+ * 重建素材描述索引。
+ *
+ * @param {string} mode
+ *   'missing'  —— 只补还没有描述的
+ *   'untagged' —— 重新识别「有描述但抽不出情绪标签」的
+ *
+ * untagged 模式的用处：早期截图把引用缩略图一起截进去了，
+ * 描述成了「这张图片包含两个部分」，一个情绪词都没有。
+ * 这种图看着「已收录」，实际按语气挑图永远挑不中。
+ */
+async function rebuildStickerIndex(mode = 'missing') {
+  const untagged = mode === 'untagged';
+  const tip = untagged
+    ? '重新识别「有描述但没情绪标签」的图？\n（一次最多 50 张，会消耗视觉额度）\n\n这次补多少张？'
+    : '这次补多少张的描述？（1-50）';
+
+  const n = prompt(tip, '10');
   if (!n) return;
 
-  toast('正在生成描述，请稍候…');
+  toast(untagged ? '正在重新识别，请稍候…' : '正在生成描述，请稍候…');
 
   try {
     const j = await api('sticker-index/rebuild', {
       method: 'POST',
-      body: { limit: Number(n) || 10 },
+      body: { limit: Number(n) || 10, mode },
     });
     toast(j.message || `完成 ${j.done} 张`);
     await loadStickerIndex();

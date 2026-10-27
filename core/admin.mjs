@@ -1391,6 +1391,8 @@ print('%016x' % bits)
 
     const total = entries.length;
     const indexed = entries.filter((e) => e.indexed).length;
+    // 有描述但抽不出情绪词 —— 看着「已收录」，实际按语气挑不中
+    const untagged = entries.filter((e) => e.indexed && !e.tags.length).length;
 
     // 标签分布，面板上显示用
     const tagCount = {};
@@ -1403,6 +1405,7 @@ print('%016x' % bits)
       total,
       indexed,
       missing: total - indexed,
+      untagged,
       entries,
       tagCount,
       autoIndex: this.config.sticker?.autoIndex !== false,
@@ -1454,24 +1457,66 @@ print('%016x' % bits)
   }
 
   /**
-   * 重建索引：给还没描述的图跑一次视觉模型。
+   * 重建索引：给素材跑一次视觉模型，生成描述 + 情绪标签。
    *
-   * 面板上点「重建」就走这里。一次最多处理 limit 张，
-   * 避免上百张图把接口和额度打爆。
+   * 两种模式：
+   *   mode='missing'（默认）—— 只处理**还没有描述**的
+   *   mode='untagged'        —— 处理**没有情绪标签**的（哪怕已有描述也重来）
+   *
+   * 为什么要 untagged 模式：
+   *   早期截图会把「引用缩略图 + 表情包」一起截进去，视觉模型就描述成
+   *   「这张图片包含两个部分」—— 有描述，但一个情绪词都抽不出来。
+   *   这种图在素材库里看着是「已收录」，实际按语气挑图永远挑不中。
+   *   光看「有没有描述」是发现不了它们的，得按标签判断。
+   *
+   * 一次最多处理 limit 张，避免上百张图把接口和额度打爆。
    */
   async #rebuildStickerIndex(body = {}) {
     const limit = Math.min(Math.max(Number(body.limit) || 10, 1), 50);
+    const mode = body.mode === 'untagged' ? 'untagged' : 'missing';
+
     const status = this.#stickerIndexStatus();
-    const todo = status.entries.filter((e) => !e.indexed).slice(0, limit);
+    const todo = status.entries
+      .filter((e) => (mode === 'untagged' ? !e.tags.length : !e.indexed))
+      .slice(0, limit);
 
     if (!todo.length) {
-      return { ok: true, done: 0, message: '所有素材都已经有描述了' };
+      return {
+        ok: true,
+        done: 0,
+        mode,
+        message: mode === 'untagged' ? '所有素材都已经有情绪标签了' : '所有素材都已经有描述了',
+      };
     }
 
     const dirs = this.#mediaDirs();
     const index = this.#readStickerIndex();
     let done = 0;
+    let tagged = 0;
     const failed = [];
+
+    /**
+     * 提示词要强调「只看主体」。
+     *
+     * 表情包截图里常混进聊天界面元素（旁边的小头像、引用的缩略图、气泡边框），
+     * 不点明的话模型会老老实实描述「这张图分成两个部分」——
+     * 这种描述抽不出任何情绪词，等于白跑一次。
+     *
+     * 同时明确要求带上情绪词，因为标签就是从情绪词里抽的。
+     */
+    const PROMPT =
+      '这是一张表情包截图。画面里可能混进了聊天界面元素：' +
+      '旁边的小头像、引用的缩略图、气泡边框、空白。\n' +
+      '请只看**最大、最居中**的那个主体 —— 那才是表情包本身，' +
+      '忽略旁边的小图和边框，不要把画面说成「分成几个部分」。\n' +
+      '\n' +
+      '用一句话回答，格式固定：\n' +
+      '「<主体是什么>，<情绪>，<主色调>，<风格>」\n' +
+      '\n' +
+      '**情绪**必须从下面这些词里选一个最接近的，不许省略、不许自己造词：\n' +
+      '开心 / 难过 / 生气 / 惊讶 / 无语 / 害羞 / 困倦 / 得意 / 安慰 / 吃饭 / 可爱 / 普通\n' +
+      '\n' +
+      '（这个情绪是用来给表情包分类的，缺了就分不了类。）不超过 40 字。';
 
     for (const item of todo) {
       const file = path.join(dirs[item.kind] || dirs.stickers, item.name);
@@ -1479,11 +1524,7 @@ print('%016x' % bits)
 
       try {
         const buf = fs.readFileSync(file);
-        const r = await this.engine.vision.describe(buf, {
-          prompt:
-            '描述这张表情包：画面里是什么（人物/动物/物体）、什么表情、什么颜色、有没有文字。' +
-            '用一句话说清楚，不超过 30 字。',
-        });
+        const r = await this.engine.vision.describe(buf, { prompt: PROMPT });
 
         const desc = String(r?.description || '').trim();
 
@@ -1494,16 +1535,17 @@ print('%016x' % bits)
 
         // 打情绪标签：和桥接那边用同一套词表
         const TAGS = {
-          开心: ['开心', '高兴', '笑', '哈哈', '快乐', '兴奋', '棒', '赞', '喜欢'],
-          难过: ['难过', '伤心', '哭', '委屈', '失落', '郁闷'],
-          生气: ['生气', '愤怒', '怒', '火大', '不爽'],
-          惊讶: ['惊讶', '震惊', '吃惊', '哇', '竟然', '没想到'],
-          无语: ['无语', '无奈', '服了', '算了', '离谱'],
-          害羞: ['害羞', '脸红', '不好意思', '撒娇'],
-          困倦: ['困', '累', '睡', '疲惫', '晚安'],
-          得意: ['得意', '骄傲', '厉害', '牛'],
-          安慰: ['安慰', '抱抱', '摸头'],
-          吃饭: ['吃', '饭', '饿', '美食', '馋'],
+          开心: ['开心', '高兴', '笑', '哈哈', '快乐', '兴奋', '棒', '赞', '喜欢', '滑稽', '欢'],
+          难过: ['难过', '伤心', '哭', '委屈', '失落', '郁闷', '流泪', '沮丧'],
+          生气: ['生气', '愤怒', '怒', '火大', '不爽', '凶', '瞪', '翻脸'],
+          惊讶: ['惊讶', '震惊', '吃惊', '哇', '竟然', '没想到', '睁大', '瞪大', '懵'],
+          无语: ['无语', '无奈', '服了', '算了', '离谱', '沉默', '翻白眼', '普通', '面无表情'],
+          害羞: ['害羞', '脸红', '不好意思', '撒娇', '羞', '腮红', '腼腆'],
+          困倦: ['困', '累', '睡', '疲惫', '晚安', '打哈欠', '躺', '懒'],
+          得意: ['得意', '骄傲', '厉害', '牛', '叉腰', '坏笑', '自信'],
+          安慰: ['安慰', '抱抱', '摸头', '摸', '拍拍', '温柔'],
+          吃饭: ['吃', '饭', '饿', '美食', '馋', '喝', '西瓜', '零食'],
+          可爱: ['可爱', '萌', '软乎', '毛绒', '玩偶', '小猫', '猫咪', '小鲸'],
         };
 
         const tags = [];
@@ -1518,6 +1560,7 @@ print('%016x' % bits)
           source: 'rebuild',
         };
         done++;
+        if (tags.length) tagged++;
       } catch (e) {
         failed.push(item.name);
         this.log.warn?.(`[sticker-index] ${item.name} 描述失败: ${e.message}`);
@@ -1530,11 +1573,20 @@ print('%016x' % bits)
       return { ok: false, error: `写索引失败：${e.message}` };
     }
 
+    const parts = [`已为 ${done} 张生成描述`];
+    if (mode === 'untagged') parts.push(`其中 ${tagged} 张打上了标签`);
+    if (failed.length) parts.push(`${failed.length} 张失败`);
+    if (done && !tagged && mode === 'untagged') {
+      parts.push('（这些图可能确实没有明显表情，只能随机挑）');
+    }
+
     return {
       ok: true,
       done,
+      tagged,
       failed: failed.length,
-      message: `已为 ${done} 张生成描述${failed.length ? `，${failed.length} 张失败` : ''}`,
+      mode,
+      message: parts.join('，'),
     };
   }
 
