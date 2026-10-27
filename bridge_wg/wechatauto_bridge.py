@@ -733,6 +733,76 @@ def main():
             _media_box["downloader"] = MediaDownloader(db, save_dir=save_dir)
         return _media_box["downloader"]
 
+    def shrink_gif(path, max_bytes=1200 * 1024):
+        """把 GIF 压到微信愿意当「图片」收的体积，压完还是动图。
+
+        为什么需要：
+           电脑微信有个隐形的体积线 —— GIF 太大时，剪贴板粘贴进去
+           它不按图片处理，而是当成**文件**发出去（聊天里显示一个文件卡片，
+           对方得点开才能看，动画也就没了）。
+           所以发之前先把大 GIF 压一压：减色 + 缩尺寸 + 降帧。
+
+        @returns 新文件路径；不需要压或压不动则返回原路径
+        """
+        try:
+            if not path or not path.lower().endswith(".gif"):
+                return path
+            size = os.path.getsize(path)
+            if size <= max_bytes:
+                return path
+
+            from PIL import Image, ImageSequence
+
+            src = Image.open(path)
+            frames = []
+            durations = []
+
+            for fr in ImageSequence.Iterator(src):
+                frames.append(fr.convert("RGB"))
+                durations.append(fr.info.get("duration", 100))
+
+            if len(frames) < 2:
+                return path
+
+            # 抽帧（最多留 12 帧）+ 缩尺寸 + 减色
+            step = max(1, len(frames) // 12)
+            frames = frames[::step]
+            durations = durations[::step]
+
+            w, h = frames[0].size
+            edge = 320
+            if max(w, h) > edge:
+                scale = edge / max(w, h)
+                frames = [f.resize((max(1, int(w * scale)), max(1, int(h * scale))), 1) for f in frames]
+
+            out = os.path.join(os.path.dirname(path), "_send_" + os.path.basename(path))
+            for colors in (96, 64, 48, 32):
+                pal = [f.quantize(colors=colors, method=Image.MEDIANCUT) for f in frames]
+                pal[0].save(
+                    out,
+                    format="GIF",
+                    save_all=True,
+                    append_images=pal[1:],
+                    duration=max(60, sum(durations) // max(1, len(durations))),
+                    loop=0,
+                    optimize=True,
+                )
+                if os.path.getsize(out) <= max_bytes:
+                    log("GIF 压缩：%d KB → %d KB（%d 色，%d 帧）" % (
+                        size // 1024, os.path.getsize(out) // 1024, colors, len(frames)))
+                    return out
+
+            # 压到最小还是太大 → 放弃，用原图（让对方点开看，总比不发强）
+            try:
+                os.remove(out)
+            except OSError:
+                pass
+            log("GIF 压不到 %d KB 以内，按原图发" % (max_bytes // 1024))
+            return path
+        except Exception as e:                      # noqa: BLE001
+            log("GIF 压缩失败（按原图发）：", repr(e))
+            return path
+
     def wxgf_to_gif(data, max_edge=360, fps=10, max_seconds=6, max_bytes=3 * 1024 * 1024):
         """把 wxgf 容器里的 HEVC 流转成**动图 GIF**。
 
@@ -2965,17 +3035,63 @@ def main():
             if gui is None:
                 gui = WeChatGUI()
 
-            try:
-                r = gui.send_image(path, chat_display_name)
-            except Exception as e:                   # noqa: BLE001
-                log("send_image 异常，回退 send_file：", repr(e))
-                r = gui.send_file(path, chat_display_name)
+            is_gif = str(path).lower().endswith(".gif")
 
+            def _do_send(p):
+                # GIF 要校验：微信有可能不把它当图片，而是当**文件**发出去
+                # （聊天里是个文件卡片，动画就没了）。verify=True 会查数据库，
+                # 只有真出现了一条「图片」消息才算成功。
+                try:
+                    return gui.send_image(p, chat_display_name, verify=is_gif)
+                except TypeError:
+                    # 老版本没有 verify 参数
+                    return gui.send_image(p, chat_display_name)
+                except Exception as e:               # noqa: BLE001
+                    log("send_image 异常，回退 send_file：", repr(e))
+                    return gui.send_file(p, chat_display_name)
+
+            r = _do_send(path)
             ok = bool(r and r.get("status") == "成功")
+
+            # GIF 没被当成图片 → 压小再试一次
+            if not ok and is_gif:
+                log("GIF 没按图片发出（%s），压缩后重试" % (
+                    (r or {}).get("message") or "无返回"))
+                small = shrink_gif(path)
+                if small and small != path:
+                    try:
+                        r = _do_send(small)
+                        ok = bool(r and r.get("status") == "成功")
+                    finally:
+                        if small != path:
+                            try:
+                                os.remove(small)
+                            except OSError:
+                                pass
+
+            # 还是不行 → 发静帧（至少是张图，不是乱飞的文件卡片）
+            if not ok and is_gif:
+                try:
+                    from PIL import Image
+
+                    still = os.path.join(os.path.dirname(path), "_still_" + os.path.splitext(os.path.basename(path))[0] + ".png")
+                    Image.open(path).convert("RGB").save(still, "PNG")
+                    log("动图发不出去，改发静帧")
+                    r = _do_send(still)
+                    ok = bool(r and r.get("status") == "成功")
+                    try:
+                        os.remove(still)
+                    except OSError:
+                        pass
+                except Exception as e:               # noqa: BLE001
+                    log("静帧兜底也失败：", repr(e))
+
             if ok:
-                log("发送表情包 → %s：%s" % (chat_display_name, os.path.basename(path)))
+                log("发送表情包 → %s：%s%s" % (
+                    chat_display_name, os.path.basename(path), "（动图）" if is_gif else ""))
             else:
-                log("表情包没发出去 → %s：%s" % (chat_display_name, r.get("message") if r else "无返回"))
+                log("表情包没发出去 → %s：%s" % (
+                    chat_display_name, (r or {}).get("message") or "无返回"))
             return ok
         except Exception as e:                       # noqa: BLE001
             log("发表情包失败：", repr(e))
