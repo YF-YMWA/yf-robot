@@ -66,6 +66,10 @@ tools/find-*.mjs
 tools/perf_*.mjs
 tools/live_*.mjs
 tools/full_*.mjs
+
+# 这两个是项目自带的自检工具，要进仓库（别人 clone 下来能自己验一遍）
+!tools/test-all-features.mjs
+!tools/scan-dist.mjs
 tools/import_*.mjs
 tools/group_*.mjs
 tools/diag-*.py
