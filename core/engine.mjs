@@ -659,6 +659,30 @@ export class ChatEngine {
     const facts = session.factSummary();
     const parts = [system];
 
+    /**
+     * 当前时间。
+     *
+     * 模型本身不知道今天是几号 —— 不注入的话，问「今天几号」它只能说
+     * 「我没联网，查不到」，可这明明不需要联网。
+     * （实测因此连问五次日期都没答上来。）
+     */
+    try {
+      const now = new Date();
+      const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+      const y = now.getFullYear();
+      const mo = now.getMonth() + 1;
+      const d = now.getDate();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      parts.push(
+        `【现在的时间】${y}年${mo}月${d}日 星期${WEEK[now.getDay()]} ${hh}:${mm}\n` +
+          '（这就是「今天」的真实日期。对方问几号、星期几、今年是哪年，' +
+          '直接按这个回答，不要说查不到；只有问天气/新闻这类才需要联网。）',
+      );
+    } catch (e) {
+      this.log.warn?.(`[engine] 注入当前时间失败: ${e.message}`);
+    }
+
     // 长期记忆：跨会话记住的事（事实 + 摘要 + 风格要求）
     try {
       // 公共记忆：每日热点这类「跟她自己有关、跟谁聊都该知道」的内容
