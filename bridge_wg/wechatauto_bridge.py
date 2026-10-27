@@ -1916,6 +1916,19 @@ def main():
         cache[name] = {"hash": ph, "kind": kind, "at": int(time.time())}
         _save_phash(cache)
 
+    def forget_phash(name):
+        """删掉某个文件的指纹记录（文件被替换/删除时用）。
+
+        不删的话，缓存里留着一条指向已不存在文件的记录，
+        之后同样的图会一直「匹配」到这个空壳，永远存不进去。
+        """
+        if not name:
+            return
+        cache = _load_phash()
+        if name in cache:
+            cache.pop(name, None)
+            _save_phash(cache)
+
     def save_media(raw, ext, kind, chat_username, sender_id, note=""):
         """把一份图片数据收进素材库。图片和表情包走同一个入口。
 
@@ -1959,11 +1972,41 @@ def main():
                 return name
 
             # 第二层：看着一样（截图路线最容易重复）
+            #
+            # 但动图要特殊对待：GIF 的第一帧和之前存过的静态 PNG 长得一样，
+            # dHash 判定为「重复」→ GIF 被直接跳过，素材库里永远只有静态图。
+            # 实测就是这样：日志里有「表情包连拍：8 帧 → GIF 391 KB」，
+            # 但紧接着没有任何「已收藏 .gif」，库里还是那张旧 PNG。
+            # 所以这里遇到「新的是动图、旧的不是」时，用动图**替换**静态版本。
             similar = find_similar_media(raw, kind)
             if similar:
-                log("%s重复（看着和 %s 一样），跳过" % (
-                    "表情包" if kind == "sticker" else "图片", similar))
-                return similar
+                new_is_gif = str(ext).lower() == ".gif"
+                old_is_gif = str(similar).lower().endswith(".gif")
+
+                if new_is_gif and not old_is_gif:
+                    old_path = os.path.join(target, similar)
+                    try:
+                        os.remove(old_path)
+                        log("动图替换静态版本：%s → %s" % (similar, name))
+                    except OSError as _e:            # noqa: BLE001
+                        log("旧静态图删不掉（继续存动图）：%r" % (_e,))
+                    try:
+                        forget_phash(similar)
+                    except Exception:                # noqa: BLE001
+                        pass
+                    # 描述索引里那条也清掉，免得控制台里看到一个指向空文件的条目
+                    try:
+                        _idx = load_sticker_index()
+                        if similar in _idx:
+                            _idx.pop(similar, None)
+                            save_sticker_index(_idx)
+                    except Exception:                # noqa: BLE001
+                        pass
+                    # 不 return，继续往下把 GIF 存进去
+                else:
+                    log("%s重复（看着和 %s 一样），跳过" % (
+                        "表情包" if kind == "sticker" else "图片", similar))
+                    return similar
 
             with open(path, "wb") as f:
                 f.write(raw)
