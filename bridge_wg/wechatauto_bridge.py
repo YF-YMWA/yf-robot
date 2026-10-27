@@ -2535,93 +2535,156 @@ def main():
             log("表情包定位异常：", repr(e))
             return None
 
+    def capture_sticker_frames(who, count=8, interval=0.12):
+        """连续截同一块区域，用来还原动图表情。
+
+        为什么需要这个：
+           动图表情（动画表情）在微信本地是**加密缓存**，解不开；
+           走截图兜底时只截一帧 —— 存进素材库就是一张不动的图，
+           发出去也不动。用户看到的就是「动图收录不了」。
+
+           微信在界面上是实时播放的，所以对着同一个矩形连续截几帧，
+           用 PIL 合成 GIF 就能把动画「录」下来。帧率不高，但确实是动的。
+
+        @returns (静帧PNG字节, 动图GIF字节) —— GIF 失败时第二项为空
+        """
+        rect = locate_sticker_rect(who)
+        if not rect:
+            return b"", b""
+
+        left, top, right, bottom = rect
+        if right - left < 20 or bottom - top < 20:
+            log("表情包截图：定位到的区域太小 (%dx%d)" % (right - left, bottom - top))
+            return b"", b""
+
+        from PIL import Image
+
+        frames = []
+
+        for i in range(max(2, count)):
+            try:
+                with gui_lock:
+                    shot = gui._grab_screen(rect)
+                    # 截完立刻松手，别把锁占太久（发送那边要用）
+            except Exception as e:              # noqa: BLE001
+                log("表情包连拍失败：", repr(e))
+                break
+
+            if shot is None:
+                break
+
+            # 裁掉消息行两侧的头像和空白
+            try:
+                from wechatauto.msgs.mtype import EmojiMessage
+
+                cropped = EmojiMessage._content_bbox_crop(shot)
+                if cropped is not None and min(cropped.size) >= 50:
+                    shot = cropped
+            except Exception:
+                pass
+
+            frames.append(shot)
+            if i < count - 1:
+                time.sleep(interval)
+
+        if not frames:
+            return b"", b""
+
+        # 第一帧当静帧（给视觉模型用）
+        first = frames[0]
+        if min(first.size) < 220:
+            scale = min(4, max(2, int(220 / max(1, min(first.size)))))
+            first = first.resize((first.width * scale, first.height * scale), 1)
+
+        import io
+
+        static_buf = io.BytesIO()
+        first.save(static_buf, "PNG")
+        static = static_buf.getvalue()
+
+        # 只有一帧就没必要做 GIF
+        if len(frames) < 3:
+            return static, b""
+
+        # 合成动图：统一尺寸 + 调色板量化
+        try:
+            w, h = frames[0].size
+            norm = []
+            for f in frames:
+                if f.size != (w, h):
+                    f = f.resize((w, h), 1)
+                norm.append(f.convert("RGB"))
+
+            # 小图放大一点，看起来别那么糊
+            if min(w, h) < 160:
+                s = min(3, max(2, int(160 / max(1, min(w, h)))))
+                norm = [f.resize((w * s, h * s), 1) for f in norm]
+
+            # 量化到 128 色，控制体积
+            pal = [f.quantize(colors=128, method=Image.MEDIANCUT) for f in norm]
+
+            gif_buf = io.BytesIO()
+            pal[0].save(
+                gif_buf,
+                format="GIF",
+                save_all=True,
+                append_images=pal[1:],
+                duration=int(interval * 1000),
+                loop=0,
+                optimize=True,
+            )
+            gif = gif_buf.getvalue()
+
+            if len(gif) < 1024 or gif[:3] != b"GIF":
+                return static, b""
+
+            # 太大就放弃动图，退回静帧
+            if len(gif) > 3 * 1024 * 1024:
+                log("表情包动图太大（%d KB），只存静帧" % (len(gif) // 1024))
+                return static, b""
+
+            log("表情包连拍：%d 帧 → GIF %d KB" % (len(frames), len(gif) // 1024))
+
+            try:
+                dbg = os.path.join(ROOT, "..", "data", "last-sticker-shot.gif")
+                with open(dbg, "wb") as f:
+                    f.write(gif)
+            except Exception:
+                pass
+
+            return static, gif
+        except Exception as e:                  # noqa: BLE001
+            log("表情包合成动图失败：", repr(e))
+            return static, b""
+
     def capture_sticker(who):
         """按 UIA 定位到的坐标截取表情包本身，返回图片字节。
 
         比整块消息区截图强的地方：只截那一行，表情包占满画面，
         视觉模型看得清楚；也不会把上面的历史消息混进来。
         """
-        rect = locate_sticker_rect(who)
-        if not rect:
-            return b""
-
-        left, top, right, bottom = rect
-        if right - left < 20 or bottom - top < 20:
-            log("表情包截图：定位到的区域太小 (%dx%d)" % (right - left, bottom - top))
-            return b""
-
-        try:
-            # 用 wechatauto 自己的截图方法，它和 UIA 坐标是同一套 DPI 口径。
-            # 持锁截：截图要抢屏幕/窗口状态，和发图（剪贴板粘贴）撞上会让图发不出去。
-            with gui_lock:
-                img = gui._grab_screen(rect)
-        except Exception as e:                  # noqa: BLE001
-            log("表情包截图失败：", repr(e))
-            return b""
-
-        if img is None:
-            return b""
-
-        # 消息行是全宽的（含头像和空白），裁出真正有内容的那个方块
-        try:
-            from wechatauto.msgs.mtype import EmojiMessage
-
-            cropped = EmojiMessage._content_bbox_crop(img)
-            if cropped is not None and min(cropped.size) >= 50:
-                img = cropped
-        except Exception as e:                  # noqa: BLE001
-            log("表情包裁剪跳过：", repr(e))
-
-        # 全白/全黑说明没截到东西
-        try:
-            extrema = img.convert("L").getextrema()
-            if extrema[1] - extrema[0] < 8:
-                log("表情包截图：截到的是纯色，放弃")
-                return b""
-        except Exception:
-            pass
-
-        # 小图放大，避免模型看糊
-        if min(img.size) < 220:
-            scale = max(2, int(220 / max(1, min(img.size))))
-            scale = min(scale, 4)
-            img = img.resize((img.width * scale, img.height * scale), 1)
-
-        import io
-
-        buf = io.BytesIO()
-        img.save(buf, "PNG")
-        data = buf.getvalue()
-        log("表情包截图：%dx%d, %d 字节" % (img.width, img.height, len(data)))
-
-        # 留一份最近一次的，出问题能直接看
-        try:
-            dbg = os.path.join(ROOT, "..", "data", "last-sticker-shot.png")
-            with open(dbg, "wb") as f:
-                f.write(data)
-        except Exception:
-            pass
-
-        return data
+        static, _gif = capture_sticker_frames(who, count=1)
+        return static
 
     def screenshot_sticker(who):
-        """表情包兜底：优先 UIA 精确定位，失败才退回整块消息区截图。
+        """表情包兜底：优先 UIA 精确定位 + 连拍，失败才退回整块消息区截图。
 
-        @returns (描述文字, 图片字节) —— 字节也返回，好让调用方顺手收藏
+        @returns (描述文字, 图片字节, 动图字节)
+                 动图字节为空表示只有静帧
         """
         try:
             import io
             import base64
 
-            # 1. 优先：UIA 精确定位到表情消息那一行
-            data = capture_sticker(who)
+            # 1. 优先：UIA 精确定位，并且**连拍几帧**还原动画
+            data, anim = capture_sticker_frames(who, count=8, interval=0.12)
 
             # 2. 退回：整块消息区截图（比例裁剪，精度差但聊胜于无）
             if not data:
                 log("表情包：UIA 定位没成功，退回消息区截图")
                 img = grab_weixin_window(find_weixin_hwnd())
                 if img is None:
-                    return "", b""
+                    return "", b"", b""
 
                 w, h = img.size
                 img = img.crop(
@@ -2658,11 +2721,11 @@ def main():
             text = str(resp.json().get("text") or "").strip()
             log("表情包识别：", text[:50])
             if "看不清" in text or "模糊" in text:
-                return "", data
-            return text, data
+                return "", data, anim
+            return text, data, anim
         except Exception as e:
             log("表情包截图识别失败：", repr(e))
-            return "", b""
+            return "", b"", b""
 
     def sticker_index_path():
         return os.path.join(ROOT, "..", "data", "stickers", "index.json")
@@ -2964,15 +3027,22 @@ def main():
 
             if not md5:
                 log("表情包：XML 里没有 md5 → 只能截图")
-                text, data = screenshot_sticker(who)
-                collect(data, ".png" if data[:4] == b"\x89PNG" else ".jpg", text)
+                text, data, anim = screenshot_sticker(who)
+                # 有动图就存 GIF（素材库和发出去都动）
+                if anim:
+                    collect(anim, ".gif", text)
+                else:
+                    collect(data, ".png" if data[:4] == b"\x89PNG" else ".jpg", text)
                 return text or _sticker_label(content)
 
             path = _find_sticker_file(md5)
             if not path:
                 log("表情包：本地缓存里找不到 md5=%s → 只能截图" % md5[:12])
-                text, data = screenshot_sticker(who)
-                collect(data, ".png" if data[:4] == b"\x89PNG" else ".jpg", text)
+                text, data, anim = screenshot_sticker(who)
+                if anim:
+                    collect(anim, ".gif", text)
+                else:
+                    collect(data, ".png" if data[:4] == b"\x89PNG" else ".jpg", text)
                 if text:
                     return text
                 return _sticker_label(content)
@@ -3041,8 +3111,11 @@ def main():
                     log("表情包转码失败：", repr(e))
             if not jpg:
                 log("表情包：缓存解不开，改用截图兜底")
-                text, data = screenshot_sticker(who)
-                collect(data, ".png" if data[:4] == b"\x89PNG" else ".jpg", text)
+                text, data, anim = screenshot_sticker(who)
+                if anim:
+                    collect(anim, ".gif", text)
+                else:
+                    collect(data, ".png" if data[:4] == b"\x89PNG" else ".jpg", text)
                 if text:
                     return text
                 log("表情包：截图也没拿到内容，告诉她看不清")

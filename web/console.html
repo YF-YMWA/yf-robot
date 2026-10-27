@@ -2516,15 +2516,16 @@ async function loadMediaAll() {
     }
 
     grid.innerHTML = all
-      .map(
-        (s, i) => `
+      .map((s, i) => {
+        const isGif = /\.gif$/i.test(s.name);
+        return `
       <div class="sticker-cell">
         <span class="del" onclick="delMedia('${s.kind}','${s.name}')" title="删除">×</span>
-        <span class="kindtag">${LABEL[s.kind] || s.kind}</span>
+        <span class="kindtag">${LABEL[s.kind] || s.kind}${isGif ? ' · 动图' : ''}</span>
         <img data-idx="${i}" alt="">
         <div class="nm">${(s.size / 1024).toFixed(0)}KB</div>
-      </div>`,
-      )
+      </div>`;
+      })
       .join('');
 
     for (let i = 0; i < all.length; i++) {
