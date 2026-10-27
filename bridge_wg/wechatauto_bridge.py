@@ -4258,6 +4258,17 @@ def main():
                 log("")
             else:
                 log("启动自检：目录一致（%s）" % payload["dataDir"])
+
+            # 版本标记。
+            #
+            # 排查「改了没生效」这类问题时，光看进程在跑没用 ——
+            # 得知道它加载的是不是最新代码。这里把几个关键模块点出来，
+            # 重启后对着这行就能确认。
+            log("启动自检：模块 消息路由=%s 表情解析=%s 媒体=%s" % (
+                route_message.__module__,
+                _extract_emoticon_md5.__module__,
+                _MediaStore.__module__,
+            ))
         except Exception as e:                      # noqa: BLE001
             log("启动自检跳过（服务未就绪）：%r" % (e,))
 
