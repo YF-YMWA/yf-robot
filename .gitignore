@@ -90,4 +90,5 @@ tools/scan-leak*.py
 
 # 词库自动备份（运行时不断生成，不是源码）
 *.txt.bak
-bridge/resources/*.bak
+resources/*.bak
+resources/*.txt.*.bak
