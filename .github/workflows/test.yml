@@ -25,9 +25,10 @@ jobs:
           node --check channels/web.mjs
 
       - name: 单元测试
-        # 注意不要写 `node --test tests/` ——
-        # Windows 上它会把 tests 当模块路径，报 Cannot find module
-        run: node --test "tests/*.test.mjs"
+        # 用自带的 runner 列文件再跑：
+        #   node --test tests/            在 Windows 上会把目录当模块，报 Cannot find module
+        #   node --test "tests/*.test.mjs" 依赖 Node 展开 glob，Node 20 直接报 Could not find
+        run: node tools/run-tests.mjs
 
       - name: 控制台脚本检查
         run: |

@@ -328,7 +328,7 @@ console.log('【10】群聊策略');
     const r3 = await groupInbound('鲸鲸你觉得呢', { name: '路人' });
     add('群聊', '叫名字也算在叫她', r3.replied, r3.ms, r3.reason || '');
 
-    const r4 = await groupInbound('/who', { from: 'wxid_stranger', name: '路人', atMe: true });
+    const r4 = await groupInbound('/who', { from: 'wxid_test_stranger', name: '路人', atMe: true });
     add('群聊', '陌生人用指令被拒', r4.reason === 'command_denied', r4.ms, r4.reason || '');
   }
 }
