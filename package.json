@@ -17,12 +17,12 @@
   "author": "jingjing contributors",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-name/yf-robot.git"
+    "url": "git+https://github.com/YF-YMWA/yf-robot.git"
   },
   "bugs": {
-    "url": "https://github.com/your-name/yf-robot/issues"
+    "url": "https://github.com/YF-YMWA/yf-robot/issues"
   },
-  "homepage": "https://github.com/your-name/yf-robot#readme",
+  "homepage": "https://github.com/YF-YMWA/yf-robot#readme",
   "engines": {
     "node": ">=18"
   },

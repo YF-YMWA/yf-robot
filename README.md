@@ -43,7 +43,7 @@ Node.js + Python，Windows 桌面双击即用。支持自定义角色卡、长�
 ### 方式二：从源码运行
 
 ```bash
-git clone https://github.com/your-name/yf-robot.git
+git clone https://github.com/YF-YMWA/yf-robot.git
 cd yf-robot
 
 # 1. 检查 Node 版本（当前没有第三方依赖）
