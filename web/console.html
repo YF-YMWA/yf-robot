@@ -639,6 +639,41 @@
         </div>
       </div>
 
+      <div class="feature">
+        <div class="row"><label>语音回复</label><div class="ctl">
+          <input type="number" id="voiceChance" min="0" max="100" step="5" style="max-width:80px" placeholder="概率%">
+          <span class="hint">% 概率发语音</span>
+          <select id="ttsVoice" style="max-width:170px">
+            <option value="Cherry">Cherry（女声，自然）</option>
+            <option value="Serena">Serena（女声，温柔）</option>
+            <option value="Chelsie">Chelsie（女声，活泼）</option>
+            <option value="Ethan">Ethan（男声，阳光）</option>
+            <option value="Dylan">Dylan（男声，北京话）</option>
+            <option value="Jada">Jada（女声，上海话）</option>
+          </select>
+        </div></div>
+        <div class="keyrow">
+          <label>合成 Key</label>
+          <input type="password" id="ttsKey" placeholder="留空则用上面「语音转文字」那把 Key">
+          <button class="ghost sm" onclick="clearTtsKey()" title="清空后改用转写那把 Key">清空</button>
+        </div>
+        <div class="keystate" id="state-tts">
+          <span class="hint">未配置（会用语音转写那把 Key）</span>
+        </div>
+        <div class="row"><label></label><div class="ctl">
+          <input type="text" id="ttsTestText" value="主人好，我是大肥鱼。" style="max-width:220px">
+          <button class="ghost sm" onclick="testTts()">合成试听</button>
+          <button class="ghost sm" onclick="saveVoiceChance()">保存概率</button>
+          <button class="ghost sm" onclick="saveTtsKey()">保存Key</button>
+          <button class="ghost sm" onclick="saveTtsVoice()">保存音色</button>
+          <span class="hint" id="ttsStatus"></span>
+        </div></div>
+        <audio id="ttsAudio" controls style="display:none;width:100%;margin-top:6px"></audio>
+        <div class="keyhelp">
+          语音由阿里云百炼合成，默认复用「语音转文字」的 Key。微信自动化只能把音频当<b>文件</b>发出（不是语音条气泡）。
+        </div>
+      </div>
+
       <div class="row"><label>表情</label><div class="ctl">
         <div class="switch" id="swEmoji" onclick="toggleSw('swEmoji')"></div>
         <span class="hint">检测到情绪时加 emoji</span>
@@ -1004,54 +1039,7 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>语音回复</h2>
-      <div class="row">
-        <label>语音概率</label>
-        <div class="ctl">
-          <input type="number" id="voiceChance" min="0" max="100" step="5" style="max-width:90px">
-          <span class="hint">%。每次回复后有这个概率改成发语音（合成后作为音频文件发出）</span>
-          <button class="ghost sm" onclick="saveVoiceChance()">保存</button>
-        </div>
-      </div>
-      <div class="row">
-        <label>合成 Key</label>
-        <div class="ctl">
-          <input type="password" id="ttsKey" placeholder="留空 = 用语音转写那把 Key" style="max-width:320px">
-          <button class="ghost sm" onclick="saveTtsKey()">保存</button>
-          <button class="ghost sm" onclick="clearTtsKey()">清空</button>
-        </div>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <label>音色</label>
-        <div class="ctl">
-          <select id="ttsVoice" style="max-width:220px">
-            <option value="Cherry">Cherry（女声，自然）</option>
-            <option value="Serena">Serena（女声，温柔）</option>
-            <option value="Chelsie">Chelsie（女声，活泼）</option>
-            <option value="Ethan">Ethan（男声，阳光）</option>
-            <option value="Dylan">Dylan（男声，北京话）</option>
-            <option value="Jada">Jada（女声，上海话）</option>
-          </select>
-          <button class="ghost sm" onclick="saveTtsVoice()">保存</button>
-        </div>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <label>试听</label>
-        <div class="ctl">
-          <input type="text" id="ttsTestText" value="主人好，我是大肥鱼。" style="max-width:260px">
-          <button class="ghost sm" onclick="testTts()">合成给我听</button>
-          <span class="hint" id="ttsStatus"></span>
-        </div>
-      </div>
-      <audio id="ttsAudio" controls style="display:none;margin-top:10px;width:100%"></audio>
-      <div class="hint" style="margin-top:10px;line-height:1.7">
-        语音由阿里云百炼合成（默认复用语音转写那把 Key，也可以单独填一个）。<br>
-        <b>微信的限制</b>：自动化只能把音频作为<b>文件</b>发出去，不是语音条气泡；对方点开就能听。
-        微信 PC 客户端本身没有「录一条语音发出去」的入口，所以要发真语音条需要虚拟麦克风，
-        那超出本项目的范围。
-      </div>
-    </div>
+
   </div>
 
   <div class="page" id="page-plugins">
