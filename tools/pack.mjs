@@ -37,6 +37,7 @@ const INCLUDE = [
   'config.example.json',
   'persona.json',
   'README.md',
+  'CHANGELOG.md',
   // 开源分发必须带上许可证和第三方声明
   'LICENSE',
   'NOTICE',
