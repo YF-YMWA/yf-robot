@@ -463,6 +463,31 @@ export class AdminApi {
         return { code: 200, body: this.#uploadMedia(body) };
       }
 
+      // 语音合成测试：现场合成一句，返回音频信息
+      if (method === 'POST' && pathname === '/api/admin/test/tts') {
+        const text = String(body?.text || '主人好，我是大肥鱼，语音测试。').slice(0, 200);
+        const voice = body?.voice || this.config.voice?.ttsVoice || undefined;
+        const { synthesize } = await import('./tts.mjs');
+        const r = await synthesize({
+          text,
+          voice,
+          config: this.config,
+          log: (m) => this.log.info?.('[tts] ' + m),
+        });
+        if (!r.ok) return { code: 200, body: { ok: false, error: r.error } };
+        return {
+          code: 200,
+          body: {
+            ok: true,
+            chars: r.chars,
+            bytes: r.buf.length,
+            voice: voice || 'Cherry',
+            model: this.config.voice?.ttsModel || 'qwen3-tts-flash',
+            preview: 'data:audio/wav;base64,' + r.buf.toString('base64'),
+          },
+        };
+      }
+
       // ===== 插件 =====
       if (method === 'GET' && pathname === '/api/admin/plugins') {
         return {
@@ -3972,6 +3997,12 @@ print('%016x' % bits)
         model: c.voice.model,
         hasKey: Boolean(c.voice.apiKey),
         apiKeyMasked: mask(c.voice.apiKey),
+
+        // 语音合成（可以和转写分开配）
+        ttsHasKey: Boolean(c.voice?.ttsApiKey),
+        ttsKeyIsShared: !c.voice?.ttsApiKey && Boolean(c.voice?.apiKey),
+        ttsModel: c.voice?.ttsModel || 'qwen3-tts-flash',
+        ttsVoice: c.voice?.ttsVoice || 'Cherry',
       },
       search: {
         enabled: c.search.enabled,
@@ -4139,6 +4170,19 @@ print('%016x' % bits)
       if (patch.voice.model) current.voice.model = String(patch.voice.model);
       applyKey(current.voice, patch.voice, patch.voice.clearApiKey, 'voice');
       if (patch.voice.mode) current.voice.mode = String(patch.voice.mode);
+
+      // 语音合成：可以单独配 Key / 模型 / 音色
+      if (Object.prototype.hasOwnProperty.call(patch.voice, 'ttsApiKey')) {
+        const v = String(patch.voice.ttsApiKey || '').trim();
+        // 掩码和空串都不改（和主 Key 同样的规则）
+        if (v && !v.includes('****')) {
+          const prevT = String(current.voice?.ttsApiKey || '');
+          if (!(prevT.length >= 40 && v.length < 40)) current.voice.ttsApiKey = v;
+        }
+      }
+      if (patch.voice.clearTtsApiKey === true) current.voice.ttsApiKey = '';
+      if (patch.voice.ttsModel) current.voice.ttsModel = String(patch.voice.ttsModel);
+      if (patch.voice.ttsVoice) current.voice.ttsVoice = String(patch.voice.ttsVoice);
     }
 
     if (patch.search) {

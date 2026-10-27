@@ -1014,9 +1014,42 @@
           <button class="ghost sm" onclick="saveVoiceChance()">保存</button>
         </div>
       </div>
-      <div class="hint" style="margin-top:8px;line-height:1.7">
-        语音由阿里云百炼合成（和「语音转写」共用同一个 Key）。<br>
-        微信自动化只能把音频<b>作为文件</b>发出去，不是语音条气泡 —— 对方点开就能听。
+      <div class="row">
+        <label>合成 Key</label>
+        <div class="ctl">
+          <input type="password" id="ttsKey" placeholder="留空 = 用语音转写那把 Key" style="max-width:320px">
+          <button class="ghost sm" onclick="saveTtsKey()">保存</button>
+          <button class="ghost sm" onclick="clearTtsKey()">清空</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label>音色</label>
+        <div class="ctl">
+          <select id="ttsVoice" style="max-width:220px">
+            <option value="Cherry">Cherry（女声，自然）</option>
+            <option value="Serena">Serena（女声，温柔）</option>
+            <option value="Chelsie">Chelsie（女声，活泼）</option>
+            <option value="Ethan">Ethan（男声，阳光）</option>
+            <option value="Dylan">Dylan（男声，北京话）</option>
+            <option value="Jada">Jada（女声，上海话）</option>
+          </select>
+          <button class="ghost sm" onclick="saveTtsVoice()">保存</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label>试听</label>
+        <div class="ctl">
+          <input type="text" id="ttsTestText" value="主人好，我是大肥鱼。" style="max-width:260px">
+          <button class="ghost sm" onclick="testTts()">合成给我听</button>
+          <span class="hint" id="ttsStatus"></span>
+        </div>
+      </div>
+      <audio id="ttsAudio" controls style="display:none;margin-top:10px;width:100%"></audio>
+      <div class="hint" style="margin-top:10px;line-height:1.7">
+        语音由阿里云百炼合成（默认复用语音转写那把 Key，也可以单独填一个）。<br>
+        <b>微信的限制</b>：自动化只能把音频作为<b>文件</b>发出去，不是语音条气泡；对方点开就能听。
+        微信 PC 客户端本身没有「录一条语音发出去」的入口，所以要发真语音条需要虚拟麦克风，
+        那超出本项目的范围。
       </div>
     </div>
   </div>
@@ -2950,6 +2983,76 @@ async function saveVoiceChance() {
 
 
 
+
+// ===== 语音合成设置 =====
+
+async function saveTtsKey() {
+  const v = $('ttsKey').value.trim();
+  if (!v) return toast('先填 Key，或者点「清空」用转写那把', 'err');
+  try {
+    await api('config', { method: 'POST', body: { voice: { ttsApiKey: v } } });
+    $('ttsKey').value = '';
+    toast('已保存语音合成 Key');
+    loadTtsSettings();
+  } catch (e) {
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
+async function clearTtsKey() {
+  if (!confirm('清空后会用「语音转写」那把 Key，确定？')) return;
+  try {
+    await api('config', { method: 'POST', body: { voice: { clearTtsApiKey: true } } });
+    toast('已清空，改用转写那把');
+    loadTtsSettings();
+  } catch (e) {
+    toast('操作失败：' + e.message, 'err');
+  }
+}
+
+async function saveTtsVoice() {
+  const v = $('ttsVoice').value;
+  try {
+    await api('config', { method: 'POST', body: { voice: { ttsVoice: v } } });
+    toast('已保存音色：' + v);
+  } catch (e) {
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
+async function testTts() {
+  const text = $('ttsTestText').value.trim() || '主人好，我是大肥鱼。';
+  const st = $('ttsStatus');
+  st.textContent = '合成中…';
+  try {
+    const j = await api('test/tts', { method: 'POST', body: { text } });
+    if (!j.ok) throw new Error(j.error || '合成失败');
+    st.textContent = `${j.chars} 字 / ${Math.round(j.bytes / 1024)} KB / ${j.model} / ${j.voice}`;
+    const a = $('ttsAudio');
+    a.src = j.preview;
+    a.style.display = '';
+    a.play().catch(() => toast('点播放按钮听一下'));
+  } catch (e) {
+    st.textContent = '';
+    toast('合成失败：' + e.message, 'err');
+  }
+}
+
+async function loadTtsSettings() {
+  try {
+    const c = await api('config');
+    const v = c.voice || {};
+    if ($('ttsKey')) {
+      $('ttsKey').placeholder = v.ttsHasKey
+        ? '已配置独立 Key（留空不改）'
+        : v.ttsKeyIsShared
+          ? '未单独配置，正在用语音转写那把 Key'
+          : '还没配 Key';
+    }
+    if ($('ttsVoice')) $('ttsVoice').value = v.ttsVoice || 'Cherry';
+  } catch {}
+}
+
 // ===== 插件 =====
 
 async function loadPlugins() {
@@ -3346,6 +3449,7 @@ async function loadStickerChance() {
     const vc = c.wechat?.voiceChance ?? 0;
     const el = $('voiceChance');
     if (el) el.value = Math.round(vc * 100);
+    loadTtsSettings();
   } catch {}
 }
 

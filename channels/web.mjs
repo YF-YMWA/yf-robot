@@ -680,7 +680,7 @@ export class WebChannel {
         const { synthesize, toVoiceFormat } = await import('../core/tts.mjs');
         const r = await synthesize({
           text,
-          voice: body?.voice || undefined,
+          voice: body?.voice || this.config.voice?.ttsVoice || undefined,
           config: this.config,
           log: (m) => this.log.info?.('[tts] ' + m),
         });

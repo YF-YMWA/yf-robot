@@ -48,8 +48,14 @@ export async function synthesize({ text, voice = DEFAULT_VOICE, config, log = ()
     return { ok: false, error: `文字太长（${clean.length} 字），上限 ${MAX_CHARS}` };
   }
 
-  const key = config?.voice?.apiKey || '';
-  if (!key) return { ok: false, error: '没配语音 Key（控制台「模型与功能」里填）' };
+  // 语音合成可以单独配 Key（有些人转写和合成用的不是同一个账号）
+  const key = config?.voice?.ttsApiKey || config?.voice?.apiKey || '';
+  if (!key) {
+    return {
+      ok: false,
+      error: '没配语音合成 Key（控制台「模型与功能」→ 语音回复 里填，留空则用语音转写那把）',
+    };
+  }
 
   // baseUrl 可能是 compatible-mode，也可能带完整路径；统一取站点根
   let origin = 'https://dashscope.aliyuncs.com';
@@ -61,7 +67,11 @@ export async function synthesize({ text, voice = DEFAULT_VOICE, config, log = ()
   const url = `${origin}/api/v1/services/aigc/multimodal-generation/generation`;
   const body = {
     model: config?.voice?.ttsModel || 'qwen3-tts-flash',
-    input: { text: clean, voice, language_type: 'Chinese' },
+    input: {
+      text: clean,
+      voice: voice || config?.voice?.ttsVoice || DEFAULT_VOICE,
+      language_type: 'Chinese',
+    },
   };
 
   let j;
