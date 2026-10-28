@@ -78,6 +78,7 @@ tools/full_*.mjs
 !tools/publish-release.mjs
 !tools/memory-tool.mjs
 !tools/scan-package-leak.py
+!tools/check-panel.mjs
 !tools/scan-dist.mjs
 tools/import_*.mjs
 tools/group_*.mjs
