@@ -542,6 +542,23 @@ export class WebChannel {
             enabled: Boolean(c.learning?.digest?.enabled),
             intervalHours: c.learning?.digest?.intervalHours ?? 24,
           },
+          /**
+           * 多条气泡之间怎么停顿。
+           *
+           * 以前适配器里写死 sleep(0.6)，三条消息几乎同时到，
+           * 一眼就是机器发的。现在按字数估打字时间 + 随机抖动，
+           * 读起来像人一个字一个字敲出来的。
+           */
+          pace: {
+            // 每条气泡的基准间隔（毫秒），0 = 不额外等
+            bubbleDelayMs: c.reply?.bubbleDelayMs ?? 400,
+            // 每个字再加多少毫秒（模拟打字速度）
+            perCharMs: c.reply?.perCharMs ?? 45,
+            // 随机抖动幅度（0~1），让节奏不那么机械
+            jitter: c.reply?.jitter ?? 0.35,
+            // 单条气泡最多等多久（防止长消息卡太久）
+            maxDelayMs: c.reply?.maxDelayMs ?? 6000,
+          },
         });
       }
 

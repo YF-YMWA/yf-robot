@@ -1019,6 +1019,16 @@ export class ChatEngine {
           '（这就是「今天」的真实日期。对方问几号、星期几、今年是哪年，' +
           '直接按这个回答，不要说查不到；只有问天气/新闻这类才需要联网。）',
       );
+
+      /**
+       * 生活状态：按时间给她一点「今天过得怎么样」的底色。
+       *
+       * 没有这个的话，凌晨三点她也精神抖擞、饭点也不觉得饿 ——
+       * 这正是「像 AI」和「像人」最明显的区别之一。
+       * 只注入一行，不替她决定说什么，只给个处境。
+       */
+      const state = timeOfDayState(now);
+      if (state) parts.push(`【此刻】${state}`);
     } catch (e) {
       this.log.warn?.(`[engine] 注入当前时间失败: ${e.message}`);
     }
@@ -1432,4 +1442,29 @@ export class ChatEngine {
       search: this.search.enabled ? this.config.search.provider : null,
     };
   }
+}
+
+/**
+ * 按时间段给她一个「此刻的处境」。
+ *
+ * 只给处境，不给台词 —— 说什么由她自己决定。
+ * 目的：凌晨三点别精神抖擞，饭点别毫无反应。
+ *
+ * @param {Date} now
+ * @returns {string} 一行描述；没合适的返回空串
+ */
+export function timeOfDayState(now = new Date()) {
+  const h = now.getHours();
+  const m = now.getMinutes();
+
+  if (h >= 0 && h < 5) return '凌晨，正困着。回复可以更短、更含糊，别像白天那样有精神。';
+  if (h < 7) return '天还没亮，刚睡醒或者还没睡，脑子不太转。';
+  if (h < 9) return '早上，可能刚起、在洗漱或者在吃早饭。';
+  if (h < 11) return '上午，一天刚开始，精神还行。';
+  if (h < 13) return '中午，可能正要吃饭或者刚吃完。';
+  if (h < 14) return '午饭后，容易犯困。';
+  if (h < 18) return '下午，正常状态。';
+  if (h < 20) return '傍晚，可能刚下班或者准备吃饭。';
+  if (h < 23) return '晚上，话可以多一点，也不用太正经。';
+  return '夜深了，开始犯困，回得会比白天慢一点、短一点。';
 }

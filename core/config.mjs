@@ -174,6 +174,12 @@ export const DEFAULTS = {
     maxBubbles: 3,
     /** 气泡之间的间隔（毫秒），模拟打字 */
     bubbleDelayMs: 400,
+    // 每条气泡按字数再等一会儿，模拟打字
+    perCharMs: 45,
+    // 节奏随机抖动（0~1），太规律就像机器
+    jitter: 0.35,
+    // 单条气泡最多等多久
+    maxDelayMs: 6000,
     /** 是否移除 Markdown 标记 */
     stripMarkdown: true,
     /** 表情装饰 */
