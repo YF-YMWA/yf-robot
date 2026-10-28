@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
+import net from 'node:net';
 
 const ENTRY = 'wechatauto_bridge.py';
 const PID_FILE = path.join('data', 'adapter.panel.pid');
@@ -69,28 +70,89 @@ function alive(pid) {
 }
 
 /**
- * 找出真正在跑桥接的 python 进程。
+ * 适配器单实例锁的端口：启动时 bind 它，占住就说明有实例在跑。
  *
- * 为什么不直接用 Start-Process 返回的 PID：
- *   那是 cmd.exe / UAC 同意进程的 PID，桥接真正的进程是它的子进程。
- *   实测返回的 PID 早就退了，而 python 还在跑 —— 面板于是显示「未运行」。
- *
- * @returns {Promise<number>} PID，找不到返回 0
+ * 为什么不只查进程：**提权进程的命令行对普通权限不可见**。
+ * 面板的服务不是管理员时，去查管理员启动的桥接，会拿到空 CommandLine，
+ * 于是误判「未运行」—— 用户明明看到它在跑。
  */
-export function findBridgePid() {
+const LOCK_PORT = 47821;
+
+/** 锁端口被占了吗（= 有实例在跑） */
+export function isLockPortBusy(port = LOCK_PORT) {
+  /**
+   * 用 netstat 看「LISTENING」而不是直接 connect。
+   *
+   * 教训：适配器的锁是 `listen(1)` —— 只有 1 个排队位。
+   * 我一开始用 TCP connect 探测，第一次能连上，之后 backlog 被占满，
+   * 后面的探测全被拒 → 一会儿说有实例、一会儿说没有，自相矛盾。
+   * netstat 只读内核状态，不占用连接。
+   */
   return new Promise((resolve) => {
+    execFile('netstat', ['-ano'], { timeout: 6000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+      if (err) return resolve(false);
+      const re = new RegExp(':' + port + '\\s', 'i');
+      const listening = String(stdout || '')
+        .split('\n')
+        .filter((l) => /LISTENING/i.test(l))
+        .some((l) => re.test(l));
+      resolve(listening);
+    });
+  });
+}
+
+/**
+ * 找出在跑的桥接进程。
+ *
+ * 三条路，按可靠性排：
+ *   1. 进程命令行匹配 → 拿得到真实 PID（仅限当前权限看得见的进程）
+ *   2. 锁端口被占 → 确实有实例，但可能拿不到 PID（返回 -1）
+ *   3. 都没有 → 没在跑（返回 0）
+ *
+ * @returns {Promise<number>} PID / -1（有实例但看不到 PID）/ 0
+ */
+export async function findBridgePid() {
+  const pids = await new Promise((resolve) => {
     const ps = [
       '-NoProfile',
       '-Command',
       "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*wechatauto_bridge.py*' } | Select-Object -ExpandProperty ProcessId",
     ];
     execFile('powershell.exe', ps, { timeout: 8000 }, (err, stdout) => {
+      if (err) return resolve([]);
+      resolve(
+        String(stdout || '')
+          .split(/\s+/)
+          .map(Number)
+          .filter((n) => Number.isFinite(n) && n > 0),
+      );
+    });
+  });
+
+  if (pids.length) return pids[0];
+  return (await isLockPortBusy()) ? -1 : 0;
+}
+
+/**
+ * 反查「谁在监听这个端口」——提权实例看不到命令行时靠它拿 PID。
+ *
+ * @returns {Promise<number>} PID，查不到返回 0
+ */
+export function pidListeningOn(port = LOCK_PORT) {
+  return new Promise((resolve) => {
+    execFile('netstat', ['-ano'], { timeout: 6000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
       if (err) return resolve(0);
-      const pids = String(stdout || '')
-        .split(/\s+/)
-        .map(Number)
-        .filter((n) => Number.isFinite(n) && n > 0);
-      resolve(pids.length ? pids[0] : 0);
+
+      for (const line of String(stdout || '').split('\n')) {
+        if (!/LISTENING/i.test(line)) continue;
+        // 形如：  TCP    127.0.0.1:47821    0.0.0.0:0    LISTENING    12345
+        const parts = line.trim().split(/\s+/);
+        const local = parts[1] || '';
+        if (!local.endsWith(':' + port)) continue;
+        const pid = Number(parts[parts.length - 1]);
+        if (Number.isFinite(pid) && pid > 0) return resolve(pid);
+      }
+      resolve(0);
     });
   });
 }
@@ -114,8 +176,10 @@ export function tailLog(root, lines = 40) {
 /**
  * 当前状态。
  *
- * 两路判断：记录的 PID 活着，或者系统里真有桥接进程 ——
- * 只看 PID 文件会因为「父进程先退」而误报未运行。
+ * 三路判断（任一成立就算在跑）：
+ *   · 记录的 PID 还活着
+ *   · 查到了桥接进程
+ *   · 锁端口被占（提权实例看不到命令行，只能靠这个）
  */
 export async function status(root) {
   const a = findAdapter(root);
@@ -125,13 +189,13 @@ export async function status(root) {
 
   const pid = readPid(root);
   const byPid = alive(pid);
-  const realPid = byPid ? pid : await findBridgePid();
-  const running = Boolean(realPid);
+  const found = byPid ? pid : await findBridgePid();
+  const running = Boolean(found); // -1 也算「有实例」
 
-  // 顺手把 PID 文件纠正过来
-  if (running && realPid !== pid) {
+  // 顺手把 PID 文件纠正过来（-1 表示有实例但看不到 PID，就不写）
+  if (running && found > 0 && found !== pid) {
     try {
-      fs.writeFileSync(path.join(root, PID_FILE), String(realPid), 'utf8');
+      fs.writeFileSync(path.join(root, PID_FILE), String(found), 'utf8');
     } catch {}
   }
 
@@ -140,7 +204,7 @@ export async function status(root) {
     mode: a.mode,
     dir: a.dir,
     running,
-    pid: running ? realPid : 0,
+    pid: running && found > 0 ? found : 0,
     entry: ENTRY,
     // 服务是管理员的话，启动适配器不需要弹 UAC
     elevated: await isElevated(),
@@ -323,74 +387,97 @@ export async function start(root, log = () => {}) {
 
     child.on('exit', async (code) => {
       const spawnedPid = Number(String(out).trim().split(/\s+/).pop());
-
-      if (!(code === 0 && Number.isFinite(spawnedPid) && spawnedPid > 0)) {
-        // 用户点了「否」，或者 UAC 被策略禁止
-        resolve({
-          ok: false,
-          error:
-            '没有启动成功。多半是 UAC 被取消了 —— 适配器需要管理员权限才能操作微信窗口，' +
-            '请重试并在弹窗点「是」。也可以手动右键 adapter/data/panel-launch.bat 用管理员运行。',
-        });
-        return;
-      }
+      const psOk = code === 0 && Number.isFinite(spawnedPid) && spawnedPid > 0;
 
       /**
-       * Start-Process 返回的是 cmd / UAC 进程的 PID，桥接真正的进程是它的子进程。
-       * 直接记那个 PID 会「记完就死」，面板显示未运行 —— 所以这里找真正的 python。
+       * 判断成功不看 PowerShell 的退出码，而是看「桥接进程是不是真起来了」。
+       *
+       * 实测：UAC 点「是」之后桥接确实跑起来了，但 PowerShell 的退出码
+       * 和 -PassThru 拿到的 PID 都不可靠（提权进程的父子关系被系统改写），
+       * 于是面板误报「UAC 被取消」。以进程/端口为准。
        */
       let realPid = 0;
-      for (let i = 0; i < 10 && !realPid; i++) {
+      const rounds = psOk ? 10 : 6; // UAC 被拒时也给几秒，避免误判
+      for (let i = 0; i < rounds && !realPid; i++) {
         await new Promise((r) => setTimeout(r, 700));
         realPid = await findBridgePid();
       }
-
-      const finalPid = realPid || spawnedPid;
-      try {
-        fs.writeFileSync(path.join(root, PID_FILE), String(finalPid), 'utf8');
-      } catch {}
 
       let hasLog = false;
       try {
         hasLog = fs.existsSync(cmd.logPath) && fs.statSync(cmd.logPath).size > 0;
       } catch {}
 
-      log('[adapter] 已启动 pid=' + finalPid + (realPid ? '（桥接进程）' : '（未找到桥接进程）'));
-
-      if (!realPid) {
+      // 桥接真的起来了（哪怕拿不到 PID：-1 表示有实例但看不到进程号）
+      if (realPid) {
+        if (realPid > 0) {
+          try {
+            fs.writeFileSync(path.join(root, PID_FILE), String(realPid), 'utf8');
+          } catch {}
+        }
+        log('[adapter] 已启动 ' + (realPid > 0 ? 'pid=' + realPid : '（提权实例，PID 不可见）'));
         resolve({
-          ok: false,
-          error:
-            '进程起来了但没找到桥接进程，多半是启动后立刻退出了。' +
-            '点「看日志」看原因（最常见：微信没开、或已有一个实例在跑）。',
+          ok: true,
+          pid: realPid > 0 ? realPid : 0,
+          logStarted: hasLog,
+          elevated: true,
+          note:
+            '已启动' +
+            (realPid > 0 ? '（pid ' + realPid + '）' : '（管理员实例）') +
+            (hasLog ? '，日志在 adapter/data/panel-run.log。' : '。'),
         });
         return;
       }
 
       resolve({
-        ok: true,
-        pid: finalPid,
-        logStarted: hasLog,
-        note: hasLog
-          ? '已启动（pid ' + finalPid + '），日志在 adapter/data/panel-run.log。'
-          : '桥接进程已起来（pid ' + finalPid + '），日志还在写。',
+        ok: false,
+        error:
+          '没有启动成功。多半是 UAC 被取消了 —— 适配器需要管理员权限才能操作微信窗口，' +
+          '请重试并在弹窗点「是」。也可以手动右键 adapter/data/panel-launch.bat 用管理员运行。',
       });
     });
   });
 }
 
 /**
- * 停止（只杀自己记录的那个 PID 及其子进程）。
+ * 停止。
+ *
+ * 优先按记录的 PID 杀（连带子进程）；拿不到 PID 时（提权实例），
+ * 用锁端口反查到底是哪个进程在监听，再杀它。
  */
-export function stop(root, log = () => {}) {
+export async function stop(root, log = () => {}) {
   const pid = readPid(root);
-  if (!pid || !alive(pid)) {
-    try {
-      fs.rmSync(path.join(root, PID_FILE), { force: true });
-    } catch {}
-    return { ok: true, note: '本来就没在跑' };
+
+  if (pid && alive(pid)) {
+    return await killPid(root, pid, log);
   }
 
+  // 记录里没有，但可能真有实例在跑（提权启动的那种）
+  const found = await findBridgePid();
+
+  if (found > 0) return await killPid(root, found, log);
+
+  if (found === -1) {
+    // 有实例但看不到 PID：用 netstat 反查监听 47821 的进程号
+    const owner = await pidListeningOn(LOCK_PORT);
+    if (owner && owner > 0) return await killPid(root, owner, log);
+
+    return {
+      ok: false,
+      error:
+        '检测到适配器在跑，但它是管理员权限启动的，面板这边看不到它的进程号，也杀不掉。' +
+        '请到任务管理器结束 python.exe，或者手动关掉那个黑色命令行窗口。',
+    };
+  }
+
+  try {
+    fs.rmSync(path.join(root, PID_FILE), { force: true });
+  } catch {}
+  return { ok: true, note: '本来就没在跑' };
+}
+
+/** 杀掉某个 PID（连带子进程），并清掉记录 */
+function killPid(root, pid, log = () => {}) {
   return new Promise((resolve) => {
     // /T 连带子进程（cmd → python）
     execFile('taskkill', ['/PID', String(pid), '/T', '/F'], (err) => {
@@ -398,7 +485,19 @@ export function stop(root, log = () => {}) {
         fs.rmSync(path.join(root, PID_FILE), { force: true });
       } catch {}
       if (err) {
-        resolve({ ok: false, error: '停止失败：' + err.message });
+        /**
+         * 常见情况：适配器是管理员启动的，而面板不是 ——
+         * Windows 不允许低权限进程结束高权限进程，taskkill 会报「找不到这个进程」
+         * （其实是被挡住了，不是真的不存在）。这时给可操作的提示。
+         */
+        resolve({
+          ok: false,
+          error:
+            '停止失败：适配器是管理员权限启动的，普通权限的面板结束不了它。' +
+            '三选一：① 关掉那个黑色命令行窗口（桥接会跟着退出）；' +
+            '② 任务管理器 → 详细信息 → 结束 python.exe；' +
+            '③ 用管理员身份运行 桌面控制台.bat，再点停止。',
+        });
       } else {
         log('[adapter] 已停止 pid=' + pid);
         resolve({ ok: true, note: '已停止' });
