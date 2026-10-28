@@ -223,3 +223,30 @@ test('上限：库满后拒绝新增', () => {
   assert.equal(r.ok, false);
   assert.match(r.error, /满了/);
 });
+
+// ===== 回归：所有联网抓取都必须走 safe-fetch =====
+
+test('learning.mjs 也挡内网（曾经只查协议，能抓到本地接口）', async () => {
+  const { fetchSiteText } = await import('../core/learning.mjs');
+  const r = await fetchSiteText('http://127.0.0.1:8899/api/admin/config', { timeoutMs: 3000 });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /不允许|只支持/);
+});
+
+test('learning.mjs 挡云元数据地址', async () => {
+  const { fetchSiteText } = await import('../core/learning.mjs');
+  const r = await fetchSiteText('http://169.254.169.254/latest/meta-data/', { timeoutMs: 3000 });
+  assert.equal(r.ok, false);
+});
+
+test('learning.mjs 挡 file 协议', async () => {
+  const { fetchSiteText } = await import('../core/learning.mjs');
+  const r = await fetchSiteText('file:///C:/Windows/win.ini', { timeoutMs: 3000 });
+  assert.equal(r.ok, false);
+});
+
+test('learning.mjs 抓图也挡内网', async () => {
+  const { fetchSiteImages } = await import('../core/learning.mjs');
+  const r = await fetchSiteImages('http://192.168.1.1/');
+  assert.equal(r.ok, false);
+});

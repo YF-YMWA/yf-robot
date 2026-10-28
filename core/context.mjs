@@ -17,10 +17,48 @@
 
 /** 各类内容在总预算里的占比 */
 const SHARE = {
-  logic: 0.45,
-  kb: 0.4,
-  media: 0.15,
+  logic: 0.3,
+  kb: 0.28,
+  media: 0.1,
+  style: 0.32,
 };
+
+/**
+ * 判断这句话什么语气，决定词库要拼哪几类。
+ *
+ * 词库全拼约 1900 字（≈1150 token），每轮都发太贵，
+ * 而大多数时候其实只用得上一类：
+ *   · 被骂/挑衅 → 回怼库
+ *   · 闲聊/开玩笑 → 网络用语
+ *   · 正经求助 → 只给缩写对照（帮着看懂对方在说什么）
+ */
+export function detectTone(text) {
+  const t = String(text || '');
+
+  const hostile =
+    /(傻逼|智障|脑残|滚|去死|废物|垃圾|狗东西|你妈的|操你|闭嘴|有你这种|你算老几|不服来|阴阳怪气)/.test(
+      t,
+    );
+  if (hostile) return 'hostile';
+
+  const casual = /(哈哈|嘿嘿|嘻嘻|笑死|绝了|梗|绷不住|离谱|无语|乐)/.test(t);
+  if (casual) return 'casual';
+
+  const serious = /(帮我|怎么|为什么|如何|请问|能不能|该不该|合同|工资|生病|医院|报错|错误|代码)/.test(
+    t,
+  );
+  if (serious) return 'serious';
+
+  // 默认当闲聊：宁可给点风格，也别让她说话太干
+  return 'casual';
+}
+
+/** 按语气决定拼哪几类词库 */
+export function banksForTone(tone) {
+  if (tone === 'hostile') return ['clapback'];
+  if (tone === 'serious') return ['abbrev'];
+  return ['slang', 'abbrev'];
+}
 
 /** 总预算（字符数） */
 export const DEFAULT_BUDGET = 1600;
@@ -33,8 +71,29 @@ export function mentionsMedia(text) {
   return /表情|图片|发图|贴图|配图|动图|gif|sticker|image|张图|来张|发张|这个图/i.test(String(text || ''));
 }
 
-/** 两条内容是不是在说同一件事（措辞高度重合） */
-export function tooSimilar(a, b) {
+/**
+ * 按长度截断，但尽量切在分隔符上。
+ *
+ * 词库是一串「词、词、词」，硬切会把最后那个词砍成半截
+ * （「破防了」变「破防」），模型可能把半截词当新词用。
+ */
+export function clipAtBoundary(text, limit) {
+  if (!text || text.length <= limit) return text || '';
+  const head = text.slice(0, limit);
+  // 从后往前找最近的天然断点
+  const cut = Math.max(
+    head.lastIndexOf('、'),
+    head.lastIndexOf('，'),
+    head.lastIndexOf('。'),
+    head.lastIndexOf('；'),
+    head.lastIndexOf('\n'),
+  );
+  // 断点太靠前（只剩不到一半）就还是硬切，免得丢太多
+  if (cut > limit * 0.5) return head.slice(0, cut + 1) + '…';
+  return head + '…';
+}
+
+/** 两条内容是不是在说同一件事（措辞高度重合） */export function tooSimilar(a, b) {
   const norm = (s) =>
     String(s || '')
       .replace(/[\s\p{P}\p{S}]+/gu, '')
@@ -81,9 +140,10 @@ export function assembleContext({
   logicHits = [],
   kbHits = [],
   media = null,
+  styleText = '',
   budget = DEFAULT_BUDGET,
 } = {}) {
-  const stats = { logic: 0, kb: 0, media: 0, droppedLogic: 0, droppedKb: 0, chars: 0 };
+  const stats = { logic: 0, kb: 0, media: 0, style: 0, droppedLogic: 0, droppedKb: 0, chars: 0 };
   const blocks = [];
 
   const cap = (kind) => Math.floor(budget * SHARE[kind]);
@@ -160,6 +220,12 @@ export function assembleContext({
 
     blocks.push({ kind: 'media', text: hint });
     stats.media = 1;
+  }
+
+  // 4. 说话风格（词库）：最后拼，占固定份额
+  if (styleText) {
+    blocks.push({ kind: 'style', text: clipAtBoundary(styleText, cap('style')) });
+    stats.style = 1;
   }
 
   stats.chars = blocks.reduce((s, b) => s + b.text.length, 0);

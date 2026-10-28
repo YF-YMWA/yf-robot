@@ -90,12 +90,23 @@ export function loadBank(dir, name) {
  * @param {object} [opts.banks] 词库启用配置
  * @returns {string} 拼好的提示词片段（没有启用任何词库时返回空串）
  */
-export function renderWordBanks({ dir, banks = {} }) {
+/**
+ * 拼词库提示词。
+ *
+ * @param {object} opts
+ * @param {string} opts.dir 词库目录
+ * @param {object} [opts.banks] 各类的开关与条数
+ * @param {string[]} [opts.only] 只拼这几类（slang/clapback/abbrev/learned）。
+ *        不传 = 全拼。按语气挑类能省一大截 —— 全拼约 1900 字（≈1150 token），
+ *        而多数时候只需要其中一类。
+ */
+export function renderWordBanks({ dir, banks = {}, only = null }) {
+  const want = (k) => !only || only.includes(k);
   const cfg = { ...DEFAULT_BANKS, ...banks };
   const parts = [];
 
   // 网络用语
-  if (cfg.slang?.enabled !== false) {
+  if (want('slang') && cfg.slang?.enabled !== false) {
     const list = loadBank(dir, 'slang');
     if (list.length) {
       const max = cfg.slang.maxEntries || 60;
@@ -113,7 +124,7 @@ export function renderWordBanks({ dir, banks = {} }) {
   }
 
   // 回怼库
-  if (cfg.clapback?.enabled !== false) {
+  if (want('clapback') && cfg.clapback?.enabled !== false) {
     const list = loadBank(dir, 'clapback');
     if (list.length) {
       const max = cfg.clapback.maxEntries || 40;
@@ -140,7 +151,7 @@ export function renderWordBanks({ dir, banks = {} }) {
   }
 
   // 缩写对照
-  if (cfg.abbrev?.enabled !== false) {
+  if (want('abbrev') && cfg.abbrev?.enabled !== false) {
     const list = loadBank(dir, 'abbrev');
     if (list.length) {
       const max = cfg.abbrev.maxEntries || 30;

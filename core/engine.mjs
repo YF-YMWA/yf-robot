@@ -20,7 +20,7 @@ import { KnowledgeBase } from './kb.mjs';
 import { PluginHost } from './plugins.mjs';
 import { LogicLibrary } from './logic.mjs';
 import { LogicLearner } from './logic-learn.mjs';
-import { assembleContext, renderContext } from './context.mjs';
+import { assembleContext, renderContext, detectTone, banksForTone } from './context.mjs';
 import { renderSystemPrompt } from './persona.mjs';
 import { renderWordBanks } from './words.mjs';
 import { OwnerService } from './owner.mjs';
@@ -646,6 +646,7 @@ export class ChatEngine {
       let kbNote = '';
       let logicNote = '';
       let mediaNote = '';
+      let styleNote = '';
 
       try {
         const logicHits = [];
@@ -688,11 +689,31 @@ export class ChatEngine {
           media = this.#mediaSummary();
         } catch {}
 
+        /**
+         * 说话风格（词库）：按语气只取需要的那一类。
+         *
+         * 全拼约 1900 字（≈1150 token），每轮都发太贵；
+         * 而且被骂的时候给一堆网络用语、说正经事的时候给回怼库，都是干扰。
+         */
+        let styleText = '';
+        try {
+          const tone = detectTone(userText);
+          styleText = renderWordBanks({
+            dir: path.join(this.config.root || process.cwd(), 'resources'),
+            banks: this.config.words || {},
+            only: banksForTone(tone),
+          });
+          if (styleText) this.log.info?.(`[words] 语气 ${tone}，词库 ${styleText.length} 字`);
+        } catch (e) {
+          this.log.warn?.(`[words] 词库加载失败：${e.message}`);
+        }
+
         const { blocks, stats } = assembleContext({
           text: userText,
           logicHits,
           kbHits,
           media,
+          styleText,
           budget: Number(this.config.context?.budget ?? 1600),
         });
 
@@ -700,11 +721,12 @@ export class ChatEngine {
           if (b.kind === 'logic') logicNote = b.text;
           else if (b.kind === 'kb') kbNote = b.text;
           else if (b.kind === 'media') mediaNote = b.text;
+          else if (b.kind === 'style') styleNote = b.text;
         }
 
-        if (stats.logic || stats.kb || stats.media) {
+        if (stats.logic || stats.kb || stats.media || stats.style) {
           this.log.info?.(
-            `[ctx] 经验 ${stats.logic} / 资料 ${stats.kb} / 素材 ${stats.media}｜` +
+            `[ctx] 经验 ${stats.logic} / 资料 ${stats.kb} / 素材 ${stats.media} / 风格 ${stats.style}｜` +
               `共 ${stats.chars} 字（丢弃 经验${stats.droppedLogic} 资料${stats.droppedKb}）`,
           );
         }
@@ -725,6 +747,7 @@ export class ChatEngine {
         kbNote,
         logicNote,
         mediaNote,
+        styleNote,
       );
 
       let raw = '';
@@ -966,6 +989,7 @@ export class ChatEngine {
     kbNote = '',
     logicNote = '',
     mediaNote = '',
+    styleNote = '',
   ) {
     const system = renderSystemPrompt(this.persona, {
       ownerName: speakerName || this.persona.ownerName,
@@ -1038,19 +1062,14 @@ export class ChatEngine {
       this.log.warn?.(`[engine] 素材库清单失败: ${e.message}`);
     }
 
-    // 词库：只有启用的才会拼进来，每次随机抽取一部分（避免提示词过长）
-    try {
-      // 词库属于核心（不接微信也要用），放在 resources/ 下。
-      // 以前是 bridge/resources，适配器独立成仓库之后那条路径就不存在了。
-      const wordsDir = path.join(this.config.root || process.cwd(), 'resources');
-      const wordNote = renderWordBanks({
-        dir: wordsDir,
-        banks: this.config.words || {},
-      });
-      if (wordNote) parts.push(wordNote);
-    } catch (e) {
-      this.log.warn?.(`[engine] 词库加载失败: ${e.message}`);
-    }
+    /**
+     * 词库（说话风格）：已经在上面的「上下文组装」里按语气挑过类、算过预算，
+     * 这里只负责把它拼上去。
+     *
+     * 以前是在这里直接 renderWordBanks 全拼 —— 每轮约 1900 字，
+     * 和被骂、说正经事都不相干，还占掉检索的预算。
+     */
+    if (styleNote) parts.push(styleNote);
 
     // 主人身份：让她知道谁是主人、能用什么
     try {

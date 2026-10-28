@@ -13,6 +13,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { safeFetchText, SafeFetchError, htmlToPlainText } from './safe-fetch.mjs';
 
 /** 默认学习配置。 */
 export const LEARNING_DEFAULTS = {
@@ -135,25 +136,18 @@ export async function fetchSiteImages(url, opts = {}) {
   }
 
   try {
-    const res = await fetch(target, {
-      headers: {
-        'user-agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-        accept: 'text/html,application/xhtml+xml',
-        // 有些图床校验 referer，带上自己的域
-        referer: u.origin + '/',
-        'accept-language': 'zh-CN,zh;q=0.9',
-      },
-      signal: AbortSignal.timeout(opts.timeoutMs || 20000),
-      redirect: 'follow',
+    /**
+     * 统一走 safe-fetch：只允许公网 http/https，挡内网/元数据地址，
+     * 限制大小，跳转逐跳校验。
+     *
+     * 以前这里是直接 fetch —— 没有 SSRF 防护，抓
+     * http://127.0.0.1:8899/api/admin/config 也能拿到东西。
+     */
+    const page = await safeFetchText(target, {
+      maxBytes: 2 * 1024 * 1024,
+      timeoutMs: opts.timeoutMs || 20000,
     });
-
-    if (!res.ok) {
-      return { ok: false, url: target, images: [], error: `HTTP ${res.status}` };
-    }
-
-    const html = await res.text();
-    const images = extractImageUrls(html, target);
+    const images = extractImageUrls(page.text, target);
 
     return { ok: true, url: target, images };
   } catch (e) {
@@ -244,18 +238,13 @@ export async function fetchSiteText(url, opts = {}) {
   // 网络偶发抖动时重试一次（实测 example.com 会间歇性 "fetch failed"）
   const attempt = async (n) => {
     try {
-      return await fetch(target, {
-        headers: {
-          // 有些站不带 UA 直接 403
-          'user-agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-          accept: 'text/html,application/xhtml+xml',
-          'accept-language': 'zh-CN,zh;q=0.9',
-        },
-        signal: AbortSignal.timeout(opts.timeoutMs || 20000),
-        redirect: 'follow',
+      return await safeFetchText(target, {
+        maxBytes: Math.max(maxChars * 4, 256 * 1024),
+        timeoutMs: opts.timeoutMs || 20000,
       });
     } catch (e) {
+      // 安全策略拒绝的不要重试（重试也没用）
+      if (e instanceof SafeFetchError && !/超时|fetch failed|抓取失败/.test(e.message)) throw e;
       if (n > 0) {
         await new Promise((r) => setTimeout(r, 600));
         return attempt(n - 1);
@@ -265,28 +254,13 @@ export async function fetchSiteText(url, opts = {}) {
   };
 
   try {
-    const res = await attempt(1);
+    const page = await attempt(1);
+    const html = page.text;
 
-    if (!res.ok) {
-      return {
-        ok: false,
-        url: target,
-        title: '',
-        text: '',
-        error: `HTTP ${res.status}`,
-      };
-    }
-
-    const ct = res.headers.get('content-type') || '';
-    if (!/text\/html|text\/plain|application\/xhtml/i.test(ct)) {
-      return { ok: false, url: target, title: '', text: '', error: `不是网页（${ct || '未知类型'}）` };
-    }
-
-    const html = await res.text();
     const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
     const title = titleMatch ? decodeEntities(titleMatch[1]).trim().slice(0, 120) : '';
 
-    let text = htmlToText(html);
+    let text = htmlToPlainText(html);
     if (text.length > maxChars) text = text.slice(0, maxChars);
 
     if (text.length < 50) {

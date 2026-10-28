@@ -3,7 +3,16 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { assembleContext, renderContext, tooSimilar, mentionsMedia, DEFAULT_BUDGET } from '../core/context.mjs';
+import {
+  assembleContext,
+  renderContext,
+  tooSimilar,
+  mentionsMedia,
+  detectTone,
+  banksForTone,
+  clipAtBoundary,
+  DEFAULT_BUDGET,
+} from '../core/context.mjs';
 
 const media = { total: 39, tags: { 开心: 17, 困倦: 5, 可爱: 5 } };
 
@@ -139,4 +148,60 @@ test('renderContext 拼成一段', () => {
 
 test('默认预算合理', () => {
   assert.ok(DEFAULT_BUDGET >= 800 && DEFAULT_BUDGET <= 4000);
+});
+
+// ===== 语气判断与词库裁剪 =====
+
+test('语气：被骂识别为 hostile', () => {
+  assert.equal(detectTone('你个傻逼滚'), 'hostile');
+  assert.equal(detectTone('你算老几'), 'hostile');
+});
+
+test('语气：玩笑识别为 casual', () => {
+  assert.equal(detectTone('哈哈笑死我了'), 'casual');
+});
+
+test('语气：求助识别为 serious', () => {
+  assert.equal(detectTone('帮我看看这个报错'), 'serious');
+});
+
+test('语气：默认按 casual（别让她说话太干）', () => {
+  assert.equal(detectTone('随便聊聊'), 'casual');
+});
+
+test('词库选类：hostile 只给回怼库', () => {
+  assert.deepEqual(banksForTone('hostile'), ['clapback']);
+});
+
+test('词库选类：serious 只给缩写库', () => {
+  assert.deepEqual(banksForTone('serious'), ['abbrev']);
+});
+
+test('风格块：超出预算会被裁剪且不留半截词', () => {
+  const long = '【网络用语参考】' + '词一、词二、词三、'.repeat(80);
+  const { blocks } = assembleContext({ text: '闲聊', styleText: long, budget: 800 });
+  const style = blocks.find((b) => b.kind === 'style');
+  assert.ok(style);
+  assert.ok(style.text.length <= Math.floor(800 * 0.32) + 2);
+  assert.ok(style.text.endsWith('…') || style.text.length <= Math.floor(800 * 0.32));
+});
+
+test('风格块：排在最后', () => {
+  const { blocks } = assembleContext({
+    text: '发个表情包',
+    logicHits: [{ title: 'a', rule: '发个表情包缓和一下' }],
+    media,
+    styleText: '【网络用语参考】绝绝子',
+  });
+  assert.equal(blocks[blocks.length - 1].kind, 'style');
+});
+
+test('裁剪函数：短文本不动', () => {
+  assert.equal(clipAtBoundary('短', 100), '短');
+});
+
+test('裁剪函数：切在分隔符上', () => {
+  const out = clipAtBoundary('甲、乙、丙、丁、戊、己、庚、辛', 10);
+  assert.ok(out.endsWith('…'));
+  assert.ok(!out.includes('庚辛'));
 });
