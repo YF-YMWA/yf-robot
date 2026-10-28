@@ -14,6 +14,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -332,25 +333,50 @@ console.log('');
 if (WITH_RUNTIME) {
   console.log('【4.5】复制运行时…');
 
+  /**
+   * 复制目录（带过滤）。
+   *
+   * 为什么不直接用 fs.cpSync：site-packages 里有大量 __pycache__/*.pyc，
+   * 那些 .pyc 内嵌**构建机的绝对路径**（C:\Users\<用户名>\...），
+   * 既没必要（Python 会自己重新生成），又是实打实的个人信息。
+   * 主源码那段的 EXCLUDE_PATTERNS 管不到这里，所以单独过滤。
+   */
+  const COPY_SKIP = [/^__pycache__$/, /\.pyc$/i, /\.pyo$/i, /^\.git$/];
+
   const copyDir = (src, dst, label) => {
     if (!fs.existsSync(src)) {
       console.log(`  [跳过] ${label}（源不存在）`);
       return 0;
     }
     const t0 = Date.now();
-    fs.cpSync(src, dst, { recursive: true });
+
     let size = 0;
-    const count = (d) => {
-      for (const n of fs.readdirSync(d)) {
-        const f = path.join(d, n);
-        const st = fs.statSync(f);
-        if (st.isDirectory()) count(f);
-        else size += st.size;
+    let skipped = 0;
+    const walk = (from, to) => {
+      fs.mkdirSync(to, { recursive: true });
+      for (const ent of fs.readdirSync(from, { withFileTypes: true })) {
+        if (COPY_SKIP.some((p) => p.test(ent.name))) {
+          skipped++;
+          continue;
+        }
+        const s = path.join(from, ent.name);
+        const d = path.join(to, ent.name);
+        if (ent.isDirectory()) {
+          walk(s, d);
+        } else {
+          fs.copyFileSync(s, d);
+          size += fs.statSync(d).size;
+        }
       }
     };
-    count(dst);
+
+    walk(src, dst);
+
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
-    console.log(`  ${label}: ${(size / 1024 / 1024).toFixed(0)} MB（${secs}s）`);
+    console.log(
+      `  ${label}: ${(size / 1024 / 1024).toFixed(0)} MB（${secs}s）` +
+        (skipped ? `，跳过 ${skipped} 个缓存/临时项` : ''),
+    );
     return size;
   };
 
@@ -830,6 +856,68 @@ if (missing.length) {
 }
 
 console.log(`  ✓ ${MUST_HAVE.length} 个关键文件齐全`);
+console.log('');
+
+/**
+ * 【9】解压级泄露扫描。
+ *
+ * 前面第 2 步扫的是「源码里有没写死密钥」，扫不到「复制进 dist 的运行时数据」
+ * 这类问题 —— 比如 site-packages 的 .pyc 里嵌着构建机的用户名。
+ * 所以把 dist 打成临时 zip，跑 tools/scan-package-leak.py 逐个文件看。
+ */
+console.log('【9】解压级泄露扫描…');
+{
+  const py = path.join(ROOT, 'runtime', 'python', 'python.exe');
+  const scanner = path.join(ROOT, 'tools', 'scan-package-leak.py');
+  const tmpZip = path.join(ROOT, '.tmp', 'dist-leak-scan.zip');
+
+  if (fs.existsSync(py) && fs.existsSync(scanner)) {
+    try {
+      fs.mkdirSync(path.dirname(tmpZip), { recursive: true });
+      // 用 Python 打临时 zip（避免额外依赖）
+      const pyScript = `
+import os, sys, zipfile
+src, out = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as z:
+    for dp, _, fns in os.walk(src):
+        for n in fns:
+            f = os.path.join(dp, n)
+            z.write(f, os.path.relpath(f, src))
+`;
+      const pyFile = path.join(ROOT, '.tmp', '_zip_dist.py');
+      fs.writeFileSync(pyFile, pyScript, 'utf8');
+
+      // 强制 UTF-8 输出，否则中文在控制台是乱码
+      const env = { ...process.env, PYTHONIOENCODING: 'utf-8' };
+      const r1 = spawnSync(py, [pyFile, DIST, tmpZip], { encoding: 'utf8', env });
+      if (r1.status === 0) {
+        const r2 = spawnSync(py, [scanner, tmpZip], { encoding: 'utf8', env });
+        const out = (r2.stdout || '').trim();
+        // 只打结论那几行，别刷屏
+        for (const line of out.split('\n')) {
+          if (/结论|\[ok\]|\[!!\]|^     -/.test(line)) console.log(line);
+        }
+        if (r2.status !== 0) {
+          console.log('');
+          console.log('  ✗ 有泄露风险，先修再发包。');
+          try {
+            fs.rmSync(tmpZip, { force: true });
+          } catch {}
+          process.exit(1);
+        }
+      } else {
+        console.log('  [跳过] 打临时 zip 失败：' + (r1.stderr || '').slice(0, 120));
+      }
+      try {
+        fs.rmSync(tmpZip, { force: true });
+      } catch {}
+    } catch (e) {
+      console.log('  [跳过] 扫描器跑不起来：' + e.message);
+    }
+  } else {
+    console.log('  [跳过] 没有 Python 运行时或扫描脚本');
+  }
+}
 console.log('');
 
 // 完成
