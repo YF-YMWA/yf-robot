@@ -38,7 +38,9 @@ const checks = [
   ['工作目录指向适配器', ps.includes(path.basename(c.adapterDir))],
   ['bat 里有 cd /d', c.bat.includes('cd /d')],
   ['bat 里是固定入口', c.bat.includes('wechatauto_bridge.py')],
-  ['bat 里重定向到日志', c.bat.includes('panel-run.log') && c.bat.includes('2>&1')],
+  // 输出必须留在窗口里：适配器自己写日志，重定向会让窗口变空白
+  ['bat 不重定向输出（窗口能看到识别过程）', !c.bat.includes('> "') && !c.bat.includes('2>&1')],
+  ['bat 设了窗口标题', c.bat.includes('title ')],
   ['bat 强制 UTF-8（防乱码）', c.bat.includes('PYTHONIOENCODING')],
   ['bat 不含用户可控内容', !c.bat.includes('${') && !c.bat.includes('%1')],
 ];

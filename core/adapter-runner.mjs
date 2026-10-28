@@ -157,20 +157,37 @@ export function pidListeningOn(port = LOCK_PORT) {
   });
 }
 
-/** 日志尾巴 */
+/**
+ * 日志尾巴。
+ *
+ * 优先读适配器自己写的 `data/wechat-bridge-4x.log` —— 它的 log() 每行都落盘，
+ * 内容最全（包括识别过程）。panel-run.log 是早期重定向产物，留作兜底。
+ */
 export function tailLog(root, lines = 40) {
   const a = findAdapter(root);
   if (!a) return { ok: false, error: '没找到适配器目录' };
 
-  const files = [path.join(a.dir, LOG_FILE), path.join(a.dir, 'data', 'bridge.log')];
-  for (const f of files) {
+  const candidates = [
+    path.join(a.dir, 'data', 'wechat-bridge-4x.log'),
+    path.join(a.dir, 'data', 'bridge.log'),
+    path.join(a.dir, LOG_FILE),
+  ];
+
+  for (const f of candidates) {
     try {
       if (!fs.existsSync(f)) continue;
+      const st = fs.statSync(f);
+      if (!st.size) continue;
       const buf = fs.readFileSync(f, 'utf8');
-      return { ok: true, file: f.replace(a.dir, 'adapter'), text: buf.split('\n').slice(-lines).join('\n') };
+      return {
+        ok: true,
+        file: f.replace(a.dir, 'adapter'),
+        at: st.mtimeMs,
+        text: buf.split('\n').slice(-lines).join('\n'),
+      };
     } catch {}
   }
-  return { ok: false, error: '还没有日志（还没从面板启动过）' };
+  return { ok: false, error: '还没有日志（还没启动过）' };
 }
 
 /**
@@ -236,14 +253,16 @@ export function isElevated() {
 
 /**
  * 直接起进程（服务本身已经是管理员时走这条路，不弹 UAC）。
+ *
+ * windowsHide 必须是 false —— 用户要看那个窗口里滚动的识别过程，
+ * 藏起来就等于「启动了什么都没看见」。
  */
 function startDirect(cmd) {
   return new Promise((resolve) => {
-    // detached：让桥接不随服务退出；windowsHide：不弹黑窗
     const child = spawn('cmd.exe', ['/c', cmd.launcher], {
       cwd: cmd.adapterDir,
       detached: true,
-      windowsHide: true,
+      windowsHide: false,
       stdio: 'ignore',
     });
     child.unref();
@@ -273,17 +292,26 @@ export function buildStartCommand(root) {
   const logPath = path.join(a.dir, LOG_FILE);
   const launcher = path.join(a.dir, 'data', 'panel-launch.bat');
 
-  // bat 内容：切到适配器目录，跑入口，输出进日志
+  /**
+   * bat 内容。
+   *
+   * 关键：**不要重定向 stdout**。
+   * 适配器自己就把每一行写进 data/wechat-bridge-4x.log（log() 里先写文件再 print），
+   * 所以面板读文件就够了。之前把输出重定向到 panel-run.log，
+   * 结果是那个命令行窗口里一片空白 —— 用户以为「看不到识别信息了」。
+   * 现在窗口正常显示所有识别过程，面板日志也照样有。
+   */
   const bat = [
     '@echo off',
     'chcp 65001 >nul',
-    // Python 默认按系统编码输出，重定向到文件就成了乱码；强制 UTF-8
+    // Python 默认按系统编码输出，中文会乱码；强制 UTF-8
     'set PYTHONIOENCODING=utf-8',
     'set PYTHONUTF8=1',
+    'title 微信适配器（YF-Robot）— 关掉窗口即停止',
     `cd /d "${a.dir}"`,
-    `"${py}" ${ENTRY} > "${logPath}" 2>&1`,
+    `"${py}" ${ENTRY}`,
     'echo.',
-    'echo [panel] 进程已退出，按任意键关闭',
+    'echo [适配器已退出] 按任意键关闭窗口',
     'pause >nul',
     '',
   ].join('\r\n');
