@@ -1895,19 +1895,18 @@
       <div style="margin-top:14px"><button class="ghost" onclick="loadBridge()">刷新</button></div>
     </div>
     <div class="card" id="adapterCtl">
-      <h2>适配器控制<span class="sp"></span><span class="chip" id="adapterChip">检测中…</span></h2>
+      <h2>适配器<span class="sp"></span><span class="chip" id="adapterChip">检测中…</span></h2>
       <div class="hint" style="margin-bottom:12px;line-height:1.7">
-        在这里直接启动 / 停止微信适配器，不用去双击脚本。<br>
-        <span style="color:var(--warn)">启动会弹一次 UAC（管理员授权）</span> ——
-        适配器要操作微信窗口，没有管理员权限只能收不能发。
+        可以同时装多个适配器（微信、QQ、自定义协议……），在这里选一个启动。<br>
+        <span style="color:var(--warn)">操作微信窗口的适配器需要管理员权限</span> ——
+        服务本身是管理员时不会弹 UAC。
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-        <button id="adapterStartBtn" onclick="adapterStart()">启动适配器</button>
-        <button class="ghost" id="adapterStopBtn" onclick="adapterStop()">停止</button>
-        <button class="ghost" onclick="loadAdapterCtl()">刷新状态</button>
+      <div id="adapterList" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+        <button class="ghost" onclick="loadAdapters()">刷新状态</button>
         <button class="ghost" onclick="showAdapterLog()">看日志</button>
       </div>
-      <div id="adapterCtlMsg" class="hint"></div>
+      <div id="adapterCtlMsg" class="hint" style="margin-top:10px"></div>
       <pre id="adapterCtlLog" style="display:none;margin-top:12px;max-height:320px;overflow:auto;background:var(--bg2,#161b22);padding:12px;border-radius:8px;font-size:12px;line-height:1.6;white-space:pre-wrap"></pre>
     </div>
 
@@ -2030,8 +2029,8 @@ function loadPageData(page) {
   if (page === 'logs') loadLogs();
   if (page === 'bridge') {
     loadBridge();
-    // 进这一页顺手刷一次适配器进程状态（启动/停止按钮的可用性靠它）
-    loadAdapterCtl();
+    // 进这一页刷新适配器列表（多适配器：状态、启停按钮都靠它）
+    loadAdapters();
   }
   if (page === 'active') loadActive();
   if (page === 'stickers') {
@@ -3836,52 +3835,95 @@ async function applyUpdate() {
 }
 
 
-// ===== 适配器控制（启动 / 停止 / 日志）=====
+// ===== 适配器（多适配器：选择 + 单独启停）=====
 
-async function loadAdapterCtl() {
+let ADAPTERS = [];
+let ACTIVE_ADAPTER = localStorage.getItem('yf.activeAdapter') || '';
+
+async function loadAdapters() {
+  const list = $('adapterList');
   const chip = $('adapterChip');
-  const startBtn = $('adapterStartBtn');
-  const stopBtn = $('adapterStopBtn');
   const msg = $('adapterCtlMsg');
+  if (!list) return;
 
   try {
-    const j = await api('adapter/status');
+    const j = await api('adapters');
+    ADAPTERS = j.adapters || [];
 
-    if (!j.found) {
-      if (chip) { chip.textContent = '没有适配器'; chip.className = 'chip off'; }
-      if (startBtn) startBtn.disabled = true;
-      if (stopBtn) stopBtn.disabled = true;
-      if (msg) msg.textContent = '这是纯框架包，没有 adapter/ 目录。想接微信请用「带适配器」的包。';
+    if (!chip) {
+    } else if (!ADAPTERS.length) {
+      chip.textContent = '没有适配器';
+      chip.className = 'chip off';
+    } else {
+      const running = ADAPTERS.filter((a) => a.running).length;
+      chip.textContent = running ? running + ' 个运行中 / ' + ADAPTERS.length : ADAPTERS.length + ' 个可用';
+      chip.className = 'chip ' + (running ? 'on' : 'off');
+    }
+
+    if (!ADAPTERS.length) {
+      list.innerHTML =
+        '<div class="hint">这个包是纯框架，没有适配器。想接微信请用「带适配器」的包，' +
+        '或者把适配器放到 <code>adapters/&lt;名字&gt;/</code> 下。</div>';
       return;
     }
 
-    if (chip) {
-      chip.textContent = j.running ? '运行中' : '未运行';
-      chip.className = 'chip ' + (j.running ? 'on' : 'off');
+    // 默认选中：上次用的 → 正在跑的 → 第一个
+    if (!ADAPTERS.some((a) => a.id === ACTIVE_ADAPTER)) {
+      ACTIVE_ADAPTER = (ADAPTERS.find((a) => a.running) || ADAPTERS[0]).id;
     }
-    if (startBtn) startBtn.disabled = j.running;
-    if (stopBtn) stopBtn.disabled = !j.running;
+
+    list.innerHTML = ADAPTERS.map((a) => {
+      const on = a.running;
+      const checked = a.id === ACTIVE_ADAPTER ? 'checked' : '';
+      return (
+        '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px">' +
+        '<input type="radio" name="adapterPick" value="' + escapeHtml(a.id) + '" ' + checked +
+        ' onchange="pickAdapter(this.value)">' +
+        '<div style="flex:1;min-width:0">' +
+        '<div style="font-size:13px">' + escapeHtml(a.name) +
+        ' <span class="hint" style="font-size:11px">' + escapeHtml(a.id) + ' · ' + escapeHtml(a.mode) + '</span></div>' +
+        '<div class="hint" style="font-size:11px;margin-top:2px">' +
+        (a.description ? escapeHtml(a.description) : '入口 ' + escapeHtml(a.entry)) +
+        (a.needsAdmin ? ' · 需管理员' : '') +
+        (a.hasGit ? ' · git 副本（更新时跳过）' : '') +
+        '</div></div>' +
+        '<span class="chip ' + (on ? 'on' : 'off') + '" style="flex:none">' +
+        (on ? '运行中' + (a.pid ? ' ' + a.pid : '') : '未运行') + '</span>' +
+        '<button class="ghost sm" ' + (on ? 'disabled' : '') +
+        ' onclick="adapterStart(\'' + escapeHtml(a.id) + '\')">启动</button>' +
+        '<button class="ghost sm" ' + (on ? '' : 'disabled') +
+        ' onclick="adapterStop(\'' + escapeHtml(a.id) + '\')">停止</button>' +
+        '</div>'
+      );
+    }).join('');
+
     if (msg) {
-      msg.textContent = j.running
-        ? '正在运行' + (j.pid ? '（pid ' + j.pid + '）' : '（提权实例，PID 不可见）') + ' · 目录 ' + (j.mode === 'bundled' ? 'adapter/' : '隔壁仓库')
-        : j.elevated
-          ? '没有在跑。服务已是管理员，点「启动适配器」不会弹 UAC。'
-          : '没有在跑。点「启动适配器」会弹一次 UAC（点「是」）。不想每次弹，就用管理员身份运行 桌面控制台.bat。';
+      msg.textContent = j.serviceElevated
+        ? '服务已是管理员：启动适配器不会弹 UAC。'
+        : '服务不是管理员：启动适配器会弹一次 UAC（点「是」）。想以后都不弹，用管理员身份运行 桌面控制台.bat。';
     }
   } catch (e) {
-    if (msg) msg.textContent = '状态查询失败：' + e.message;
+    if (msg) msg.textContent = '读取失败：' + e.message;
   }
 }
 
-async function adapterStart() {
+function pickAdapter(id) {
+  ACTIVE_ADAPTER = id;
+  try {
+    localStorage.setItem('yf.activeAdapter', id);
+  } catch {}
+  const a = ADAPTERS.find((x) => x.id === id);
+  toast('已选中：' + (a ? a.name : id));
+}
+
+async function adapterStart(id) {
   const msg = $('adapterCtlMsg');
-  if (msg) msg.textContent = '正在启动…如果弹出 UAC 请点「是」';
-  if ($('adapterStartBtn')) $('adapterStartBtn').disabled = true;
+  if (msg) msg.textContent = '正在启动 ' + id + '…如果弹出 UAC 请点「是」';
 
   try {
-    const j = await api('adapter/start', { method: 'POST', body: {} });
+    const j = await api('adapters/start', { method: 'POST', body: { id } });
     if (j.ok) {
-      toast('适配器已启动');
+      toast('已启动：' + id);
       if (msg) msg.textContent = j.note || '已启动';
     } else {
       if (msg) msg.textContent = '✗ ' + (j.error || '启动失败');
@@ -3890,22 +3932,22 @@ async function adapterStart() {
   } catch (e) {
     if (msg) msg.textContent = '✗ ' + e.message;
   } finally {
-    setTimeout(loadAdapterCtl, 1200);
+    setTimeout(loadAdapters, 1200);
   }
 }
 
-async function adapterStop() {
-  if (!confirm('停止适配器？微信那边就不会再自动回复了（服务本身还在跑）。')) return;
+async function adapterStop(id) {
+  if (!confirm('停止适配器「' + id + '」？这个平台就不再自动回复了（核心服务还在跑）。')) return;
 
   const msg = $('adapterCtlMsg');
   try {
-    const j = await api('adapter/stop', { method: 'POST', body: {} });
+    const j = await api('adapters/stop', { method: 'POST', body: { id } });
     if (msg) msg.textContent = j.ok ? j.note || '已停止' : '✗ ' + j.error;
     toast(j.ok ? '已停止' : '停止失败', j.ok ? 'ok' : 'err');
   } catch (e) {
     if (msg) msg.textContent = '✗ ' + e.message;
   } finally {
-    setTimeout(loadAdapterCtl, 800);
+    setTimeout(loadAdapters, 800);
   }
 }
 
@@ -3916,11 +3958,12 @@ async function showAdapterLog() {
   pre.textContent = '读取中…';
 
   try {
-    const j = await api('adapter/log?lines=80');
+    const id = ACTIVE_ADAPTER || (ADAPTERS[0] && ADAPTERS[0].id) || '';
+    const j = await api('adapters/log?id=' + encodeURIComponent(id) + '&lines=80');
     if (j.ok) {
       const when = j.at ? new Date(j.at).toLocaleTimeString() : '';
       const head = '// ' + (j.file || '日志') + (when ? '  更新于 ' + when : '');
-      pre.textContent = head + '\n\n' + (j.text || '（空）');
+      pre.textContent = head + String.fromCharCode(10, 10) + (j.text || '（空）');
       pre.scrollTop = pre.scrollHeight;
     } else {
       pre.textContent = j.error || '读不到日志';

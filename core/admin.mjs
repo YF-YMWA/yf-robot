@@ -767,6 +767,66 @@ export class AdminApi {
         }
       }
 
+      // ===== 多适配器：列表 / 选择 / 单独启停 =====
+      if (method === 'GET' && pathname === '/api/admin/adapters') {
+        const runner = await import('./adapter-runner.mjs');
+        const { listAdapters } = await import('./adapter-registry.mjs');
+
+        const list = [];
+        for (const a of listAdapters(this.root)) {
+          let st = { running: false, pid: 0 };
+          try {
+            st = await runner.status(this.root, a.id);
+          } catch {}
+
+          list.push({
+            id: a.id,
+            name: a.name,
+            entry: a.entry,
+            mode: a.mode,
+            description: a.description,
+            needsAdmin: a.needsAdmin,
+            hasGit: a.hasGit,
+            dir: a.dir,
+            running: Boolean(st.running),
+            pid: st.pid || 0,
+          });
+        }
+
+        return {
+          code: 200,
+          body: {
+            ok: true,
+            adapters: list,
+            // 服务自己是不是管理员：是的话启动适配器不弹 UAC
+            serviceElevated: await runner.isElevated(),
+          },
+        };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/adapters/start') {
+        const { start } = await import('./adapter-runner.mjs');
+        const id = String(body?.id || '');
+        const r = await start(this.root, (m) => this.log.info?.(m), id);
+        return { code: 200, body: r };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/adapters/stop') {
+        const { stop } = await import('./adapter-runner.mjs');
+        const id = String(body?.id || '');
+        const r = await stop(this.root, (m) => this.log.info?.(m), id);
+        return { code: 200, body: r };
+      }
+
+      if (method === 'GET' && pathname === '/api/admin/adapters/log') {
+        const { tailLog } = await import('./adapter-runner.mjs');
+        const q = pathname.includes('?') ? pathname.slice(pathname.indexOf('?')) : '';
+        const sp = new URLSearchParams(q);
+        const id = sp.get('id') || '';
+        const n = Number(sp.get('lines'));
+        return { code: 200, body: tailLog(this.root, Number.isFinite(n) && n > 0 ? n : 60, id) };
+      }
+
       // ===== 适配器进程（从面板启动 / 停止）=====
       if (method === 'GET' && pathname === '/api/admin/adapter/status') {
         const { status } = await import('./adapter-runner.mjs');
@@ -774,12 +834,12 @@ export class AdminApi {
       }
       if (method === 'POST' && pathname === '/api/admin/adapter/start') {
         const { start } = await import('./adapter-runner.mjs');
-        const r = await start(this.root, (m) => this.log.info?.(m));
+        const r = await start(this.root, (m) => this.log.info?.(m), body?.id);
         return { code: 200, body: r };
       }
       if (method === 'POST' && pathname === '/api/admin/adapter/stop') {
         const { stop } = await import('./adapter-runner.mjs');
-        const r = await stop(this.root, (m) => this.log.info?.(m));
+        const r = await stop(this.root, (m) => this.log.info?.(m), body?.id);
         return { code: 200, body: r };
       }
       if (method === 'GET' && pathname === '/api/admin/adapter/log') {
