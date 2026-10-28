@@ -17,23 +17,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import net from 'node:net';
+import { getAdapter } from './adapter-registry.mjs';
 
 const ENTRY = 'wechatauto_bridge.py';
-const PID_FILE = path.join('data', 'adapter.panel.pid');
+
+/** 每个适配器各自的 PID 文件 / 启动脚本，互不干扰 */
+function pidFile(id) {
+  return path.join('data', 'adapter-' + (id || 'default') + '.pid');
+}
+
+/** 旧的单适配器 PID 文件（升级兼容：读到就迁过来） */
+const LEGACY_PID = path.join('data', 'adapter.panel.pid');
 const LOG_FILE = path.join('data', 'panel-run.log');
 
 /**
  * 找适配器目录：打包形态在 `adapter/`，开发形态在隔壁仓库。
  * @returns {{dir:string, mode:'bundled'|'sibling'}|null}
  */
-export function findAdapter(root) {
-  const bundled = path.join(root, 'adapter');
-  if (fs.existsSync(path.join(bundled, ENTRY))) return { dir: bundled, mode: 'bundled' };
-
-  const sibling = path.join(path.dirname(root), 'yf-robot-wechat-adapter');
-  if (fs.existsSync(path.join(sibling, ENTRY))) return { dir: sibling, mode: 'sibling' };
-
-  return null;
+export function findAdapter(root, id) {
+  const a = getAdapter(root, id);
+  if (!a) return null;
+  return { dir: a.dir, mode: a.mode, id: a.id, entry: a.entry, name: a.name, needsAdmin: a.needsAdmin };
 }
 
 /** 找一个能用的 python（优先用随包的运行时） */
@@ -49,13 +53,25 @@ function findPython(root, adapterDir) {
 }
 
 /** 读已记录的 PID */
-function readPid(root) {
+function readPid(root, id) {
+  const mine = path.join(root, pidFile(id));
   try {
-    const n = Number(fs.readFileSync(path.join(root, PID_FILE), 'utf8').trim());
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
+    const n = Number(fs.readFileSync(mine, 'utf8').trim());
+    if (Number.isFinite(n) && n > 0) return n;
+  } catch {}
+
+  // 升级兼容：老版本只写 data/adapter.panel.pid
+  try {
+    const n = Number(fs.readFileSync(path.join(root, LEGACY_PID), 'utf8').trim());
+    if (Number.isFinite(n) && n > 0) {
+      try {
+        fs.writeFileSync(mine, String(n), 'utf8');
+      } catch {}
+      return n;
+    }
+  } catch {}
+
+  return 0;
 }
 
 /** 这个 PID 还活着吗 */
@@ -163,8 +179,8 @@ export function pidListeningOn(port = LOCK_PORT) {
  * 优先读适配器自己写的 `data/wechat-bridge-4x.log` —— 它的 log() 每行都落盘，
  * 内容最全（包括识别过程）。panel-run.log 是早期重定向产物，留作兜底。
  */
-export function tailLog(root, lines = 40) {
-  const a = findAdapter(root);
+export function tailLog(root, lines = 40, id) {
+  const a = findAdapter(root, id);
   if (!a) return { ok: false, error: '没找到适配器目录' };
 
   const candidates = [
@@ -198,21 +214,23 @@ export function tailLog(root, lines = 40) {
  *   · 查到了桥接进程
  *   · 锁端口被占（提权实例看不到命令行，只能靠这个）
  */
-export async function status(root) {
-  const a = findAdapter(root);
+export async function status(root, id) {
+  const a = findAdapter(root, id);
   if (!a) {
     return { found: false, running: false, message: '没有适配器（这是纯框架包）' };
   }
 
-  const pid = readPid(root);
+  const pid = readPid(root, id);
   const byPid = alive(pid);
-  const found = byPid ? pid : await findBridgePid();
+  // 非微信适配器：只看 PID（findBridgePid 是按 wechatauto 的锁端口找的）
+  const found =
+    a.needsAdmin === false ? (byPid ? pid : 0) : byPid ? pid : await findBridgePid();
   const running = Boolean(found); // -1 也算「有实例」
 
   // 顺手把 PID 文件纠正过来（-1 表示有实例但看不到 PID，就不写）
   if (running && found > 0 && found !== pid) {
     try {
-      fs.writeFileSync(path.join(root, PID_FILE), String(found), 'utf8');
+      fs.writeFileSync(path.join(root, pidFile(id)), String(found), 'utf8');
     } catch {}
   }
 
@@ -225,7 +243,7 @@ export async function status(root) {
     entry: ENTRY,
     // 服务是管理员的话，启动适配器不需要弹 UAC
     elevated: await isElevated(),
-    log: tailLog(root, 20),
+    log: tailLog(root, 20, id),
   };
 }
 
@@ -268,7 +286,8 @@ function startDirect(cmd) {
     child.unref();
 
     child.on('error', (e) => resolve({ ok: false, error: '启动失败：' + e.message }));
-    child.on('spawn', () => resolve({ ok: true, pid: 0, direct: true }));
+    // pid 要给出来：非微信适配器靠它判断进程是否还活着
+    child.on('spawn', () => resolve({ ok: true, pid: child.pid || 0, direct: true }));
   });
 }
 
@@ -284,12 +303,13 @@ function startDirect(cmd) {
  * 现在的做法：把命令写进一个 .bat，Start-Process 只传一个路径。
  * 路径再长、含空格都没关系，不需要任何嵌套引号。
  */
-export function buildStartCommand(root) {
-  const a = findAdapter(root);
+export function buildStartCommand(root, id) {
+  const a = findAdapter(root, id);
   if (!a) return null;
 
   const py = findPython(root, a.dir);
   const logPath = path.join(a.dir, LOG_FILE);
+  // 每个适配器一份启动脚本，别互相覆盖
   const launcher = path.join(a.dir, 'data', 'panel-launch.bat');
 
   /**
@@ -301,6 +321,15 @@ export function buildStartCommand(root) {
    * 结果是那个命令行窗口里一片空白 —— 用户以为「看不到识别信息了」。
    * 现在窗口正常显示所有识别过程，面板日志也照样有。
    */
+  /**
+   * 入口用适配器自己声明的（adapter.json 里的 entry）。
+   *
+   * 之前这里写死 wechatauto_bridge.py，导致面板加了第二个适配器之后，
+   * 点启动还是去跑微信那个脚本 —— 报「文件不存在」，看着像启动失败。
+   */
+  const entry = a.entry || ENTRY;
+  const title = (a.name || '适配器') + '（YF-Robot）— 关掉窗口即停止';
+
   const bat = [
     '@echo off',
     'chcp 65001 >nul',
@@ -309,9 +338,9 @@ export function buildStartCommand(root) {
     'set PYTHONUTF8=1',
     // 面板启动：让桥接忽略 Ctrl+C —— 点窗口复制日志时很容易误触，一按就退出了
     'set YF_NO_SIGINT=1',
-    'title 微信适配器（YF-Robot）— 关掉窗口即停止',
+    `title ${title}`,
     `cd /d "${a.dir}"`,
-    `"${py}" ${ENTRY}`,
+    `"${py}" ${entry}`,
     'echo.',
     'echo [适配器已退出] 按任意键关闭窗口',
     'pause >nul',
@@ -324,10 +353,11 @@ export function buildStartCommand(root) {
   return {
     adapterDir: a.dir,
     python: py,
+    entry,
     logPath,
     launcher,
     bat,
-    cmdLine: `"${py}" ${ENTRY} > "${logPath}" 2>&1`,
+    cmdLine: `"${py}" ${entry} > "${logPath}" 2>&1`,
     psArgs: [
       '-NoProfile',
       '-Command',
@@ -345,17 +375,17 @@ export function buildStartCommand(root) {
  *
  * @returns {Promise<{ok:boolean, pid?:number, error?:string, note?:string}>}
  */
-export async function start(root, log = () => {}) {
-  const a = findAdapter(root);
+export async function start(root, log = () => {}, id) {
+  const a = findAdapter(root, id);
   if (!a) return { ok: false, error: '没有适配器目录（这是纯框架包）' };
 
   // 已经在跑（按 PID 或按进程名找，别重复起）
-  const cur = readPid(root);
+  const cur = readPid(root, id);
   if (alive(cur)) return { ok: true, pid: cur, note: '已经在跑了' };
   const existing = await findBridgePid();
   if (existing) return { ok: true, pid: existing, note: '已经在跑了（pid ' + existing + '）' };
 
-  const cmd = buildStartCommand(root);
+  const cmd = buildStartCommand(root, id);
   if (!cmd) return { ok: false, error: '没有适配器目录（这是纯框架包）' };
 
   fs.mkdirSync(path.dirname(cmd.logPath), { recursive: true });
@@ -373,35 +403,62 @@ export async function start(root, log = () => {}) {
     return { ok: false, error: '写启动脚本失败：' + e.message };
   }
 
-  // ===== 情况一：服务本身是管理员 → 直接起，不弹 UAC =====
-  if (await isElevated()) {
+  /**
+   * 两条路，按适配器自己的声明决定：
+   *
+   *   needsAdmin = false（例如 QQ / 自定义协议适配器）
+   *       → 直接起，永不弹 UAC。以前不管什么适配器都走提权，
+   *         导致「不需要管理员的适配器」也弹窗、还会被当成本地启动失败。
+   *
+   *   needsAdmin = true（微信这种要操作别人窗口的）
+   *       → 服务已经是管理员就直接起；不是才弹 UAC。
+   */
+  const elevated = await isElevated();
+  const needElevation = a.needsAdmin !== false && !elevated;
+
+  if (!needElevation) {
     const r = await startDirect(cmd);
     if (!r.ok) return r;
 
-    // 等桥接进程出现（同样不能信 spawn 给的 PID）
+    /**
+     * 等它真的活下来。
+     *
+     * 微信适配器有自己的单实例锁端口，能用 findBridgePid() 精确判断；
+     * 其它适配器没有这个约定，就按 spawn 出来的 PID 看它是否还活着。
+     */
     let realPid = 0;
     for (let i = 0; i < 12 && !realPid; i++) {
-      await new Promise((x) => setTimeout(x, 700));
-      realPid = await findBridgePid();
+      await new Promise((x) => setTimeout(x, 500));
+
+      if (a.needsAdmin !== false) {
+        realPid = await findBridgePid();
+      } else {
+        const childPid = r.pid || 0;
+        realPid = childPid && alive(childPid) ? childPid : 0;
+      }
     }
 
     if (!realPid) {
       return {
         ok: false,
-        error: '进程起了但没找到桥接进程，多半是启动后立刻退出了。点「看日志」看原因（微信没开？已有实例？）。',
+        error:
+          '进程起了但没活下来，多半是启动后立刻退出了。点「看日志」看原因' +
+          (a.needsAdmin !== false ? '（微信没开？已有实例？）' : '（脚本报错？）'),
       };
     }
 
     try {
-      fs.writeFileSync(path.join(root, PID_FILE), String(realPid), 'utf8');
+      fs.writeFileSync(path.join(root, pidFile(id)), String(realPid), 'utf8');
     } catch {}
 
-    log('[adapter] 已启动 pid=' + realPid + '（直接启动，无需 UAC）');
+    log('[adapter] ' + (a.name || id || '适配器') + ' 已启动 pid=' + realPid);
     return {
       ok: true,
       pid: realPid,
-      elevated: true,
-      note: '已启动（pid ' + realPid + '）。服务本身是管理员，所以没有弹 UAC。',
+      elevated,
+      note: elevated
+        ? '已启动（pid ' + realPid + '）。服务本身是管理员，没有弹 UAC。'
+        : '已启动（pid ' + realPid + '）。这个适配器不需要管理员权限。',
     };
   }
 
@@ -442,7 +499,7 @@ export async function start(root, log = () => {}) {
       if (realPid) {
         if (realPid > 0) {
           try {
-            fs.writeFileSync(path.join(root, PID_FILE), String(realPid), 'utf8');
+            fs.writeFileSync(path.join(root, pidFile(id)), String(realPid), 'utf8');
           } catch {}
         }
         log('[adapter] 已启动 ' + (realPid > 0 ? 'pid=' + realPid : '（提权实例，PID 不可见）'));
@@ -475,22 +532,22 @@ export async function start(root, log = () => {}) {
  * 优先按记录的 PID 杀（连带子进程）；拿不到 PID 时（提权实例），
  * 用锁端口反查到底是哪个进程在监听，再杀它。
  */
-export async function stop(root, log = () => {}) {
-  const pid = readPid(root);
+export async function stop(root, log = () => {}, id) {
+  const pid = readPid(root, id);
 
   if (pid && alive(pid)) {
-    return await killPid(root, pid, log);
+    return await killPid(root, pid, log, id);
   }
 
   // 记录里没有，但可能真有实例在跑（提权启动的那种）
   const found = await findBridgePid();
 
-  if (found > 0) return await killPid(root, found, log);
+  if (found > 0) return await killPid(root, found, log, id);
 
   if (found === -1) {
     // 有实例但看不到 PID：用 netstat 反查监听 47821 的进程号
     const owner = await pidListeningOn(LOCK_PORT);
-    if (owner && owner > 0) return await killPid(root, owner, log);
+    if (owner && owner > 0) return await killPid(root, owner, log, id);
 
     return {
       ok: false,
@@ -501,18 +558,18 @@ export async function stop(root, log = () => {}) {
   }
 
   try {
-    fs.rmSync(path.join(root, PID_FILE), { force: true });
+    fs.rmSync(path.join(root, pidFile(id)), { force: true });
   } catch {}
   return { ok: true, note: '本来就没在跑' };
 }
 
 /** 杀掉某个 PID（连带子进程），并清掉记录 */
-function killPid(root, pid, log = () => {}) {
+function killPid(root, pid, log = () => {}, id) {
   return new Promise((resolve) => {
     // /T 连带子进程（cmd → python）
     execFile('taskkill', ['/PID', String(pid), '/T', '/F'], (err) => {
       try {
-        fs.rmSync(path.join(root, PID_FILE), { force: true });
+        fs.rmSync(path.join(root, pidFile(id)), { force: true });
       } catch {}
       if (err) {
         /**
