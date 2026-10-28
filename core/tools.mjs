@@ -46,6 +46,8 @@ export class ToolKit {
    * @param {number} [opts.cmdTimeout] 命令超时（毫秒）
    */
   constructor(opts) {
+    /** 核心配置（读 tools.off 白名单用） */
+    this.config = opts.config || {};
     this.sandbox = path.resolve(opts.sandbox);
     this.log = opts.logger || console;
     this.maxFileSize = opts.maxFileSize || 512 * 1024;
@@ -109,6 +111,22 @@ export class ToolKit {
     }
 
     return abs;
+  }
+
+  /**
+   * 全部工具定义（包括被关掉的）。
+   *
+   * 控制台的「工具」页要用它：关掉的工具也得列出来，否则一关就从列表里消失，
+   * 想再打开都找不到。
+   */
+  allDefinitions() {
+    const saved = this.config?.tools?.off;
+    this.config.tools = { ...(this.config.tools || {}), off: [] };
+    try {
+      return this.definitions();
+    } finally {
+      this.config.tools = { ...(this.config.tools || {}), off: saved };
+    }
   }
 
   /** 工具定义（给模型看的）。 */
@@ -361,7 +379,30 @@ export class ToolKit {
       }
     }
 
-    return defs;
+    // 白名单：只把开着的工具给模型（关掉的既不发定义，也不让调）
+    const off = this.disabledTools();
+    if (!off.size) return defs;
+    return defs.filter((d) => !off.has(d.function?.name));
+  }
+
+  /**
+   * 被关掉的工具集合。
+   *
+   * 配置长这样（默认空 = 全开）：
+   *   "tools": { "off": ["run_command", "ask_dsh"] }
+   *
+   * 用「关掉哪些」而不是「只开哪些」，是为了以后新增工具默认可用，
+   * 不用回来改白名单。
+   */
+  disabledTools() {
+    const list = this.config?.tools?.off;
+    if (!Array.isArray(list)) return new Set();
+    return new Set(list.map((x) => String(x)));
+  }
+
+  /** 这个工具是不是被关了 */
+  isToolOff(name) {
+    return this.disabledTools().has(String(name));
   }
 
   /**
@@ -373,6 +414,12 @@ export class ToolKit {
    */
   async run(name, args, ctx = {}) {
     try {
+      // 关掉的工具即使被硬调也不执行（模型偶尔会照着历史记录瞎调）
+      if (this.isToolOff(name)) {
+        this.log.info?.(`[tool] ${name} 已被关闭，拒绝执行`);
+        return `（${name} 这个功能被主人关掉了）`;
+      }
+
       switch (name) {
         case 'list_files':
           return this.listFiles(args.dir || '');
@@ -477,8 +524,7 @@ export class ToolKit {
             return await this.plugins.runTool(name, args);
           }
           return `（未知工具：${name}）`;
-      }
-    } catch (e) {
+      }    } catch (e) {
       this.log.warn?.(`[tool] ${name} 失败: ${e.message}`);
       return `（执行失败：${e.message}）`;
     }

@@ -708,12 +708,20 @@ export class WebChannel {
          * 加了卡片音色之后，换个角色声音也能跟着换 ——
          * 一张卡是慵懒大叔、一张是元气少女，共用一个音色会很出戏。
          */
-        const voice =
+        const wanted =
           body?.voice ||
           this.engine?.persona?.voice ||
           this.engine?.persona?.data?.voice || // 兼容卡片原始结构
           this.config.voice?.ttsVoice ||
-          undefined;
+          '';
+
+        // 从「内置 + 导入的语音包」里解析；找不到就退回默认，不让合成直接失败
+        const { resolveVoice } = await import('../core/voice-packs.mjs');
+        const picked = resolveVoice(this.config.root || process.cwd(), wanted);
+        if (picked.fallback) {
+          this.log.warn?.(`[tts] 音色 ${picked.wanted} 不存在，改用 ${picked.id}`);
+        }
+        const voice = picked.id;
 
         const r = await synthesize({
           text,

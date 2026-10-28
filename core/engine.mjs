@@ -132,6 +132,7 @@ export class ChatEngine {
       this.usage = { day: '', calls: 0, input: 0, output: 0, byKind: {} };
 
       this.tools = new ToolKit({
+        config: this.config,
         plugins: this.plugins,
         // 懒加载：第一次用到时才建库，启动不受影响
         logic: { search: (...a) => this.logic().search(...a) },

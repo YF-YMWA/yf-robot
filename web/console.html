@@ -318,6 +318,7 @@
     <a data-page="active">主动功能</a>
     <a data-page="stickers">素材库</a>
     <a data-page="learn">联网学习</a>
+    <a data-page="tools">工具</a>
     <a data-page="plugins">插件</a>
       <a data-page="data" data-group="data">资料</a>
     <a data-page="identity" data-group="identity">身份</a>
@@ -676,14 +677,8 @@
         <div class="row"><label>语音回复</label><div class="ctl">
           <input type="number" id="voiceChance" min="0" max="100" step="5" style="max-width:80px" placeholder="概率%">
           <span class="hint">% 概率发语音</span>
-          <select id="ttsVoice" style="max-width:170px">
-            <option value="Cherry">Cherry（女声，自然）</option>
-            <option value="Serena">Serena（女声，温柔）</option>
-            <option value="Chelsie">Chelsie（女声，活泼）</option>
-            <option value="Ethan">Ethan（男声，阳光）</option>
-            <option value="Dylan">Dylan（男声，北京话）</option>
-            <option value="Jada">Jada（女声，上海话）</option>
-          </select>
+          <select id="ttsVoice" style="max-width:200px"></select>
+          <button class="ghost sm" onclick="importVoicePack()" title="导入自定义音色（声音复刻得到的音色 ID）">导入语音包</button>
         </div></div>
         <div class="keyrow">
           <label>合成 Key</label>
@@ -1073,6 +1068,33 @@
     </div>
 
 
+  </div>
+
+  <div class="page" id="page-tools">
+    <h1>工具</h1>
+
+    <div class="card">
+      <h2>总开关</h2>
+      <div class="row"><label>启用工具</label><div class="ctl">
+        <div class="switch" id="swToolsGlobal" onclick="toggleSw('swToolsGlobal')"></div>
+        <button class="ghost sm" onclick="saveToolsGlobal()">保存</button>
+        <span class="hint">关掉后她只能用嘴聊，不能读写文件、不能联网、不能发图</span>
+      </div></div>
+      <div class="row"><label>工作目录</label><div class="ctl">
+        <code id="toolSandbox" style="font-size:12px">加载中…</code>
+        <span class="hint">她的读写和命令都限制在这个目录里</span>
+      </div></div>
+      <div class="hint" style="margin-top:10px;line-height:1.7" id="toolHint"></div>
+    </div>
+
+    <div class="card">
+      <h2>单个工具<span class="sp"></span><button class="ghost sm" onclick="loadTools()">刷新</button></h2>
+      <div id="toolList">加载中…</div>
+      <div class="hint" style="margin-top:12px;line-height:1.7">
+        关掉的工具<b>不会发给模型</b>，模型看不到也就不会调；就算它照历史记录硬调，也会被拒绝。<br>
+        插件提供的工具也在这里，和内置的一视同仁。
+      </div>
+    </div>
   </div>
 
   <div class="page" id="page-plugins">
@@ -3214,7 +3236,30 @@ async function loadTtsSettings() {
           ? '未单独配置，正在用语音转写那把 Key'
           : '还没配 Key';
     }
-    if ($('ttsVoice')) $('ttsVoice').value = v.ttsVoice || 'Cherry';
+    // 音色下拉：内置 + 导入的语音包
+    try {
+      const packs = await api('voice/packs');
+      const sel = $('ttsVoice');
+      if (sel) {
+        const groups = {};
+        for (const voice of packs.voices || []) {
+          (groups[voice.from] ||= []).push(voice);
+        }
+        const esc = (x) => escapeHtml(String(x == null ? '' : x));
+        sel.innerHTML = Object.entries(groups)
+          .map(([from, list]) => {
+            const opts = list
+              .map((x) => {
+                const note = x.note ? '（' + esc(x.note) + '）' : '';
+                return '<option value="' + esc(x.id) + '">' + esc(x.label) + note + '</option>';
+              })
+              .join('');
+            return '<optgroup label="' + esc(from) + '">' + opts + '</optgroup>';
+          })
+          .join('');
+        sel.value = packs.current || v.ttsVoice || 'Cherry';
+      }
+    } catch {}
   } catch {}
 }
 
@@ -3443,6 +3488,131 @@ async function togglePlugin(id, enabled) {
   } catch (e) {
     toast('操作失败：' + e.message, 'err');
   }
+}
+
+// ===== 工具 =====
+
+let _toolList = [];
+
+const TOOL_KIND = {
+  read: { label: '读', color: 'var(--fg)' },
+  write: { label: '写', color: 'var(--warn)' },
+  run: { label: '执行', color: 'var(--err)' },
+  net: { label: '联网', color: 'var(--fg)' },
+  other: { label: '其它', color: 'var(--fg)' },
+};
+
+/** 粗分类：让用户一眼看出哪些是"危险"的 */
+function toolKind(name) {
+  if (/read_file|list_files|list_stickers|recall_logic/.test(name)) return 'read';
+  if (/write_file|save_sticker/.test(name)) return 'write';
+  if (/run_command|ask_dsh/.test(name)) return 'run';
+  if (/search_web|learn_from_web/.test(name)) return 'net';
+  return 'other';
+}
+
+async function loadTools() {
+  const listEl = $('toolList');
+  const hint = $('toolHint');
+  if (!listEl) return;
+
+  try {
+    const j = await api('tools');
+    _toolList = j.tools || [];
+
+    setSw('swToolsGlobal', j.enabled !== false);
+    if ($('toolSandbox')) $('toolSandbox').textContent = j.sandbox || '（默认）';
+    if (hint) {
+      hint.textContent = `共 ${j.count} 个，已关 ${j.offCount} 个。关掉的工具既不会告诉模型，也算调用不了。`;
+    }
+
+    if (!_toolList.length) {
+      listEl.innerHTML = '<div class="hint">没有可用工具</div>';
+      return;
+    }
+
+    // 按来源分组：内置 / 插件
+    const render = (list) =>
+      list
+        .map((t) => {
+          const k = toolKind(t.name);
+          const kind = TOOL_KIND[k];
+          const danger = k === 'run' || k === 'write';
+          return `
+        <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;${t.enabled ? '' : 'opacity:.55'}">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <div class="switch ${t.enabled ? 'on' : ''}" onclick="toggleTool('${escapeHtml(t.name)}', ${!t.enabled})"></div>
+            <b style="font-family:monospace">${escapeHtml(t.name)}</b>
+            <span class="chip" style="color:${kind.color}">${kind.label}</span>
+            ${t.source === 'plugin' ? `<span class="chip">插件：${escapeHtml(t.plugin)}</span>` : ''}
+            ${danger ? '<span class="hint" style="color:var(--warn)">能改文件或跑命令，别乱开</span>' : ''}
+          </div>
+          <div class="hint" style="margin-top:6px;line-height:1.6">${escapeHtml(t.description || '')}</div>
+        </div>`;
+        })
+        .join('');
+
+    const builtin = _toolList.filter((t) => t.source === 'builtin');
+    const plugin = _toolList.filter((t) => t.source === 'plugin');
+
+    listEl.innerHTML =
+      `<div style="margin:6px 0 8px;font-weight:600;font-size:13px">内置工具（${builtin.length}）</div>` +
+      render(builtin) +
+      (plugin.length
+        ? `<div style="margin:16px 0 8px;font-weight:600;font-size:13px">插件提供的（${plugin.length}）</div>` +
+          render(plugin)
+        : `<div class="hint" style="margin-top:14px">还没有插件提供工具。放一个到 plugins/ 目录，重启后就会出现在这里。</div>`);
+  } catch (e) {
+    if (hint) hint.textContent = '读取失败：' + e.message;
+  }
+}
+
+async function toggleTool(name, enabled) {
+  try {
+    const j = await api('tools/toggle', { method: 'POST', body: { name, enabled } });
+    if (!j.ok) throw new Error(j.error || '操作失败');
+    toast(`${name} 已${enabled ? '开启' : '关闭'}`);
+    loadTools();
+  } catch (e) {
+    toast('操作失败：' + e.message, 'err');
+  }
+}
+
+async function saveToolsGlobal() {
+  try {
+    await api('config', { method: 'POST', body: { tools: { enabled: isSw('swToolsGlobal') } } });
+    toast('已保存');
+  } catch (e) {
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
+
+/**
+ * 导入语音包。
+ *
+ * 阿里云百炼里做「声音复刻」会拿到一个音色 ID，写成一个 JSON：
+ *   { "name": "我的音色", "voices": [{ "id": "cosyvoice-v2-xxx", "label": "我自己" }] }
+ * 在这里选这个文件导入，之后下拉框里就能选到。
+ */
+async function importVoicePack() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const r = await api('voice/packs/import', { method: 'POST', body: parsed });
+      if (!r.ok) throw new Error(r.error || '导入失败');
+      toast('导入成功：' + r.pack.name + '（' + r.count + ' 个音色）');
+      loadTtsSettings();
+    } catch (e) {
+      toast('导入失败：' + e.message, 'err');
+    }
+  };
+  input.click();
 }
 
 // ===== 逻辑库 =====
@@ -6042,6 +6212,7 @@ async function loadAll() {
     loadUsage(),
     loadBackend(),
     loadLogic(),
+    loadTools(),
   ]);
 }
 

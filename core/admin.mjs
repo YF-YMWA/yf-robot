@@ -494,6 +494,86 @@ export class AdminApi {
         };
       }
 
+      // ===== 语音包 =====
+      if (method === 'GET' && pathname === '/api/admin/voice/packs') {
+        const { allVoices, readPacks } = await import('./voice-packs.mjs');
+        return {
+          code: 200,
+          body: {
+            voices: allVoices(this.root),
+            packs: readPacks(this.root),
+            current: this.config.voice?.ttsVoice || 'Cherry',
+          },
+        };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/voice/packs/import') {
+        const { importPack } = await import('./voice-packs.mjs');
+        const payload = body?.pack ?? body;
+        const r = importPack(this.root, payload);
+        return { code: 200, body: r };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/voice/packs/remove') {
+        const { removePack } = await import('./voice-packs.mjs');
+        return { code: 200, body: removePack(this.root, String(body?.name || '')) };
+      }
+
+      // ===== 工具列表（内置 + 插件，各自独立开关） =====
+      if (method === 'GET' && pathname === '/api/admin/tools') {
+        const kit = this.engine.tools;
+        const off = kit?.disabledTools?.() || new Set();
+        const pluginOf = new Map();
+        for (const p of this.engine.plugins?.list?.() || []) {
+          for (const t of p.tools || []) pluginOf.set(t, p.name);
+        }
+
+        // 用「全部定义」列出（包括关掉的，否则关了就从列表里消失，没法再打开）
+        const all = kit?.allDefinitions?.() || [];
+        const tools = all.map((d) => {
+          const name = d.function?.name || '';
+          return {
+            name,
+            description: d.function?.description || '',
+            enabled: !off.has(name),
+            source: pluginOf.has(name) ? 'plugin' : 'builtin',
+            plugin: pluginOf.get(name) || '',
+          };
+        });
+
+        return {
+          code: 200,
+          body: {
+            enabled: this.config.tools?.enabled !== false,
+            sandbox: this.config.tools?.sandbox || '',
+            count: tools.length,
+            offCount: tools.filter((t) => !t.enabled).length,
+            tools,
+          },
+        };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/tools/toggle') {
+        const name = String(body?.name || '');
+        const on = Boolean(body?.enabled);
+        if (!name) return { code: 200, body: { ok: false, error: '缺少工具名' } };
+
+        const file = path.join(this.root, 'config.json');
+        const current = JSON.parse(fs.readFileSync(file, 'utf8'));
+        current.tools = current.tools || {};
+        const off = new Set(Array.isArray(current.tools.off) ? current.tools.off.map(String) : []);
+
+        if (on) off.delete(name);
+        else off.add(name);
+
+        current.tools.off = [...off];
+        writeConfig(file, current, 'tools/toggle', this.log);
+
+        // 同步内存（引擎每轮读 this.config.tools.off）
+        this.config.tools = { ...(this.config.tools || {}), ...current.tools };
+        return { code: 200, body: { ok: true, name, enabled: on, off: current.tools.off } };
+      }
+
       // ===== 逻辑库 =====
       if (method === 'GET' && pathname === '/api/admin/logic') {
         const lib = this.engine.logic();
