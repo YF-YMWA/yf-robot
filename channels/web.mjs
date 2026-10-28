@@ -315,9 +315,16 @@ export class WebChannel {
         if (r) return json(res, r.code, r.body);
       }
 
-      // 页面：把 token 注入进去，供前端后续调用接口
+      /**
+       * 根路径直接跳到控制台。
+       *
+       * 以前这里是一个独立的网页聊天页（web/index.html，11KB），
+       * 但控制台里的「对话调试」本来就有输入框和发送按钮，
+       * 两边功能重复。合并成一个入口，少维护一份界面。
+       */
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-        return this.#serveWithToken(res, 'index.html', 200);
+        res.writeHead(302, { location: '/console' });
+        return res.end();
       }
       if (req.method === 'GET' && url.pathname === '/console') {
         return this.#serveWithToken(res, 'console.html', 200);
