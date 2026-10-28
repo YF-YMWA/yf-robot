@@ -94,68 +94,23 @@ export class ChatEngine {
       this.log.info?.(`[imagegen] 绘图已启用: ${config.imagegen?.model || 'cogview-3-flash'}`);
     }
 
-    // 工具层（只有开启时才初始化）
+    /**
+     * 工具层。
+     *
+     * 面板上「工具能力」可以随时开关，所以这里只建一次初始状态，
+     * 之后每轮对话前由 syncTools() 按最新配置校正 ——
+     * 之前只在构造时判断一次，运行中关掉等于没关（还会照常读目录、跑命令）。
+     */
     this.tools = null;
-    if (config.tools?.enabled) {
-      // DSH 调用（可选）
-      let dsh = null;
-      if (config.tools.dsh?.enabled) {
-        const rt = DshClient.detect();
-        if (rt) {
-          const home = DshClient.prepareHome(config.root || process.cwd());
-          dsh = new DshClient({
-            nodePath: rt.nodePath,
-            dshBin: rt.dshBin,
-            extraArgs: rt.extraArgs,
-            cwd: config.tools.dsh.cwd || config.root || process.cwd(),
-            dshHome: home.dshHome,
-            tmpDir: home.tmpDir,
-            timeoutMs: config.tools.dsh.timeoutMs || 180000,
-            logger,
-          });
-          this.log.info?.('[tool] DSH 调用已启用');
-        } else {
-          this.log.warn?.('[tool] 没找到 DSH 运行时，跳过');
-        }
-      }
-
-      /**
-       * 插件宿主。
-       *
-       * 加载是异步的（要 import 插件模块），所以这里先建对象，
-       * 由 app.mjs 在启动时 await this.plugins.load()。
-       * 没加载完之前 definitions() 返回空数组，不影响正常聊天。
-       */
-      this.plugins = new PluginHost({
-        root: config.root || process.cwd(),
-        config,
-        log: (m) => logger.info?.(m),
-      });
-
-      /**
-       * 用量统计。
-       *
-       * 记每次调用的输入/输出 token，按天累计，写进 data/token-stats.json。
-       * 目的是能回答「这个功能一次花多少」这种问题 —— 之前完全没数据。
-       */
-      this.usage = { day: '', calls: 0, input: 0, output: 0, byKind: {} };
-
-      this.tools = new ToolKit({
-        config: this.config,
-        plugins: this.plugins,
-        // 懒加载：第一次用到时才建库，启动不受影响
-        logic: { search: (...a) => this.logic().search(...a) },
-        learner: {
-          learnFromUrl: (...a) => this.learner().learnFromUrl(...a),
-        },
-        sandbox: config.tools.sandbox || path.join(config.root || '.', 'agent-workspace'),
-        logger,
-        dsh,
-        dshCwd: config.tools.dsh?.cwd || config.root || process.cwd(),
-        imagegen: this.imagegen.enabled ? this.imagegen : null,
-      });
-      this.log.info?.(`[tool] 工具已启用，沙箱: ${this.tools.sandbox}`);
-    }
+    this.plugins = null;
+    /**
+     * 用量统计。
+     *
+     * 记每次调用的输入/输出 token，按天累计，写进 data/token-stats.json。
+     * 目的是能回答「这个功能一次花多少」这种问题 —— 之前完全没数据。
+     */
+    this.usage = { day: '', calls: 0, input: 0, output: 0, byKind: {} };
+    this.#buildTools();
 
     // 主人身份识别
     this.owner = new OwnerService(config.owner || {});
@@ -419,6 +374,89 @@ export class ChatEngine {
       });
     }
     return this._learner;
+  }
+
+  /**
+   * 按当前配置建/清工具层。
+   *
+   * 面板能随时改「工具能力」和「调用 DSH」，所以不能只在构造时判断一次。
+   */
+  syncTools() {
+    const want = this.config?.tools?.enabled !== false && Boolean(this.config?.tools?.enabled);
+
+    if (!want) {
+      if (this.tools) {
+        this.tools = null;
+        this.log.info?.('[tool] 工具能力已关闭（本轮起不再执行工具）');
+      }
+      return;
+    }
+
+    if (!this.tools) {
+      this.#buildTools();
+      this.log.info?.('[tool] 工具能力已开启');
+    }
+  }
+
+  /** 建工具层（构造时和运行中被打开时都走这里） */
+  #buildTools() {
+    const config = this.config;
+    if (!config?.tools?.enabled) {
+      this.tools = null;
+      return;
+    }
+
+    // DSH 调用（可选）
+    let dsh = null;
+    if (config.tools.dsh?.enabled) {
+      const rt = DshClient.detect();
+      if (rt) {
+        const home = DshClient.prepareHome(config.root || process.cwd());
+        dsh = new DshClient({
+          nodePath: rt.nodePath,
+          dshBin: rt.dshBin,
+          extraArgs: rt.extraArgs,
+          cwd: config.tools.dsh.cwd || config.root || process.cwd(),
+          dshHome: home.dshHome,
+          tmpDir: home.tmpDir,
+          timeoutMs: config.tools.dsh.timeoutMs || 180000,
+          logger: this.log,
+        });
+        this.log.info?.('[tool] DSH 调用已启用');
+      } else {
+        this.log.warn?.('[tool] 没找到 DSH 运行时，跳过');
+      }
+    }
+
+    /**
+     * 插件宿主。
+     *
+     * 加载是异步的（要 import 插件模块），所以这里先建对象，
+     * 由 app.mjs 在启动时 await this.plugins.load()。
+     * 没加载完之前 definitions() 返回空数组，不影响正常聊天。
+     */
+    this.plugins = new PluginHost({
+      root: config.root || process.cwd(),
+      config,
+      log: (m) => this.log.info?.(m),
+    });
+
+    this.tools = new ToolKit({
+      config: this.config,
+      plugins: this.plugins,
+      // 懒加载：第一次用到时才建库，启动不受影响
+      logic: { search: (...a) => this.logic().search(...a) },
+      learner: {
+        learnFromUrl: (...a) => this.learner().learnFromUrl(...a),
+      },
+      sandbox: config.tools.sandbox || path.join(config.root || '.', 'agent-workspace'),
+      logger: this.log,
+      dsh,
+      dshCwd: config.tools.dsh?.cwd || config.root || process.cwd(),
+      imagegen: this.imagegen.enabled ? this.imagegen : null,
+    });
+
+    this.log.info?.(`[tool] 工具已启用，沙箱: ${this.tools.sandbox}`);
   }
 
   /** 导入一份文档到知识库（admin 调用） */
@@ -830,6 +868,13 @@ export class ChatEngine {
         } catch (e) {
           this.log.warn?.(`[mood] 读取失败：${e.message}`);
         }
+      }
+
+      // 工具开关可能刚在面板改过，每轮校正一次（关掉就真的不执行了）
+      try {
+        this.syncTools();
+      } catch (e) {
+        this.log.warn?.(`[tool] 同步失败：${e.message}`);
       }
 
       const messages = this.#buildMessages(

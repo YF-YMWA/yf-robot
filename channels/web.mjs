@@ -198,6 +198,22 @@ export class WebChannel {
    * 同时接微信和 QQ 时，心跳和联系人必须分开存 ——
    * 只留一个槽位会互相覆盖，控制台就只显示最后一个报到的。
    */
+  /**
+   * 气泡之间的打字节奏。
+   *
+   * 回复里必须带上：适配器按它算每条气泡的停顿，
+   * 不带的话它就退回自己写死的固定值（几条消息几乎同时到，一眼是机器）。
+   */
+  #pace() {
+    const c = this.config || {};
+    return {
+      bubbleDelayMs: c.reply?.bubbleDelayMs ?? 400,
+      perCharMs: c.reply?.perCharMs ?? 45,
+      jitter: c.reply?.jitter ?? 0.35,
+      maxDelayMs: c.reply?.maxDelayMs ?? 6000,
+    };
+  }
+
   #adapterSlot(name) {
     const key = String(name || 'default').slice(0, 40);
     if (!this.engine.adapters) this.engine.adapters = new Map();
@@ -542,6 +558,21 @@ export class WebChannel {
             enabled: Boolean(c.learning?.digest?.enabled),
             intervalHours: c.learning?.digest?.intervalHours ?? 24,
           },
+          /**
+           * 发语音 / 发表情包的概率。
+           *
+           * 适配器从这两个字段读（它有一层兜底：核心没给 voice 提示时，
+           * 按这个概率自己决定要不要补一条语音）。
+           * 之前这里没返回 —— 适配器一直用启动时的默认值，
+           * 于是出现「面板把语音概率调成 0，窗口里还在合成语音」。
+           */
+          voiceChance: c.wechat?.voiceChance ?? 0,
+          stickerChance: c.wechat?.stickerChance ?? 0,
+
+          // 素材收藏（适配器用它决定要不要把收到的图传过来）
+          collect: c.wechat?.mediaCollect !== false,
+          collectOnlyFrom: c.wechat?.collectOnlyFrom || [],
+
           /**
            * 多条气泡之间怎么停顿。
            *
@@ -890,6 +921,8 @@ export class WebChannel {
           voice: result.voice || null,
           // 当前情绪（调试用，也方便看看她情绪变化）
           mood: result.mood || null,
+          // 气泡之间的打字节奏（适配器照这个停顿，不然几条消息会同时到）
+          pace: this.#pace(),
         });
       }
 
@@ -923,6 +956,8 @@ export class WebChannel {
         voice: result.voice || null,
         // 当前情绪
         mood: result.mood || null,
+        // 气泡节奏（/api/wechat 这个老入口也带上，保持一致）
+        pace: this.#pace(),
       });
     } catch (e) {
       this.log.error?.('[wechat] ' + e.message);
