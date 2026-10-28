@@ -353,6 +353,7 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button onclick="runRepair()">一键修复</button>
         <button class="ghost" onclick="checkUpdate()">检查更新</button>
+        <label id="updateAdapterWrap" style="display:none;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="updateAdapter" checked> 连适配器一起更新</label>
         <button class="ghost" onclick="applyUpdate()" id="updateBtn" style="display:none">一键更新</button>
       </div>
       <div class="hint" style="margin-top:10px;line-height:1.7">
@@ -1890,6 +1891,23 @@
       <div class="grid" id="bridgeGrid"><div class="stat"><div class="k">状态</div><div class="v">检测中…</div></div></div>
       <div style="margin-top:14px"><button class="ghost" onclick="loadBridge()">刷新</button></div>
     </div>
+    <div class="card" id="adapterCtl">
+      <h2>适配器控制<span class="sp"></span><span class="chip" id="adapterChip">检测中…</span></h2>
+      <div class="hint" style="margin-bottom:12px;line-height:1.7">
+        在这里直接启动 / 停止微信适配器，不用去双击脚本。<br>
+        <span style="color:var(--warn)">启动会弹一次 UAC（管理员授权）</span> ——
+        适配器要操作微信窗口，没有管理员权限只能收不能发。
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <button id="adapterStartBtn" onclick="adapterStart()">启动适配器</button>
+        <button class="ghost" id="adapterStopBtn" onclick="adapterStop()">停止</button>
+        <button class="ghost" onclick="loadAdapterCtl()">刷新状态</button>
+        <button class="ghost" onclick="showAdapterLog()">看日志</button>
+      </div>
+      <div id="adapterCtlMsg" class="hint"></div>
+      <pre id="adapterCtlLog" style="display:none;margin-top:12px;max-height:320px;overflow:auto;background:var(--bg2,#161b22);padding:12px;border-radius:8px;font-size:12px;line-height:1.6;white-space:pre-wrap"></pre>
+    </div>
+
     <div class="card">
       <h2>怎么接入</h2>
       <div class="hint" style="line-height:2">
@@ -2007,7 +2025,11 @@ const PAGE_TO_GROUP = (() => {
 /** 进页面时的加载动作 */
 function loadPageData(page) {
   if (page === 'logs') loadLogs();
-  if (page === 'bridge') loadBridge();
+  if (page === 'bridge') {
+    loadBridge();
+    // 进这一页顺手刷一次适配器进程状态（启动/停止按钮的可用性靠它）
+    loadAdapterCtl();
+  }
   if (page === 'active') loadActive();
   if (page === 'stickers') {
     loadMediaAll();
@@ -3707,6 +3729,8 @@ async function checkUpdate() {
     // 有新版才显示「一键更新」按钮
     const btn = $('updateBtn');
     if (btn) btn.style.display = j.hasUpdate ? '' : 'none';
+    const wrap = $('updateAdapterWrap');
+    if (wrap) wrap.style.display = j.hasUpdate ? 'inline-flex' : 'none';
 
     box.innerHTML = j.hasUpdate
       ? '<div style="color:var(--warn)">发现新版本 v' +
@@ -3738,7 +3762,8 @@ async function applyUpdate() {
   box.innerHTML = '<div class="hint">下载并覆盖中，可能要半分钟…</div>';
 
   try {
-    const j = await api('update/apply', { method: 'POST', body: {} });
+    const includeAdapter = $('updateAdapter') ? $('updateAdapter').checked : false;
+    const j = await api('update/apply', { method: 'POST', body: { includeAdapter } });
     const steps = j.steps || [];
 
     if (j.ok) {
@@ -3756,6 +3781,93 @@ async function applyUpdate() {
     box.innerHTML = '<div class="hint" style="color:var(--err)">更新失败：' + escapeHtml(e.message) + '</div>';
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '一键更新'; }
+  }
+}
+
+
+// ===== 适配器控制（启动 / 停止 / 日志）=====
+
+async function loadAdapterCtl() {
+  const chip = $('adapterChip');
+  const startBtn = $('adapterStartBtn');
+  const stopBtn = $('adapterStopBtn');
+  const msg = $('adapterCtlMsg');
+
+  try {
+    const j = await api('adapter/status');
+
+    if (!j.found) {
+      if (chip) { chip.textContent = '没有适配器'; chip.className = 'chip off'; }
+      if (startBtn) startBtn.disabled = true;
+      if (stopBtn) stopBtn.disabled = true;
+      if (msg) msg.textContent = '这是纯框架包，没有 adapter/ 目录。想接微信请用「带适配器」的包。';
+      return;
+    }
+
+    if (chip) {
+      chip.textContent = j.running ? '运行中' : '未运行';
+      chip.className = 'chip ' + (j.running ? 'on' : 'off');
+    }
+    if (startBtn) startBtn.disabled = j.running;
+    if (stopBtn) stopBtn.disabled = !j.running;
+    if (msg) {
+      msg.textContent = j.running
+        ? '正在运行（pid ' + j.pid + '）· 目录 ' + (j.mode === 'bundled' ? 'adapter/' : '隔壁仓库')
+        : '没有在跑。点「启动适配器」会弹 UAC。';
+    }
+  } catch (e) {
+    if (msg) msg.textContent = '状态查询失败：' + e.message;
+  }
+}
+
+async function adapterStart() {
+  const msg = $('adapterCtlMsg');
+  if (msg) msg.textContent = '正在启动…如果弹出 UAC 请点「是」';
+  if ($('adapterStartBtn')) $('adapterStartBtn').disabled = true;
+
+  try {
+    const j = await api('adapter/start', { method: 'POST', body: {} });
+    if (j.ok) {
+      toast('适配器已启动');
+      if (msg) msg.textContent = j.note || '已启动';
+    } else {
+      if (msg) msg.textContent = '✗ ' + (j.error || '启动失败');
+      toast('启动失败', 'err');
+    }
+  } catch (e) {
+    if (msg) msg.textContent = '✗ ' + e.message;
+  } finally {
+    setTimeout(loadAdapterCtl, 1200);
+  }
+}
+
+async function adapterStop() {
+  if (!confirm('停止适配器？微信那边就不会再自动回复了（服务本身还在跑）。')) return;
+
+  const msg = $('adapterCtlMsg');
+  try {
+    const j = await api('adapter/stop', { method: 'POST', body: {} });
+    if (msg) msg.textContent = j.ok ? j.note || '已停止' : '✗ ' + j.error;
+    toast(j.ok ? '已停止' : '停止失败', j.ok ? 'ok' : 'err');
+  } catch (e) {
+    if (msg) msg.textContent = '✗ ' + e.message;
+  } finally {
+    setTimeout(loadAdapterCtl, 800);
+  }
+}
+
+async function showAdapterLog() {
+  const pre = $('adapterCtlLog');
+  if (!pre) return;
+  pre.style.display = 'block';
+  pre.textContent = '读取中…';
+
+  try {
+    const j = await api('adapter/log?lines=80');
+    pre.textContent = j.ok ? j.text || '（日志是空的）' : j.error || '读不到日志';
+    pre.scrollTop = pre.scrollHeight;
+  } catch (e) {
+    pre.textContent = '读取失败：' + e.message;
   }
 }
 

@@ -766,6 +766,28 @@ export class AdminApi {
         }
       }
 
+      // ===== 适配器进程（从面板启动 / 停止）=====
+      if (method === 'GET' && pathname === '/api/admin/adapter/status') {
+        const { status } = await import('./adapter-runner.mjs');
+        return { code: 200, body: status(this.root) };
+      }
+      if (method === 'POST' && pathname === '/api/admin/adapter/start') {
+        const { start } = await import('./adapter-runner.mjs');
+        const r = await start(this.root, (m) => this.log.info?.(m));
+        return { code: 200, body: r };
+      }
+      if (method === 'POST' && pathname === '/api/admin/adapter/stop') {
+        const { stop } = await import('./adapter-runner.mjs');
+        const r = await stop(this.root, (m) => this.log.info?.(m));
+        return { code: 200, body: r };
+      }
+      if (method === 'GET' && pathname === '/api/admin/adapter/log') {
+        const { tailLog } = await import('./adapter-runner.mjs');
+        const q = pathname.includes('?') ? pathname.slice(pathname.indexOf('?')) : '';
+        const n = Number(new URLSearchParams(q).get('lines'));
+        return { code: 200, body: tailLog(this.root, Number.isFinite(n) && n > 0 ? n : 60) };
+      }
+
       // ===== 一键更新（下载新版本、覆盖代码、保留配置和数据）=====
       if (method === 'POST' && pathname === '/api/admin/update/apply') {
         const local = this.#version();
@@ -786,6 +808,9 @@ export class AdminApi {
           repo,
           latest,
           local,
+          // 默认连适配器一起更新（没有 adapter/ 目录时会自动跳过）
+          includeAdapter: body?.includeAdapter !== false,
+          adapterRepo: this.config.adapterRepo || 'YF-YMWA/yf-robot-wechat-adapter',
           log: (m) => this.log.info?.(m),
         });
         return { code: 200, body: { ...r, local, latest } };
