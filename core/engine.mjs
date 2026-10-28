@@ -21,11 +21,17 @@ import { PluginHost } from './plugins.mjs';
 import { LogicLibrary } from './logic.mjs';
 import { LogicLearner } from './logic-learn.mjs';
 import { assembleContext, renderContext, detectTone, banksForTone } from './context.mjs';
-import { memoryDir, migrateLegacyToScope, scopeName, resolveWordsDir } from './scoped-paths.mjs';
+import {
+  memoryDir,
+  migrateLegacyToScope,
+  scopeName,
+  resolveWordsDir,
+  scopeDir,
+  generatedDir,
+} from './scoped-paths.mjs';
 import { addTypoSlip } from './humanize.mjs';
 import { decideVoiceReply } from './voice-reply.mjs';
 import { MoodStore, moodDelta, describeMood } from './mood.mjs';
-import { scopeDir } from './scoped-paths.mjs';
 import { renderSystemPrompt } from './persona.mjs';
 import { renderWordBanks } from './words.mjs';
 import { OwnerService } from './owner.mjs';
@@ -78,6 +84,7 @@ export class ChatEngine {
     this.search = new SearchClient(config.search, { fetchImpl });
 
     // 画图能力（要在 ToolKit 之前建，工具需要它）
+    // 画图存到当前角色卡的目录（路径在构造后按 this.scope 算，见 #generatedSaveDir）
     this.imagegen = new ImageGenClient(config.imagegen || {}, {
       apiKey: config.imagegen?.apiKey || config.vision?.apiKey || config.llm?.apiKey || '',
       root: config.root || process.cwd(),
@@ -202,7 +209,16 @@ export class ChatEngine {
     this.search = new SearchClient(this.config.search, { fetchImpl: f });
 
     const ig = this.config.imagegen || {};
-    this.imagegen = new ImageGenClient(ig, {
+    this.imagegen = new ImageGenClient(
+      {
+        ...ig,
+        // 她画的图按角色卡分开：data/<卡片>/generated
+        saveDir: path.relative(
+          this.config.root || process.cwd(),
+          path.join(generatedDir(this.config.root || process.cwd(), this.scope), ''),
+        ),
+      },
+      {
       apiKey: ig.apiKey || this.config.vision?.apiKey || this.config.llm?.apiKey || '',
       root: this.config.root || process.cwd(),
       logger: this.log,
@@ -253,7 +269,9 @@ export class ChatEngine {
   rebuildImagegen(cfg) {
     const merged = { ...(this.config.imagegen || {}), ...(cfg || {}) };
 
-    this.imagegen = new ImageGenClient(merged, {
+    this.imagegen = new ImageGenClient(
+      { ...merged, saveDir: this.#generatedSaveDir() },
+      {
       apiKey: merged.apiKey || this.config.vision?.apiKey || this.config.llm?.apiKey || '',
       root: this.config.root || process.cwd(),
       logger: this.log,
@@ -283,6 +301,18 @@ export class ChatEngine {
    * 不重建的话，旧卡片的知识库/逻辑库实例还挂在内存里，
    * 换卡看起来「没生效」。
    */
+
+  /**
+   * 她画的图存哪 —— 按角色卡分开。
+   *
+   * 表情包和收到的图是共享的（换角色还能用同一批），
+   * 但每个角色画的东西应该各归各的。
+   */
+  #generatedSaveDir() {
+    const root = this.config.root || process.cwd();
+    return path.relative(root, generatedDir(root, this.scope));
+  }
+
   reloadScopedStores() {
     this._kb = null;
     this._logic = null;

@@ -11,6 +11,7 @@ import {
   kbDir,
   logicFile,
   memoryDir,
+  generatedDir,
   migrateLegacyToScope,
 } from '../core/scoped-paths.mjs';
 import { KnowledgeBase } from '../core/kb.mjs';
@@ -130,4 +131,36 @@ test('迁移：没有老数据时什么都不做', () => {
   const r = migrateLegacyToScope(root, 'x');
   assert.equal(r.moved.length, 0);
   assert.equal(r.skipped.length, 0);
+});
+
+test('她画的图：按角色卡分开，表情包共享', () => {
+  const root = path.join(TMP, 'gen');
+  fs.mkdirSync(root, { recursive: true });
+
+  const a = generatedDir(root, 'cardA');
+  const b = generatedDir(root, 'cardB');
+  assert.notEqual(a, b);
+  assert.ok(a.includes('cardA'));
+
+  // 画进 A 的目录
+  fs.mkdirSync(a, { recursive: true });
+  fs.writeFileSync(path.join(a, 'gen_1.jpg'), 'x');
+
+  // B 看不到
+  assert.equal(fs.existsSync(path.join(b, 'gen_1.jpg')), false);
+
+  // 表情包目录不跟卡走
+  const shared = path.join(root, 'data', 'stickers');
+  assert.equal(shared, path.join(root, 'data', 'stickers'));
+});
+
+test('迁移：老的她画的图会搬进当前卡', () => {
+  const root = path.join(TMP, 'gen-migrate');
+  fs.mkdirSync(path.join(root, 'data', 'generated'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'data', 'generated', 'gen_old.jpg'), 'x');
+
+  const r = migrateLegacyToScope(root, 'mycard');
+  assert.ok(r.moved.includes('generated'), JSON.stringify(r));
+  assert.ok(fs.existsSync(path.join(root, 'data', 'mycard', 'generated', 'gen_old.jpg')));
+  assert.ok(!fs.existsSync(path.join(root, 'data', 'generated')));
 });

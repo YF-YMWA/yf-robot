@@ -10,7 +10,7 @@
  *
  * 所有写操作都要校验，避免控制台把配置改坏。
  */
-import { resolveWordsDir, scopeName } from './scoped-paths.mjs';
+import { resolveWordsDir, scopeName, generatedDir } from './scoped-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -1502,10 +1502,11 @@ export class AdminApi {
    */
   #mediaDirs() {
     return {
+      // 表情包和收到的图是共享的：换角色还能用同一批
       stickers: path.join(this.root, 'data', 'stickers'),
       images: path.join(this.root, 'data', 'images'),
-      // 她画的图
-      generated: path.join(this.root, 'data', 'generated'),
+      // 她画的图按角色卡分开（data/<卡片>/generated）
+      generated: generatedDir(this.root, scopeName(this.config.card || 'default')),
     };
   }
 

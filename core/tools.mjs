@@ -10,6 +10,7 @@
  * 这不是「全能 agent」——是有边界的助手。
  */
 import fs from 'node:fs';
+import { generatedDir, scopeName } from './scoped-paths.mjs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -127,6 +128,19 @@ export class ToolKit {
     } finally {
       this.config.tools = { ...(this.config.tools || {}), off: saved };
     }
+  }
+
+  /**
+   * 素材目录（按角色卡解析）。
+   *
+   * 「她画的图」跟卡走，表情包和收到的图共享 ——
+   * 和 admin 里 #mediaDirs 用的是同一套规则，别两边不一致。
+   */
+  #mediaDir(kind) {
+    const root = this.config?.root || path.join(this.sandbox, '..');
+    const card = scopeName(this.config?.card || 'default');
+    if (kind === 'generated') return generatedDir(root, card);
+    return path.join(root, 'data', kind);
   }
 
   /** 工具定义（给模型看的）。 */
@@ -663,9 +677,9 @@ export class ToolKit {
       // 3. 素材库里的文件名（收到的图在 images/，她画的在 generated/）
       else if (/^[\w.-]+\.(jpg|jpeg|png|gif|webp)$/i.test(src)) {
         const candidates = [
-          path.join(dataDir, 'images', src),
-          path.join(dataDir, 'stickers', src),
-          path.join(dataDir, 'generated', src),
+          path.join(this.#mediaDir('images'), src),
+          path.join(this.#mediaDir('stickers'), src),
+          path.join(this.#mediaDir('generated'), src),
           path.join(dataDir, 'tmp', src),
         ];
         const hit = candidates.find((p) => fs.existsSync(p));
@@ -730,9 +744,9 @@ export class ToolKit {
     // 给了具体文件名：在所有库里找，别只限 kind 指定的那个
     if (want) {
       const dirs = {
-        generated: path.join(this.sandbox, '..', 'data', 'generated'),
-        stickers: path.join(this.sandbox, '..', 'data', 'stickers'),
-        images: path.join(this.sandbox, '..', 'data', 'images'),
+        generated: this.#mediaDir('generated'),
+        stickers: this.#mediaDir('stickers'),
+        images: this.#mediaDir('images'),
       };
 
       const IMG_RE = /\.(jpg|jpeg|png|gif|webp)$/i;

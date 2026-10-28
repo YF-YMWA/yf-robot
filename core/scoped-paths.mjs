@@ -68,6 +68,16 @@ export function resolveWordsDir(root, card) {
   return path.join(root, 'resources');
 }
 
+/**
+ * 她画的图：按角色卡分开。
+ *
+ * 表情包和收到的图是共享的（换角色还能用同一批），
+ * 但「她画的图」属于这个角色的创作，混在一起会很乱。
+ */
+export function generatedDir(root, card) {
+  return path.join(scopeDir(root, card), 'generated');
+}
+
 /** 记忆目录 */
 export function memoryDir(root, card) {
   return path.join(scopeDir(root, card), 'memory');
@@ -98,6 +108,7 @@ export function migrateLegacyToScope(root, card) {
     ['kb', LEGACY.kb(root), kbDir(root, card)],
     ['logic', LEGACY.logic(root), logicFile(root, card)],
     ['memory', LEGACY.memory(root), memoryDir(root, card)],
+    ['generated', path.join(root, 'data', 'generated'), generatedDir(root, card)],
   ];
 
   for (const [name, from, to] of check) {
