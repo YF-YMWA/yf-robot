@@ -815,7 +815,8 @@ export class AdminApi {
         return { code: 200, body: await this.#runDigest(body) };
       }
       // 供 app.mjs 定时器调用
-      if (method === 'POST' && pathname === '/api/admin/learning/digest/tick') {
+      // tick 也接受 GET：调试时用浏览器/curl 直接打开就能看，不用构造 POST
+      if ((method === 'POST' || method === 'GET') && pathname === '/api/admin/learning/digest/tick') {
         return { code: 200, body: await this.#digestTick() };
       }
       if (method === 'POST' && pathname === '/api/admin/learning/apply') {
@@ -2980,10 +2981,43 @@ print('%016x' % bits)
       }
     }
 
+    /**
+     * 第三层兜底：搜网页 → 抓页面 → 从 <img> 里抠图。
+     *
+     * 前两层分别是「图片搜索接口」（要单独开通权限，没开通就静默 401）
+     * 和「从搜索摘要里正则抠直链」（摘要里几乎不含直链）。
+     * 所以「下载图片素材」以前一直是坏的，永远报「没找到可用的图片链接」。
+     * 这条路实测有效：cnblogs 首页能抠出 44 张。
+     */
+    if (!urls.length && this.engine.search?.enabled) {
+      try {
+        const pages = await this.engine.search.search(query, { limit: 6 });
+        const { fetchSiteImages } = await import('./learning.mjs');
+
+        for (const p of pages || []) {
+          if (urls.length >= limit * 2) break;
+          try {
+            const r = await fetchSiteImages(p.url);
+            if (r && r.ok && Array.isArray(r.images)) urls.push(...r.images);
+          } catch {
+            // 单个页面失败不影响别的
+          }
+        }
+
+        if (urls.length) {
+          this.log.info?.(
+            '[learn] 图片搜索接口不可用，改从 ' + pages.length + ' 个网页里抠到 ' + urls.length + ' 张',
+          );
+        }
+      } catch (e) {
+        this.log.warn?.('[learn] 网页抠图失败：' + e.message);
+      }
+    }
+
     if (!urls.length) {
       return {
         ok: false,
-        error: '没找到可用的图片链接。换个关键词试试，或者确认搜索 Key 有图片搜索权限。',
+        error: '没找到可用的图片：图片搜索接口没权限，网页里也没抠到图。换个关键词试试。',
         foundUrls: 0,
       };
     }

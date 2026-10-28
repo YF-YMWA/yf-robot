@@ -72,6 +72,20 @@ export function extractImageUrls(html, baseUrl) {
       // 有些 CDN 地址不带扩展名，靠 query 传格式，放行常见图床特征
       if (!/(image|img|pic|photo|thumb|avatar|cover)/i.test(u)) return;
     }
+
+    /**
+     * 过滤站点装饰图。
+     *
+     * 实测抓 cnblogs 首页，抠出来的头几十张里一堆 logo / 图标 / 搜索按钮 ——
+     * 存进素材库就是垃圾，还会被她当成表情包发出去。
+     */
+    if (/\.svg(\?|#|$)/i.test(u)) return; // SVG 基本都是图标
+    if (/(logo|icon|favicon|sprite|badge|button|arrow|loading|spinner|placeholder)/i.test(u)) {
+      return;
+    }
+    // 明显的小尺寸参数（1x1 埋点、16px 图标）
+    if (/[?&](size|w|width)=([1-9]|[1-5]\d)(&|$)/i.test(u)) return;
+
     if (seen.has(u)) return;
     seen.add(u);
     out.push(u);
