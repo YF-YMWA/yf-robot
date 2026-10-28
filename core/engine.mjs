@@ -70,15 +70,27 @@ export class ChatEngine {
     // 「两轮 = 4 条」这种断言直接崩。改配置容易漏，这里统一兜住。
     const inTest = Boolean(process.env.NODE_TEST_CONTEXT);
 
+    /**
+     * 会话目录按角色卡分开。
+     *
+     * 以前是全局 data/sessions —— 换张卡，同一个人的聊天记录还在，
+     * 新角色一开口就知道上一个角色聊过什么（实测换卡后问「我叫什么」，
+     * 新卡答得出「YF，爱吃白米饭」）。现在各卡独立。
+     */
     const sessionDir =
-      config.session?.persist === false || inTest
-        ? ''
-        : path.join(config.root || process.cwd(), 'data', 'sessions');
+      config.session?.persist === false || inTest ? '' : this.#sessionDir();
 
     this.sessions = new SessionStore(config.session, {
       dir: sessionDir,
       log: (msg) => logger.info?.(msg),
     });
+
+    // 老版本把会话存在全局 data/sessions，搬一次到当前卡（只搬一次）
+    if (sessionDir) {
+      try {
+        migrateLegacyToScope(config.root || process.cwd(), this.scope);
+      } catch {}
+    }
     this.vision = new VisionClient(config.vision, { fetchImpl });
     this.voice = new VoiceClient(config.voice, { fetchImpl });
     this.search = new SearchClient(config.search, { fetchImpl });
@@ -283,7 +295,32 @@ export class ChatEngine {
       maxFacts: this.config.memory?.maxFacts || 50,
       maxSummaries: this.config.memory?.maxSummaries || 10,
     });
+
+    /**
+     * 会话历史也要跟着换卡。
+     *
+     * 以前会话目录是全局的 data/sessions，换张卡之后同一个人的聊天记录还在，
+     * 新角色一开口就知道上一个角色的对话内容 —— 实测：
+     *   切到「测试卡」问「我叫什么」，它答「YF，爱吃白米饭」。
+     * 现在按角色卡分开存。
+     */
+    try {
+      this.sessions = new SessionStore(this.config.session, {
+        dir: this.#sessionDir(),
+        log: (m) => this.log.info?.(m),
+      });
+    } catch (e) {
+      this.log.warn?.(`[scope] 会话库重建失败：${e.message}`);
+    }
+
     this.log.info?.(`[scope] 已切到「${this.scope}」的数据`);
+  }
+
+  /** 会话目录：按角色卡分开（session.persist=false 时不落盘） */
+  #sessionDir() {
+    const inTest = Boolean(process.env.NODE_TEST_CONTEXT);
+    if (this.config.session?.persist === false || inTest) return '';
+    return path.join(scopeDir(this.config.root || process.cwd(), this.scope), 'sessions');
   }
 
   #kb() {
