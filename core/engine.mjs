@@ -831,6 +831,11 @@ export class ChatEngine {
           logicHits,
           kbHits,
           media,
+          // 刚收进来的素材（10 分钟内有效）：让她能把「你刚发的那张」原样发回去
+          recentMedia:
+            this.recentMedia && Date.now() - this.recentMedia.at < 10 * 60 * 1000
+              ? this.recentMedia
+              : null,
           styleText,
           budget: Number(this.config.context?.budget ?? 1600),
         });
@@ -1083,13 +1088,26 @@ export class ChatEngine {
         const sentSomething = (drawn?.length || 0) > 0 || Boolean(voice);
         const text = finalBubbles.join(' ');
 
-        if (!sentSomething && /发你了|给你发了|发过去了|发出了|发了张|发了张图/.test(text)) {
+        /**
+         * 单独一个「发了，收到没」也算声称。
+         *
+         * 真实事故：19:37 用户说「发回给我看看」，她回「发了， 收到没」——
+         * 这轮表情包概率没命中，什么都没发。之前的正则只认「发你了」，
+         * 漏掉了「发了，」这种写法，用户在那头等半天。
+         *
+         * 用边界排除「发现了」「出发了」「发了呆」这类正常词。
+         */
+        const CLAIM =
+          /发你了|给你发了|发过去了|发过去了|发出了|发了张|(^|[，。！？、\s])发了([，。！？、\s]|$)/;
+
+        if (!sentSomething && CLAIM.test(text)) {
           const softened = finalBubbles.map((b) =>
             b
               .replace(/发你了/g, '没发出去')
               .replace(/给你发了/g, '没发出去')
               .replace(/发过去了/g, '没发出去')
-              .replace(/发了张图?/g, '想发张图没发出去'),
+              .replace(/发了张图?/g, '想发张图没发出去')
+              .replace(/(^|[，。！？、\s])发了([，。！？、\s]|$)/g, '$1没发出去$2'),
           );
           finalBubbles = softened;
           this.log.warn?.('[honesty] 她声称发了东西但实际没发，已改成「没发出去」');
