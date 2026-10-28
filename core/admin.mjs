@@ -4433,6 +4433,8 @@ print('%016x' % bits)
         ffmpeg: Boolean(hb?.ffmpeg),
         heartbeatAgo: hb ? Math.round((now - hb.at) / 1000) : null,
         recentMessages: Number(hb?.recentMessages) || 0,
+        // 发送健康度：不带上的话，顶层 send 永远是 null（列表里取不到）
+        send: hb?.send || null,
         version: info?.version || '',
         contacts: s.contacts ? s.contacts.size : 0,
       };

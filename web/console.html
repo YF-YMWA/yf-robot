@@ -6614,6 +6614,11 @@ async function loadBridge() {
       <div class="stat"><div class="k">消息监听</div><div class="v ${b.listening ? 'ok' : 'warn'}">${b.listening ? '监听中' : '未开启'}</div></div>
       <div class="stat"><div class="k">发送通道</div><div class="v ${b.uiaOk ? 'ok' : 'warn'}">${b.uiaOk ? '可发送' : '受限'}</div></div>
       <div class="stat"><div class="k">最近消息</div><div class="v">${s.recentMessages || 0} 条</div></div>
+      <div class="stat"><div class="k">发送 成功/失败</div><div class="v" style="font-size:13px">${
+        b.send ? `${b.send.ok || 0} / ${b.send.fail || 0}` : '—'
+      }${b.send && b.send.cooldownSec > 0
+        ? ` <span style="color:var(--warn)">冷却 ${b.send.cooldownSec}s</span>`
+        : ''}</div></div>
       <div class="stat"><div class="k">最后心跳</div><div class="v" style="font-size:12px">${b.lastActivity || '-'}</div></div>`;
 
     if (!b.online) {
