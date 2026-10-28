@@ -671,6 +671,20 @@ export class WebChannel {
           ffmpeg: Boolean(body.ffmpeg),
           account: String(body.account || ''),
           recentMessages: Number(body.recentMessages) || 0,
+          /**
+           * 发送健康度（适配器上报）。
+           *
+           * 有了这个，面板才能区分「没收到消息」和「收到了但发不出去」——
+           * 之前只能靠翻适配器日志。
+           */
+          send: body.send && typeof body.send === 'object'
+            ? {
+                ok: Number(body.send.ok) || 0,
+                fail: Number(body.send.fail) || 0,
+                cooldownSec: Number(body.send.cooldownSec) || 0,
+                lastError: String(body.send.lastError || '').slice(0, 120),
+              }
+            : null,
         };
 
         this.#adapterSlot(name).heartbeat = hb;
