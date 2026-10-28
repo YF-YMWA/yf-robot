@@ -1211,8 +1211,9 @@
 
   <div class="page" id="page-learn">
     <h1>联网学习</h1>
+<div style="margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--fg);opacity:.85">开关</div>
 
-    <div class="card">
+<div class="card">
       <h2>总开关 <span class="chip" id="learnChip"></span></h2>
       <div class="row">
         <label>启用</label>
@@ -1240,38 +1241,9 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>定向网站学习 <span class="chip" id="siteChip"></span></h2>
-      <div class="hint" style="margin-bottom:12px">
-        指定几个网站，让她直接从页面正文里学词，比关键词搜索更准。<br>
-        适合：梗百科、网络用语大全、特定圈子黑话页。
-      </div>
+<div style="margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--fg);opacity:.85">自动学习（对话中顺手学）</div>
 
-      <div id="siteList" class="target-list" style="margin-bottom:10px">
-        <span class="hint">还没添加网站</span>
-      </div>
-
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <input type="text" id="siteUrlInput" placeholder="https://..." style="flex:1;min-width:240px">
-        <input type="text" id="siteNoteInput" placeholder="备注（可选）" style="max-width:140px">
-        <button class="ghost sm" onclick="addSite()">添加</button>
-      </div>
-
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <button onclick="learnFromSites()" id="btnLearnSites">学习所有网站</button>
-        <button class="ghost" onclick="previewSite()" id="btnPreviewSite">先预览抓取效果</button>
-        <span class="hint" id="siteLearnResult"></span>
-      </div>
-
-      <div id="sitePreviewBox" style="display:none;margin-top:14px">
-        <h2 style="font-size:13px;margin-bottom:8px">
-          <span id="sitePreviewTitle"></span>
-        </h2>
-        <pre id="sitePreviewText" class="preview-box"></pre>
-      </div>
-    </div>
-
-    <div class="card">
+<div class="card">
       <h2>学到的词自动进词库 <span class="chip" id="autoMergeChip"></span></h2>
       <div class="hint" style="margin-bottom:12px">
         开着的话，联网学到的词直接整理进词库，不用每次手动点「合并」。<br>
@@ -1294,7 +1266,7 @@
       </div>
     </div>
 
-    <div class="card">
+<div class="card">
       <h2>对话时自动学习 <span class="chip" id="autoLearnChip"></span></h2>
       <div class="hint" style="margin-bottom:12px">
         开着聊天也能让她自己长本事，不用你手动点。<br>
@@ -1339,7 +1311,7 @@
       <div class="hint" id="autoStatusBox" style="margin-top:12px;line-height:1.9"></div>
     </div>
 
-    <div class="card">
+<div class="card">
       <h2>学习网络用语</h2>
       <div class="hint" style="margin-bottom:12px">
         从网上搜最新网络用语，让模型提炼成词条。学到的会先进「待审」，确认后才合并进词库。
@@ -1358,7 +1330,9 @@
       </div>
     </div>
 
-    <div class="card">
+<div style="margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--fg);opacity:.85">图片采集</div>
+
+<div class="card">
       <h2>下载图片素材</h2>
       <div class="hint" style="margin-bottom:12px">
         按关键词搜索图片并下载收藏。<br>
@@ -1392,7 +1366,7 @@
       </div>
     </div>
 
-    <div class="card">
+<div class="card">
       <h2>定向网页抓图 <span class="chip" id="mediaSiteChip"></span></h2>
       <div class="hint" style="margin-bottom:12px">
         指定网页，把页面里的图片批量抓下来。<br>
@@ -1433,7 +1407,40 @@
       </div>
     </div>
 
-    <div class="card">
+<div style="margin:18px 0 8px;font-size:13px;font-weight:600;color:var(--fg);opacity:.85">网页与订阅</div>
+
+<div class="card">
+      <h2>定向网站学习 <span class="chip" id="siteChip"></span></h2>
+      <div class="hint" style="margin-bottom:12px">
+        指定几个网站，让她直接从页面正文里学词，比关键词搜索更准。<br>
+        适合：梗百科、网络用语大全、特定圈子黑话页。
+      </div>
+
+      <div id="siteList" class="target-list" style="margin-bottom:10px">
+        <span class="hint">还没添加网站</span>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <input type="text" id="siteUrlInput" placeholder="https://..." style="flex:1;min-width:240px">
+        <input type="text" id="siteNoteInput" placeholder="备注（可选）" style="max-width:140px">
+        <button class="ghost sm" onclick="addSite()">添加</button>
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button onclick="learnFromSites()" id="btnLearnSites">学习所有网站</button>
+        <button class="ghost" onclick="previewSite()" id="btnPreviewSite">先预览抓取效果</button>
+        <span class="hint" id="siteLearnResult"></span>
+      </div>
+
+      <div id="sitePreviewBox" style="display:none;margin-top:14px">
+        <h2 style="font-size:13px;margin-bottom:8px">
+          <span id="sitePreviewTitle"></span>
+        </h2>
+        <pre id="sitePreviewText" class="preview-box"></pre>
+      </div>
+    </div>
+
+<div class="card">
       <h2>RSS 订阅学习 <span class="chip" id="rssChip"></span></h2>
       <div class="hint" style="margin-bottom:12px">
         B站、小黑盒、微博、知乎这类站点网页是 JS 渲染的，直接抓只有空壳。<br>
@@ -1489,7 +1496,7 @@
       </div>
     </div>
 
-    <div class="card">
+<div class="card">
       <h2>每日热点摘要 <span class="chip" id="digestChip"></span></h2>
       <div class="hint" style="margin-bottom:12px">
         每天抓一次上面的订阅源，总结成几条「今天大家在聊什么」存进记忆。<br>
