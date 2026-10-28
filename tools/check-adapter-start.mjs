@@ -1,37 +1,46 @@
 /**
- * 验证适配器的启动命令拼装（不弹 UAC，只检查字符串）。
+ * 验证适配器的启动方式（不弹 UAC，只检查生成的脚本和参数）。
+ *
+ * 上一版这里只检查命令行字符串，结果引号被转义坏了也没发现 ——
+ * 面板显示「已启动」，实际 cmd 秒退。所以现在连 bat 内容一起验。
  */
 import path from 'node:path';
-import { buildStartCommand, findAdapter, status, stop, tailLog } from '../core/adapter-runner.mjs';
+import { buildStartCommand, status, stop, findBridgePid } from '../core/adapter-runner.mjs';
 
 const root = process.cwd();
 const c = buildStartCommand(root);
 
 if (!c) {
-  console.log('  没有适配器目录（这是纯框架包）—— 跳过');
+  console.log('  没有适配器目录（纯框架包）—— 跳过');
   process.exit(0);
 }
 
-console.log('  python   :', path.basename(path.dirname(c.python)) + '/' + path.basename(c.python));
-console.log('  工作目录 :', path.basename(c.adapterDir));
-console.log('  cmdLine  :', c.cmdLine);
-console.log('  PS 参数  :', c.psArgs[2]);
+console.log('  启动脚本 :', c.launcher);
+console.log('  PS 命令  :', c.psArgs[2]);
+console.log('');
+console.log('  bat 内容：');
+console.log(
+  c.bat
+    .split('\r\n')
+    .map((l) => '    ' + l)
+    .join('\n'),
+);
 console.log('');
 
+const ps = c.psArgs[2];
 const checks = [
-  ['带 -Verb RunAs（会提权）', c.psArgs[2].includes('-Verb RunAs')],
-  ['带 -PassThru（拿 PID）', c.psArgs[2].includes('-PassThru')],
-  // 转义坏掉时会变成 "\ = Start-Process"、"\)"、"\.Id" 这种
-  [
-    'PowerShell 变量完好',
-    /\$p\s*=\s*Start-Process/.test(c.psArgs[2]) &&
-      c.psArgs[2].includes('{ $p.Id }') &&
-      !/\\\s*=|\\\)|\\\.Id/.test(c.psArgs[2]),
-  ],
-  ['工作目录指向适配器', c.psArgs[2].includes(path.basename(c.adapterDir))],
-  ['命令里是固定入口', c.cmdLine.includes('wechatauto_bridge.py')],
-  ['输出重定向到日志', c.cmdLine.includes('>') && c.cmdLine.includes('panel-run.log')],
-  ['不包含用户可控命令', !c.cmdLine.includes('\n')],
+  ['带 -Verb RunAs（会提权）', ps.includes('-Verb RunAs')],
+  ['带 -PassThru（拿 PID）', ps.includes('-PassThru')],
+  ['PowerShell 变量完好', /\$p\s*=\s*Start-Process/.test(ps) && ps.includes('{ $p.Id }')],
+  // 关键：参数里不能再出现 \" 这种 cmd 不认的转义
+  ['参数里没有坏转义', !ps.includes('\\"')],
+  ['只传一个 bat 路径（不塞命令）', ps.includes('.bat') && !ps.includes('>')],
+  ['工作目录指向适配器', ps.includes(path.basename(c.adapterDir))],
+  ['bat 里有 cd /d', c.bat.includes('cd /d')],
+  ['bat 里是固定入口', c.bat.includes('wechatauto_bridge.py')],
+  ['bat 里重定向到日志', c.bat.includes('panel-run.log') && c.bat.includes('2>&1')],
+  ['bat 强制 UTF-8（防乱码）', c.bat.includes('PYTHONIOENCODING')],
+  ['bat 不含用户可控内容', !c.bat.includes('${') && !c.bat.includes('%1')],
 ];
 
 let bad = 0;
@@ -41,9 +50,10 @@ for (const [name, ok] of checks) {
 }
 
 console.log('');
-const st = status(root);
-console.log('  状态:', st.running ? '运行中' : '未运行', '| 模式:', st.mode);
-console.log('  停止（没在跑时应返回 ok）:', JSON.stringify(stop(root)));
+const st = await status(root);
+console.log('  当前状态:', st.running ? '运行中 pid=' + st.pid : '未运行', '| 模式:', st.mode);
+console.log('  系统里的桥接进程:', (await findBridgePid()) || '无');
+console.log('  停止（没在跑时应 ok）:', JSON.stringify(stop(root)));
 
 console.log('');
 console.log(bad ? '  ✗ ' + bad + ' 项不合格' : '  ✓ 全部合格');
