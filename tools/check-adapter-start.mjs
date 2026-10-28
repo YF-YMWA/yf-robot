@@ -53,7 +53,7 @@ console.log('');
 const st = await status(root);
 console.log('  当前状态:', st.running ? '运行中 pid=' + st.pid : '未运行', '| 模式:', st.mode);
 console.log('  系统里的桥接进程:', (await findBridgePid()) || '无');
-console.log('  停止（没在跑时应 ok）:', JSON.stringify(stop(root)));
+console.log('  停止:', JSON.stringify(await stop(root)));
 
 console.log('');
 console.log(bad ? '  ✗ ' + bad + ' 项不合格' : '  ✓ 全部合格');
