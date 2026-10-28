@@ -4542,6 +4542,21 @@ print('%016x' % bits)
         bubbleDelayMs: c.reply.bubbleDelayMs,
         emoji: c.reply.emoji || {},
       },
+      /**
+       * 工具能力。
+       *
+       * 之前这里没返回 —— 面板的「工具能力 / 调用 DSH」两个开关读不到真实值，
+       * 永远显示关；配上 #saveConfig 也没处理，等于两个开关完全没接上。
+       */
+      tools: {
+        enabled: c.tools?.enabled !== false,
+        dsh: {
+          enabled: c.tools?.dsh?.enabled === true,
+          cwd: c.tools?.dsh?.cwd || '',
+        },
+        sandbox: c.tools?.sandbox || '',
+        off: Array.isArray(c.tools?.off) ? c.tools.off : [],
+      },
       group: {
         requireAt: c.group.requireAt,
         masterAlwaysReply: c.group.masterAlwaysReply !== false,
@@ -4691,6 +4706,47 @@ print('%016x' % bits)
       if (Number.isFinite(patch.reply.bubbleDelayMs)) current.reply.bubbleDelayMs = clamp(patch.reply.bubbleDelayMs, 0, 5000);
       if (patch.reply.emoji) {
         current.reply.emoji = { ...(current.reply.emoji || {}), ...sanitizeEmoji(patch.reply.emoji) };
+      }
+    }
+
+    /**
+     * 情绪状态开关。
+     *
+     * 和 tools 一样，之前没接 —— 面板/接口改了不生效，情绪永远开着。
+     */
+    if (patch.mood && typeof patch.mood === 'object') {
+      current.mood = current.mood || {};
+      if (typeof patch.mood.enabled === 'boolean') current.mood.enabled = patch.mood.enabled;
+    }
+
+    /**
+     * 工具能力 / DSH 开关。
+     *
+     * 之前这里压根没处理 —— 面板上「工具能力」「调用 DSH」两个开关点了、
+     * 点保存也显示成功，但配置里一个字都没变（GET /api/admin/config 也不返回 tools，
+     * 所以界面读回来永远是关）。两头都缺，等于这两个开关一直是摆设。
+     */
+    if (patch.tools && typeof patch.tools === 'object') {
+      current.tools = current.tools || {};
+      if (typeof patch.tools.enabled === 'boolean') current.tools.enabled = patch.tools.enabled;
+
+      if (patch.tools.dsh && typeof patch.tools.dsh === 'object') {
+        current.tools.dsh = current.tools.dsh || {};
+        if (typeof patch.tools.dsh.enabled === 'boolean') {
+          current.tools.dsh.enabled = patch.tools.dsh.enabled;
+        }
+        if (typeof patch.tools.dsh.cwd === 'string') {
+          current.tools.dsh.cwd = patch.tools.dsh.cwd.trim();
+        }
+      }
+
+      // 白名单关掉的工具（数组，元素是工具名）
+      if (Array.isArray(patch.tools.off)) {
+        current.tools.off = patch.tools.off.map(String).filter(Boolean).slice(0, 100);
+      }
+
+      if (typeof patch.tools.sandbox === 'string' && patch.tools.sandbox.trim()) {
+        current.tools.sandbox = patch.tools.sandbox.trim();
       }
     }
 
@@ -5021,6 +5077,21 @@ print('%016x' % bits)
 
     Object.assign(this.config.reply, current.reply);
     Object.assign(this.config.group, current.group);
+
+    /**
+     * 工具开关同步进内存。
+     *
+     * 只写盘不同步的话，GET /api/admin/config 读的还是旧对象 ——
+     * 表现就是「保存了，但界面刷新后又是原样」。工具那块之前两头都缺。
+     */
+    this.config.tools = { ...(this.config.tools || {}), ...(current.tools || {}) };
+    this.config.mood = { ...(this.config.mood || {}), ...(current.mood || {}) };
+
+    // 工具层的白名单/开关也换成新对象（工具实例持有 config 引用）
+    if (this.engine?.tools) {
+      this.engine.tools.config = this.config;
+    }
+
     for (const name of Object.keys(current.channels || {})) {
       if (this.config.channels[name]) {
         Object.assign(this.config.channels[name], current.channels[name]);

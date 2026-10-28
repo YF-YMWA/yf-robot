@@ -307,6 +307,8 @@ export function buildStartCommand(root) {
     // Python 默认按系统编码输出，中文会乱码；强制 UTF-8
     'set PYTHONIOENCODING=utf-8',
     'set PYTHONUTF8=1',
+    // 面板启动：让桥接忽略 Ctrl+C —— 点窗口复制日志时很容易误触，一按就退出了
+    'set YF_NO_SIGINT=1',
     'title 微信适配器（YF-Robot）— 关掉窗口即停止',
     `cd /d "${a.dir}"`,
     `"${py}" ${ENTRY}`,

@@ -67,3 +67,34 @@ test('简短：本来只有一条时不动', () => {
   const out = sometimesTerse(['就一句'], { chance: 1 });
   assert.equal(out.length, 1);
 });
+
+// ===== 错字不能把句子弄成胡话 =====
+
+test('错字：不会把「说」换成「税」这类词', () => {
+  const bad = ['税', '事', '友', '反', '砍', '谁', '池', '药', '梅', '莱', '号', '取', '布'];
+  const samples = [
+    '它回话说到了，我正在等它再确认一遍',
+    '我觉得这样不太好，你说呢',
+    '刚才那句话说错了，我得改一下',
+    '有没有别的办法啊，我有点累了',
+  ];
+
+  for (const s of samples) {
+    for (let i = 0; i < 40; i++) {
+      const r = makeTypo(s);
+      if (!r) continue;
+      for (const ch of bad) {
+        assert.ok(
+          !r.wrong.includes(ch),
+          `「${s}」被换成了「${r.wrong}」，出现了不该有的字「${ch}」`,
+        );
+      }
+    }
+  }
+});
+
+test('错字：改口后的原文能和错字区分开', () => {
+  const r = makeTypo('我再说一遍这个事情');
+  if (!r) return; // 没命中就跳过（概率性）
+  assert.notEqual(r.wrong, r.right, '错字版和原文不该一样');
+});
