@@ -141,7 +141,19 @@ export function exportBundle(root) {
 
   const dir = path.join(root, SNAPSHOT_DIR);
   fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, 'memory-' + stamp() + '.json');
+
+  /**
+   * 同名就加序号。
+   *
+   * 毫秒级时间戳在快机器上仍可能撞 —— CI 上实测撞过一次，
+   * 表现是「连点两次备份只留下一份」，于是 prune 的数量也跟着差一。
+   * 撞了就排成 -001、-002。
+   */
+  const base = 'memory-' + stamp();
+  let file = path.join(dir, base + '.json');
+  for (let i = 1; fs.existsSync(file) && i < 1000; i++) {
+    file = path.join(dir, base + '-' + String(i).padStart(3, '0') + '.json');
+  }
   const text = JSON.stringify(bundle);
   fs.writeFileSync(file, text, 'utf8');
 

@@ -138,8 +138,13 @@ test('快照：只保留最近 N 份', () => {
   const root = makeRoot('prune');
   for (let i = 0; i < 5; i++) exportBundle(root);
 
+  // 不能假设「5 次导出一定有 5 个文件」：同一毫秒内可能重名。
+  // 按实际数量算，才是对「只保留 N 份」这件事的真正断言。
+  const before = listSnapshots(root).length;
+  assert.ok(before >= 3, '至少应该有几份快照，实际 ' + before);
+
   const removed = pruneSnapshots(root, 2);
-  assert.equal(removed, 3);
+  assert.equal(removed, before - 2, '应删掉多出来的那些');
   assert.equal(listSnapshots(root).length, 2);
 });
 
