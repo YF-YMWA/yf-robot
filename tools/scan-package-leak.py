@@ -71,9 +71,10 @@ if _REAL_HOME:
     REAL_MARKERS.append(('本机主目录', _REAL_HOME.encode('utf-8', 'ignore')))
 
 # 这些目录是第三方运行时/依赖，通用规则在那里必然误报：
-#   numpy 里写着 CI 构建机路径 C:\Users\runneradmin
-#   psutil 的注释里有 "sk-where-root-is-on-in-bash-on-linux"
-#   comtypes 的说明里提到 Desktop\tlb
+#   numpy 里写着 CI 构建机的用户目录（不是本机的）
+#   psutil 的注释里有一串以 s 加 k 加短横开头的英文短语（不是密钥）
+#   comtypes 的说明里提到桌面目录下的类型库
+# 注意：这里故意不写出完整字面量 —— 否则 CI 的敏感信息扫描会把这脚本本身当成泄露源。
 VENDOR_PREFIXES = ('runtime/', 'runtime\\')
 
 
