@@ -1373,9 +1373,14 @@
 
 <div class="card">
       <h2>下载图片素材</h2>
-      <div class="hint" style="margin-bottom:12px">
+      <div class="hint" style="margin-bottom:12px;line-height:1.7">
         按关键词搜索图片并下载收藏。<br>
-        <span style="color:var(--warn)">注意：只下载公开可访问的图片；部分网站有防盗链会失败。</span>
+        <span style="color:var(--warn)">注意：只下载公开可访问的图片；部分网站有防盗链会失败。</span><br>
+        <b>预期别太高</b>：网页上搜到的图多数是文章配图、横幅、网站图标，
+        不是真正的表情包 —— 现在会自动挡掉尺寸和比例明显不对的，
+        但「画面像不像表情」它判断不了。<br>
+        真正好用的表情包主要靠<b>微信里收藏</b>（别人发来的会自动进素材库），
+        这个按钮当作「偶尔补充几张」更合适。
       </div>
       <div class="row">
         <label>类型</label>
@@ -5306,7 +5311,11 @@ async function learnMedia() {
     });
 
     if (j.ok) {
-      res.innerHTML = `✓ 找到 ${j.foundUrls} 个链接，成功下载 ${j.downloaded.length} 张`;
+      // 跳过的数量要说清楚，不然用户以为「怎么只存了 2 张」
+      const skipped = j.skippedCount
+        ? `，跳过 ${j.skippedCount} 张不像表情包的（${(j.skipped || [])[0] || ''}）`
+        : '';
+      res.innerHTML = `✓ 找到 ${j.foundUrls} 个链接，成功下载 ${j.downloaded.length} 张${escapeHtml(skipped)}`;
       res.style.color = 'var(--ok)';
       await refreshMedia(kind);
     } else {
