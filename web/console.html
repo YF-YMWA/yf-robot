@@ -302,6 +302,7 @@
     <a data-page="stickers">素材库</a>
     <a data-page="learn">联网学习</a>
     <a data-page="kb">知识库</a>
+    <a data-page="logic">逻辑库</a>
     <a data-page="plugins">插件</a>
     <a data-page="bridge">接入状态</a>
     <a data-page="logs">日志</a>
@@ -1078,6 +1079,74 @@
         完整说明见 <code>docs/plugin-api.md</code>；
         现成例子见 <code>plugins/demo-dice-notes/</code>（掷骰子 + 便签本）。
       </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-logic">
+    <h1>逻辑库</h1>
+
+    <div class="card">
+      <h2>开关</h2>
+      <div class="row"><label>聊天时参考经验</label><div class="ctl">
+        <div class="switch" id="swLogic" onclick="toggleSw('swLogic')"></div>
+        <span class="hint">命中相关经验时塞进提示词</span>
+      </div></div>
+      <div class="row"><label>联网学习</label><div class="ctl">
+        <div class="switch" id="swLogicLearn" onclick="toggleSw('swLogicLearn')"></div>
+        <span class="hint">让她能从网页学新经验（默认关闭）</span>
+      </div></div>
+      <div class="row"><label>每天最多学</label><div class="ctl">
+        <input type="number" id="logicMaxPerDay" min="1" max="100" style="max-width:80px">
+        <span class="hint">条。防止失控烧钱</span>
+      </div></div>
+      <div class="row"><label>学完怎么处理</label><div class="ctl">
+        <select id="logicLearnMode" style="max-width:200px">
+          <option value="pending">先进待审，我确认后才生效</option>
+          <option value="active">直接生效</option>
+        </select>
+      </div></div>
+      <div style="margin-top:12px"><button onclick="saveLogicConfig()">保存设置</button>
+        <span class="hint" id="logicCfgHint" style="margin-left:10px"></span></div>
+      <div class="hint" style="margin-top:10px;line-height:1.7">
+        逻辑库存的是<b>「遇到这种情况该怎么处理」</b>，知识库存的是<b>「某件事是什么」</b>。<br>
+        联网学习会抓公开网页 → 让模型提炼成做法 → 过滤注入和垃圾后入库。
+        <b>建议先保持「先进待审」</b>，看过觉得没问题再放行。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>新增一条<span class="sp"></span><span class="hint" id="logicStats"></span></h2>
+      <div class="row"><label>一句话概括</label><div class="ctl">
+        <input type="text" id="logicTitle" placeholder="比如「被骂先别软」" style="max-width:300px">
+      </div></div>
+      <div class="row"><label>具体怎么做</label><div class="ctl">
+        <textarea id="logicRule" rows="3" placeholder="比如「对方骂人的时候先短句顶回去，不要急着道歉讲道理」" style="width:100%"></textarea>
+      </div></div>
+      <div class="row"><label>标签</label><div class="ctl">
+        <input type="text" id="logicTags" placeholder="逗号分隔，比如 沟通,情绪" style="max-width:300px">
+        <button onclick="addLogicRule()">保存</button>
+        <span class="hint" id="logicAddHint"></span>
+      </div></div>
+    </div>
+
+    <div class="card">
+      <h2>从网页学一条</h2>
+      <div class="row"><label>网址</label><div class="ctl">
+        <input type="text" id="logicLearnUrl" placeholder="https://…（只支持公网 http/https）" style="max-width:420px">
+      </div></div>
+      <div class="row"><label>想学哪方面</label><div class="ctl">
+        <input type="text" id="logicLearnTopic" placeholder="可选，比如「怎么拒绝别人」" style="max-width:300px">
+        <button onclick="learnLogicFromUrl()">开始学</button>
+        <span class="hint" id="logicLearnHint"></span>
+      </div></div>
+    </div>
+
+    <div class="card">
+      <h2>规则<span class="sp"></span>
+        <button class="ghost sm" onclick="loadLogic()">刷新</button>
+      </h2>
+      <div class="hint" id="logicHint">加载中…</div>
+      <div id="logicList"></div>
     </div>
   </div>
 
@@ -1859,6 +1928,7 @@ document.querySelectorAll('aside nav a').forEach((a) => {
 
 function toggleSw(id) { $(id).classList.toggle('on'); }
 function setSw(id, on) { const el = $(id); if (el) el.className = 'switch' + (on ? ' on' : ''); }
+function isSw(id) { const el = $(id); return Boolean(el && el.classList.contains('on')); }
 
 // ===== 能力测试 =====
 
@@ -3187,6 +3257,236 @@ async function togglePlugin(id, enabled) {
     loadPlugins();
   } catch (e) {
     toast('操作失败：' + e.message, 'err');
+  }
+}
+
+// ===== 逻辑库 =====
+
+let _logicRules = [];
+
+const LOGIC_STATUS = {
+  active: { text: '生效中', cls: 'on' },
+  pending: { text: '待审', cls: '' },
+  disabled: { text: '已禁用', cls: 'off' },
+};
+
+const LOGIC_SOURCE = {
+  manual: '手动',
+  web: '联网',
+  chat: '对话',
+};
+
+/** 读配置 + 规则，一次填满整页 */
+async function loadLogic() {
+  const listEl = $('logicList');
+  const hint = $('logicHint');
+  if (!listEl) return;
+
+  try {
+    const [cfg, data] = await Promise.all([api('config'), api('logic')]);
+
+    // 开关
+    setSw('swLogic', cfg.logic?.enabled !== false);
+    setSw('swLogicLearn', cfg.logic?.autoLearn?.enabled === true);
+    $('logicMaxPerDay').value = cfg.logic?.autoLearn?.maxPerDay ?? 10;
+    $('logicLearnMode').value = cfg.logic?.autoLearn?.mode || 'pending';
+
+    _logicRules = data.rules || [];
+    const st = data.stats || {};
+    $('logicStats').textContent = `共 ${st.total || 0} 条（上限 ${st.cap || 500}）`;
+
+    if (!_logicRules.length) {
+      hint.style.display = '';
+      hint.textContent = '还没有记录。可以手动加一条，或者从网页学一条。';
+      listEl.innerHTML = '';
+      return;
+    }
+
+    hint.style.display = 'none';
+    renderLogicList();
+  } catch (e) {
+    hint.style.display = '';
+    hint.textContent = '读取失败：' + e.message;
+  }
+}
+
+function renderLogicList() {
+  const el = $('logicList');
+  const pending = _logicRules.filter((r) => r.status === 'pending');
+  const active = _logicRules.filter((r) => r.status !== 'pending');
+
+  const one = (r) => {
+    const st = LOGIC_STATUS[r.status] || LOGIC_STATUS.active;
+    return `
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span class="chip ${st.cls}">${st.text}</span>
+          <b>${escapeHtml(r.title || '')}</b>
+          <span class="hint">${LOGIC_SOURCE[r.source] || r.source || ''}${
+            r.uses ? ` · 用过 ${r.uses} 次` : ''
+          }${r.tags?.length ? ` · ${r.tags.map(escapeHtml).join(' / ')}` : ''}</span>
+          <span style="flex:1"></span>
+          ${
+            r.status === 'pending'
+              ? `<button class="ghost sm" onclick="setLogicStatus('${r.id}','active')">通过</button>
+                 <button class="ghost sm" onclick="setLogicStatus('${r.id}','disabled')">拒绝</button>`
+              : `<button class="ghost sm" onclick="editLogicRule('${r.id}')">改</button>
+                 <button class="ghost sm" onclick="setLogicStatus('${
+                   r.id
+                 }','${r.status === 'disabled' ? 'active' : 'disabled'}')">${
+                   r.status === 'disabled' ? '启用' : '禁用'
+                 }</button>`
+          }
+          <button class="ghost sm" onclick="deleteLogicRule('${r.id}')" style="color:var(--err)">删</button>
+        </div>
+        <div style="margin-top:6px;line-height:1.6">${escapeHtml(r.rule || '')}</div>
+        ${r.sourceUrl ? `<div class="hint" style="margin-top:4px;opacity:.7">来源：${escapeHtml(r.sourceUrl)}</div>` : ''}
+      </div>`;
+  };
+
+  el.innerHTML =
+    (pending.length
+      ? `<div style="margin:4px 0 8px"><b style="color:var(--warn)">待审 ${pending.length} 条</b>
+         <button class="ghost sm" onclick="approveAllLogic()">全部通过</button></div>` +
+        pending.map(one).join('')
+      : '') +
+    (active.length ? active.map(one).join('') : '');
+}
+
+async function saveLogicConfig() {
+  const hint = $('logicCfgHint');
+  hint.textContent = '保存中…';
+  try {
+    await api('config', {
+      method: 'POST',
+      body: {
+        logic: {
+          enabled: isSw('swLogic'),
+          autoLearn: {
+            enabled: isSw('swLogicLearn'),
+            maxPerDay: Number($('logicMaxPerDay').value) || 10,
+            mode: $('logicLearnMode').value,
+          },
+        },
+      },
+    });
+    hint.textContent = '已保存';
+    toast('逻辑库设置已保存');
+  } catch (e) {
+    hint.textContent = '';
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
+async function addLogicRule() {
+  const title = $('logicTitle').value.trim();
+  const rule = $('logicRule').value.trim();
+  const tags = $('logicTags').value.trim();
+  const hint = $('logicAddHint');
+
+  if (!rule) {
+    hint.textContent = '「具体怎么做」不能为空';
+    return;
+  }
+
+  hint.textContent = '保存中…';
+  try {
+    const j = await api('logic/add', { method: 'POST', body: { title, rule, tags } });
+    if (!j.ok) throw new Error(j.error || '保存失败');
+    $('logicTitle').value = '';
+    $('logicRule').value = '';
+    $('logicTags').value = '';
+    hint.textContent = '已保存';
+    toast('已加入逻辑库');
+    loadLogic();
+  } catch (e) {
+    hint.textContent = '';
+    toast(e.message, 'err');
+  }
+}
+
+async function editLogicRule(id) {
+  const r = _logicRules.find((x) => x.id === id);
+  if (!r) return;
+  const next = prompt('改这条规则（留空取消）：', r.rule);
+  if (next === null) return;
+  const rule = next.trim();
+  if (!rule) return;
+
+  try {
+    const j = await api('logic/update', { method: 'POST', body: { id, rule } });
+    if (!j.ok) throw new Error(j.error || '修改失败');
+    toast('已修改');
+    loadLogic();
+  } catch (e) {
+    toast('修改失败：' + e.message, 'err');
+  }
+}
+
+async function setLogicStatus(id, status) {
+  try {
+    const j = await api('logic/status', { method: 'POST', body: { id, status } });
+    if (!j.ok) throw new Error(j.error || '操作失败');
+    loadLogic();
+  } catch (e) {
+    toast('操作失败：' + e.message, 'err');
+  }
+}
+
+async function deleteLogicRule(id) {
+  const r = _logicRules.find((x) => x.id === id);
+  if (!confirm('确定删掉「' + (r?.title || id) + '」？')) return;
+  try {
+    const j = await api('logic/delete', { method: 'POST', body: { id } });
+    if (!j.ok) throw new Error(j.error || '删除失败');
+    toast('已删除');
+    loadLogic();
+  } catch (e) {
+    toast('删除失败：' + e.message, 'err');
+  }
+}
+
+async function approveAllLogic() {
+  const pending = _logicRules.filter((r) => r.status === 'pending');
+  if (!pending.length) return;
+  if (!confirm(`把 ${pending.length} 条待审全部通过？`)) return;
+  for (const r of pending) {
+    try {
+      await api('logic/status', { method: 'POST', body: { id: r.id, status: 'active' } });
+    } catch {}
+  }
+  toast('已全部通过');
+  loadLogic();
+}
+
+async function learnLogicFromUrl() {
+  const url = $('logicLearnUrl').value.trim();
+  const topic = $('logicLearnTopic').value.trim();
+  const hint = $('logicLearnHint');
+
+  if (!url) {
+    hint.textContent = '先填网址';
+    return;
+  }
+  if (!isSw('swLogicLearn')) {
+    hint.textContent = '联网学习开关还没打开';
+    return;
+  }
+
+  hint.textContent = '抓取并提炼中（可能要十几秒）…';
+  try {
+    const j = await api('logic/learn', { method: 'POST', body: { url, topic } });
+    if (!j.ok) throw new Error(j.error || '学习失败');
+    if (!j.added?.length) {
+      hint.textContent = '这个页面没提炼出可用的经验';
+    } else {
+      hint.textContent = `学到 ${j.added.length} 条`;
+      toast(`学到 ${j.added.length} 条经验`);
+    }
+    loadLogic();
+  } catch (e) {
+    hint.textContent = '';
+    toast('学习失败：' + e.message, 'err');
   }
 }
 
@@ -5547,6 +5847,7 @@ async function loadAll() {
     loadBridge(),
     loadServerMode(),
     loadUsage(),
+    loadLogic(),
   ]);
 }
 

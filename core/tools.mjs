@@ -55,6 +55,10 @@ export class ToolKit {
     /** 插件宿主（可选，由外部注入）——插件提供的工具从这里来 */
     this.plugins = opts.plugins || null;
 
+    /** 逻辑库（查以往经验）与联网学习器，可选 */
+    this.logic = opts.logic || null;
+    this.learner = opts.learner || null;
+
     /** DSH 客户端（可选，由外部注入） */
     this.dsh = opts.dsh || null;
     this.dshEnabled = Boolean(opts.dsh);
@@ -259,6 +263,42 @@ export class ToolKit {
       },
     });
 
+    // 逻辑库：查以往的处理经验 / 从网页学新经验
+    defs.push({
+      type: 'function',
+      function: {
+        name: 'recall_logic',
+        description:
+          '查「以往遇到类似情况是怎么处理的」。碰到拿不准怎么回、或者之前学过相关做法时用。' +
+          '查到的只是参考经验，不一定适用，自己判断要不要照着做。',
+        parameters: {
+          type: 'object',
+          properties: {
+            topic: { type: 'string', description: '想问哪方面，比如「对方生气」「讨价还价」' },
+          },
+          required: ['topic'],
+        },
+      },
+    });
+
+    defs.push({
+      type: 'function',
+      function: {
+        name: 'learn_from_web',
+        description:
+          '从一个网址学「遇到某类情况该怎么做」，提炼成经验存进逻辑库。' +
+          '只有主人能用；联网学习总开关关着时会直接失败。',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: '要学的网页地址（http/https）' },
+            topic: { type: 'string', description: '想学哪方面，可选' },
+          },
+          required: ['url'],
+        },
+      },
+    });
+
     // 画图（需要绘图 API，由外部注入）
     if (this.imagegen) {
       defs.push({
@@ -360,6 +400,28 @@ export class ToolKit {
           return await this.#drawImage(args);
         case 'send_image':
           return this.#sendImage(args);
+        case 'recall_logic': {
+          if (!this.logic) return '（逻辑库未启用）';
+          const topic = String(args.topic || '').trim();
+          if (!topic) return '（要查什么？）';
+          const hits = await this.logic.search(topic);
+          if (!hits.length) return `（没有关于「${topic}」的经验记录）`;
+          return hits.map((h, i) => `${i + 1}. ${h.title}：${h.rule}`).join('\n');
+        }
+        case 'learn_from_web': {
+          if (!this.learner) return '（联网学习未启用）';
+          const url = String(args.url || '').trim();
+          if (!url) return '（要学哪个网址？）';
+          const r = await this.learner.learnFromUrl(url, {
+            topic: String(args.topic || '').trim(),
+            mode: this.config?.logic?.autoLearn?.mode === 'pending' ? 'pending' : 'active',
+          });
+          if (!r.ok) return `（学习失败：${r.error}）`;
+          if (!r.added?.length) return '（这个页面没提炼出可用的经验）';
+          return (
+            `学到 ${r.added.length} 条：\n` + r.added.map((x) => `· ${x.title}：${x.rule}`).join('\n')
+          );
+        }
         case 'ask_dsh':
           if (!this.dsh) return '（DSH 调用未启用）';
           {

@@ -18,6 +18,9 @@ import { SessionStore, extractFacts, isEcho } from './session.mjs';
 import { MemoryStore, extractPreferences } from './memory.mjs';
 import { KnowledgeBase } from './kb.mjs';
 import { PluginHost } from './plugins.mjs';
+import { LogicLibrary } from './logic.mjs';
+import { LogicLearner } from './logic-learn.mjs';
+import { assembleContext, renderContext } from './context.mjs';
 import { renderSystemPrompt } from './persona.mjs';
 import { renderWordBanks } from './words.mjs';
 import { OwnerService } from './owner.mjs';
@@ -127,6 +130,11 @@ export class ChatEngine {
 
       this.tools = new ToolKit({
         plugins: this.plugins,
+        // 懒加载：第一次用到时才建库，启动不受影响
+        logic: { search: (...a) => this.logic().search(...a) },
+        learner: {
+          learnFromUrl: (...a) => this.learner().learnFromUrl(...a),
+        },
         sandbox: config.tools.sandbox || path.join(config.root || '.', 'agent-workspace'),
         logger,
         dsh,
@@ -267,6 +275,72 @@ export class ChatEngine {
       });
     }
     return this._kb;
+  }
+
+  /**
+   * 素材库摘要：有几张图、都是什么情绪的。
+   *
+   * 只是一句话的提示，用来让她知道「手上有什么牌」，
+   * 具体挑哪张还是走 list_stickers / send_image 工具。
+   * 读不到就返回 null，不影响别的。
+   */
+  #mediaSummary() {
+    const file = path.join(this.config.root || process.cwd(), 'data', 'stickers', 'index.json');
+    let index = {};
+    try {
+      index = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      return null;
+    }
+
+    const names = Object.keys(index);
+    if (!names.length) return null;
+
+    const tagCount = {};
+    for (const n of names) {
+      for (const t of index[n]?.tags || []) {
+        tagCount[t] = (tagCount[t] || 0) + 1;
+      }
+    }
+
+    return { total: names.length, tags: tagCount };
+  }
+
+  /** 逻辑库（懒加载，用到才建） */
+  logic() {
+    if (!this._logic) {
+      this._logic = new LogicLibrary({
+        root: this.config.root || process.cwd(),
+        config: this.config,
+        log: (m) => this.log.info?.(m),
+        /**
+         * 复用知识库那套嵌入（智谱 embedding-3）。
+         *
+         * 只靠字面匹配，中文换个说法就搜不到 ——
+         * 「有人骂我」和「对方骂人」一个字都不重合，但明显是同一件事。
+         * 没有 Key 的时候自动退回纯字面，不影响使用。
+         */
+        embed: async (text) => {
+          const [v] = await this.#kb().embed([text]);
+          return v;
+        },
+      });
+      this._logic.load();
+    }
+    return this._logic;
+  }
+
+  /** 联网学习器（懒加载） */
+  learner() {
+    if (!this._learner) {
+      this._learner = new LogicLearner({
+        library: this.logic(),
+        llm: this.llm,
+        config: this.config,
+        log: (m) => this.log.info?.(m),
+      });
+    }
+    return this._learner;
   }
 
   /** 导入一份文档到知识库（admin 调用） */
@@ -563,24 +637,79 @@ export class ChatEngine {
       }
 
       /**
-       * 知识库检索：在拼提示词之前做一次。
+       * 上下文组装：知识库 + 逻辑库 + 素材库，一次拼好。
        *
-       * 只在「开启 + 有文档」时才走，失败不影响正常回复
-       * （知识库挂了不能让她连话都不会说）。
+       * 以前是各拼各的，问题有三个：内容撞车白烧 token、
+       * 谁先拼谁占地方、经验说「该发个表情」但她不知道手上有什么图。
+       * 现在统一排队、去重、封顶。
        */
       let kbNote = '';
-      if (this.config.kb?.enabled !== false) {
-        try {
-          const hits = await this.#kb().search(userText);
-          if (hits.length) {
-            kbNote = KnowledgeBase.render(hits);
-            this.log.info?.(
-              `[kb] 命中 ${hits.length} 段（最高 ${hits[0].score.toFixed(2)}，来自 ${hits[0].doc}）`,
-            );
+      let logicNote = '';
+      let mediaNote = '';
+
+      try {
+        const logicHits = [];
+        const kbHits = [];
+
+        // 经验：短、可执行，优先
+        if (this.config.logic?.enabled !== false) {
+          try {
+            const hits = await this.logic().search(userText);
+            logicHits.push(...hits);
+            if (hits.length) {
+              this.log.info?.(
+                `[logic] 命中 ${hits.length} 条（最高 ${hits[0].score.toFixed(2)}：${hits[0].title}）`,
+              );
+              this.logic().markUsed(hits.map((h) => h.id));
+            }
+          } catch (e) {
+            this.log.warn?.(`[logic] 检索失败（不影响回复）：${e.message}`);
           }
-        } catch (e) {
-          this.log.warn?.(`[kb] 检索失败（不影响回复）：${e.message}`);
         }
+
+        // 事实
+        if (this.config.kb?.enabled !== false) {
+          try {
+            const hits = await this.#kb().search(userText);
+            kbHits.push(...hits);
+            if (hits.length) {
+              this.log.info?.(
+                `[kb] 命中 ${hits.length} 段（最高 ${hits[0].score.toFixed(2)}，来自 ${hits[0].doc}）`,
+              );
+            }
+          } catch (e) {
+            this.log.warn?.(`[kb] 检索失败（不影响回复）：${e.message}`);
+          }
+        }
+
+        // 素材库摘要（只在聊到图的时候才会真的用上）
+        let media = null;
+        try {
+          media = this.#mediaSummary();
+        } catch {}
+
+        const { blocks, stats } = assembleContext({
+          text: userText,
+          logicHits,
+          kbHits,
+          media,
+          budget: Number(this.config.context?.budget ?? 1600),
+        });
+
+        for (const b of blocks) {
+          if (b.kind === 'logic') logicNote = b.text;
+          else if (b.kind === 'kb') kbNote = b.text;
+          else if (b.kind === 'media') mediaNote = b.text;
+        }
+
+        if (stats.logic || stats.kb || stats.media) {
+          this.log.info?.(
+            `[ctx] 经验 ${stats.logic} / 资料 ${stats.kb} / 素材 ${stats.media}｜` +
+              `共 ${stats.chars} 字（丢弃 经验${stats.droppedLogic} 资料${stats.droppedKb}）`,
+          );
+        }
+      } catch (e) {
+        this.log.warn?.(`[ctx] 组装失败（不影响回复）：${e.message}`);
       }
 
       const messages = this.#buildMessages(
@@ -594,6 +723,8 @@ export class ChatEngine {
         input.speakerId || '',
         input.groupNote || '',
         kbNote,
+        logicNote,
+        mediaNote,
       );
 
       let raw = '';
@@ -833,6 +964,8 @@ export class ChatEngine {
     speakerId = '',
     groupNote = '',
     kbNote = '',
+    logicNote = '',
+    mediaNote = '',
   ) {
     const system = renderSystemPrompt(this.persona, {
       ownerName: speakerName || this.persona.ownerName,
@@ -880,6 +1013,12 @@ export class ChatEngine {
 
     // 知识库资料：从用户导入的文档里检索出来的相关片段
     if (kbNote) parts.push(kbNote);
+
+    // 逻辑库：以往遇到类似情况的做法（是参考，不是规定）
+    if (logicNote) parts.push(logicNote);
+
+    // 素材库提示：只在聊到图的时候才出现
+    if (mediaNote) parts.push(mediaNote);
 
     // 防编造：模型很容易顺着对方编一段「你上次说过」的假回忆
     parts.push(

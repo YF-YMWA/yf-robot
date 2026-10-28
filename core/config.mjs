@@ -98,6 +98,24 @@ export const DEFAULTS = {
     autoDetect: true,
   },
 
+  /**
+   * 逻辑库：她「怎么想」的经验，和知识库（知道什么）分开。
+   */
+  logic: {
+    /** 聊天时自动检索并参考以往经验 */
+    enabled: true,
+    /** 联网学习：默认关闭，要用得在控制台手动打开 */
+    autoLearn: {
+      enabled: false,
+      /** 每天最多学几条（防止失控烧 token） */
+      maxPerDay: 10,
+      /** active = 学完直接用；pending = 进待审，等主人确认 */
+      mode: 'pending',
+      /** 单个页面抓取超时 */
+      timeoutMs: 15000,
+    },
+  },
+
   /** B站分享。 */
   share: {
     enabled: false,

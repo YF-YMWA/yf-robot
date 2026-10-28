@@ -488,6 +488,74 @@ export class AdminApi {
         };
       }
 
+      // ===== 逻辑库 =====
+      if (method === 'GET' && pathname === '/api/admin/logic') {
+        const lib = this.engine.logic();
+        return {
+          code: 200,
+          body: {
+            enabled: this.config.logic?.enabled !== false,
+            autoLearn: this.config.logic?.autoLearn || {},
+            stats: lib.stats(),
+            rules: lib.list(),
+          },
+        };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/logic/add') {
+        const lib = this.engine.logic();
+        const r = lib.add({
+          title: body?.title,
+          rule: body?.rule,
+          tags: Array.isArray(body?.tags) ? body.tags : String(body?.tags || '').split(/[,，\s]+/).filter(Boolean),
+          source: 'manual',
+          status: body?.status === 'pending' ? 'pending' : 'active',
+        });
+        return { code: 200, body: r };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/logic/update') {
+        const lib = this.engine.logic();
+        const id = String(body?.id || '');
+        const rule = lib.rules.find((x) => x.id === id);
+        if (!rule) return { code: 200, body: { ok: false, error: '没有这条' } };
+
+        // 走一遍校验，别把注入内容改进去
+        const { sanitizeRule, rejectReason } = await import('./logic.mjs');
+        const nextRule = sanitizeRule(body?.rule ?? rule.rule);
+        const bad = rejectReason(nextRule);
+        if (bad) return { code: 200, body: { ok: false, error: bad } };
+
+        rule.rule = nextRule;
+        if (typeof body?.title === 'string') rule.title = sanitizeRule(body.title).slice(0, 60) || rule.title;
+        if (Array.isArray(body?.tags)) rule.tags = body.tags.slice(0, 6).map((t) => sanitizeRule(t).slice(0, 16));
+        if (['active', 'pending', 'disabled'].includes(body?.status)) rule.status = body.status;
+        lib.save();
+        return { code: 200, body: { ok: true, rule: { ...rule, grams: undefined, vec: undefined } } };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/logic/delete') {
+        return { code: 200, body: this.engine.logic().remove(String(body?.id || '')) };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/logic/status') {
+        return {
+          code: 200,
+          body: this.engine.logic().setStatus(String(body?.id || ''), String(body?.status || '')),
+        };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/logic/learn') {
+        const url = String(body?.url || '').trim();
+        if (!url) return { code: 200, body: { ok: false, error: '要学哪个网址？' } };
+        const learner = this.engine.learner();
+        const r = await learner.learnFromUrl(url, {
+          topic: String(body?.topic || '').trim(),
+          mode: this.config.logic?.autoLearn?.mode === 'active' ? 'active' : 'pending',
+        });
+        return { code: 200, body: r };
+      }
+
       // ===== 用量统计 =====
       if (method === 'GET' && pathname === '/api/admin/usage') {
         return { code: 200, body: this.engine.usage || { calls: 0, input: 0, output: 0 } };
@@ -3996,6 +4064,14 @@ print('%016x' % bits)
         hasKey: Boolean(c.vision.apiKey),
         apiKeyMasked: mask(c.vision.apiKey),
       },
+      logic: {
+        enabled: c.logic?.enabled !== false,
+        autoLearn: {
+          enabled: c.logic?.autoLearn?.enabled === true,
+          maxPerDay: c.logic?.autoLearn?.maxPerDay ?? 10,
+          mode: c.logic?.autoLearn?.mode || 'pending',
+        },
+      },
       voice: {
         enabled: c.voice.enabled,
         baseUrl: c.voice.baseUrl,
@@ -4167,6 +4243,23 @@ print('%016x' % bits)
       if (patch.vision.baseUrl) current.vision.baseUrl = String(patch.vision.baseUrl);
       if (patch.vision.model) current.vision.model = String(patch.vision.model);
       applyKey(current.vision, patch.vision, patch.vision.clearApiKey, 'vision');
+    }
+
+    // 逻辑库开关（联网学习默认关闭，得主人手动打开）
+    if (patch.logic) {
+      current.logic = current.logic || {};
+      if (typeof patch.logic.enabled === 'boolean') current.logic.enabled = patch.logic.enabled;
+
+      if (patch.logic.autoLearn && typeof patch.logic.autoLearn === 'object') {
+        const al = (current.logic.autoLearn = current.logic.autoLearn || {});
+        const p2 = patch.logic.autoLearn;
+        if (typeof p2.enabled === 'boolean') al.enabled = p2.enabled;
+        if (p2.maxPerDay !== undefined) {
+          const n = Number(p2.maxPerDay);
+          if (Number.isFinite(n)) al.maxPerDay = Math.min(Math.max(Math.trunc(n), 1), 100);
+        }
+        if (p2.mode === 'active' || p2.mode === 'pending') al.mode = p2.mode;
+      }
     }
 
     if (patch.voice) {
@@ -4506,6 +4599,15 @@ print('%016x' % bits)
     // care 可能原本不存在，要整体替换（不能 Object.assign 到 undefined）
     this.config.care = { ...(this.config.care || {}), ...(current.care || {}) };
     this.config.learning = { ...(this.config.learning || {}), ...(current.learning || {}) };
+    // 逻辑库：autoLearn 是嵌套对象，要深合并一层，否则改了一半会丢
+    this.config.logic = {
+      ...(this.config.logic || {}),
+      ...(current.logic || {}),
+      autoLearn: {
+        ...(this.config.logic?.autoLearn || {}),
+        ...(current.logic?.autoLearn || {}),
+      },
+    };
     this.config.wechat = { ...(this.config.wechat || {}), ...(current.wechat || {}) };
 
     // 画图：客户端持有自己的 cfg 副本，要重建才认新 Key/模型
