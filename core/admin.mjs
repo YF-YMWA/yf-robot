@@ -2160,6 +2160,74 @@ print('%016x' % bits)
     return good;
   }
 
+  /**
+   * 供工具层调用：改配置（和面板保存走同一条路）。
+   *
+   * 白了就是 #saveConfig 的公开包装 —— 所以在对话里改设置，
+   * 效果和你在控制台点保存完全一样（会触发客户端重建、内存同步）。
+   */
+  saveConfigFromTool(patch) {
+    return this.#saveConfig(patch);
+  }
+
+  /**
+   * 供工具层调用：清理素材（和面板「清理不合格」同一条路）。
+   */
+  async cleanMediaFromTool({ kind = 'stickers', dryRun = false } = {}) {
+    const handler = async () => {
+      const body = { kind, dryRun };
+      // 直接复用 HTTP 处理逻辑里的那段：这里内联一份最小实现
+      const dirs = this.#mediaDirs();
+      const dir = dirs[kind];
+      if (!dir) return { ok: false, error: '未知类型' };
+
+      let files = [];
+      try {
+        files = fs.readdirSync(dir).filter((n) => /^[\w.-]{1,120}$/.test(n));
+      } catch {
+        return { ok: false, error: '目录读不到' };
+      }
+
+      const { suitableAsSticker, suitableAsImage } = await import('./media-suit.mjs');
+      const judge = kind === 'stickers' ? suitableAsSticker : suitableAsImage;
+
+      const bad = [];
+      for (const n of files) {
+        if (!/\.(jpe?g|png|gif|webp)$/i.test(n)) continue;
+        if (/^sticker_(site|web)_/.test(n)) {
+          bad.push({ name: n, reason: '网页抓取（不是表情包）' });
+          continue;
+        }
+        try {
+          const buf = fs.readFileSync(path.join(dir, n));
+          const v = judge(buf);
+          if (!v.ok) bad.push({ name: n, reason: v.reason || '不合格' });
+        } catch (e) {
+          bad.push({ name: n, reason: '读不出来：' + e.message });
+        }
+      }
+
+      if (body.dryRun) {
+        return { ok: true, dryRun: true, count: bad.length, items: bad };
+      }
+
+      const trash = path.join(this.root, 'data', kind + '-trash');
+      fs.mkdirSync(trash, { recursive: true });
+      let moved = 0;
+      for (const b of bad) {
+        try {
+          fs.renameSync(path.join(dir, b.name), path.join(trash, b.name));
+          moved++;
+        } catch {}
+      }
+      this.__stickerPoolCache = null;
+      this.log.info?.(`[clean] 工具触发：${kind} 清掉 ${moved} 张`);
+      return { ok: true, moved, items: bad.slice(0, 20) };
+    };
+
+    return await handler();
+  }
+
   pickSticker(text = '') {
     const dirs = this.#mediaDirs();
     const dir = dirs.stickers;

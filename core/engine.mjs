@@ -486,6 +486,14 @@ export class ChatEngine {
       learner: {
         learnFromUrl: (...a) => this.learner().learnFromUrl(...a),
       },
+      /**
+       * 管理能力（仅主人工具会用）。
+       *
+       * 用回调注入而不是让 tools.mjs 直接 import admin ——
+       * 避免 tools ↔ admin ↔ engine 的循环依赖。
+       */
+      adminSaveConfig: (...a) => this.saveConfigHook(...a),
+      adminCleanMedia: (...a) => this.cleanMediaHook(...a),
       sandbox: config.tools.sandbox || path.join(config.root || '.', 'agent-workspace'),
       logger: this.log,
       dsh,
@@ -949,6 +957,7 @@ export class ChatEngine {
           const r = await this.#runWithTools(sessionId, messages, onDelta, {
             // 工具权限：同时看「是否主人」和「识别级别」
             allowTools: this.owner?.can(isOwner, 'tools', ownerCheck) !== false,
+            isOwner,
           });
           raw = r.text;
           reason = r.reason;
@@ -1205,6 +1214,8 @@ export class ChatEngine {
   async #runWithTools(sessionId, messages, onDelta, opts = {}) {
     const MAX_ROUNDS = 5;
     const allowTools = opts.allowTools !== false;
+    /** 工具层要用：判断是不是主人（管理类工具只给主人） */
+    const callerIsOwner = opts.isOwner !== false;
     let msgs = [...messages];
     let accumulated = '';
 
@@ -1259,7 +1270,22 @@ export class ChatEngine {
         }
 
         this.log.info?.(`[tool] 执行 ${fn.name}(${JSON.stringify(args).slice(0, 60)})`);
-        const result = await this.tools.run(fn.name, args, { search: this.search });
+
+        /**
+         * 调用前把管理回调同步给工具层。
+         *
+         * ToolKit 建在 AdminApi 之前，那时 hook 还是 null；
+         * 不同步的话 this.adminSaveConfig 永远是 null，
+         * 表现就是「对话里改设置」报「不是一个函数」。
+         */
+        this.tools.adminSaveConfig = this.saveConfigHook || null;
+        this.tools.adminCleanMedia = this.cleanMediaHook || null;
+
+        // isOwner 传下去：管理类工具（改设置 / 清素材）只有主人能用
+        const result = await this.tools.run(fn.name, args, {
+          search: this.search,
+          isOwner: callerIsOwner,
+        });
 
         msgs.push({
           role: 'tool',
