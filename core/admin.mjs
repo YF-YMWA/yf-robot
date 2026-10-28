@@ -385,6 +385,70 @@ export class AdminApi {
       if (method === 'GET' && pathname === '/api/admin/memory') {
         return { code: 200, body: this.#listMemory() };
       }
+      // ===== 记忆备份 / 恢复 =====
+      if (method === 'GET' && pathname === '/api/admin/memory/snapshots') {
+        const { listSnapshots } = await import('./memory-backup.mjs');
+        return { code: 200, body: { ok: true, list: listSnapshots(this.root) } };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/memory/export') {
+        const { exportBundle, pruneSnapshots } = await import('./memory-backup.mjs');
+        try {
+          const r = exportBundle(this.root);
+          const pruned = pruneSnapshots(this.root);
+          this.log.info?.('[backup] 记忆已备份：' + r.file.replace(this.root, '.') + (pruned ? `（清掉 ${pruned} 份旧快照）` : ''));
+          return {
+            code: 200,
+            body: {
+              ok: true,
+              file: r.file.replace(this.root, '').replace(/^[\\/]/, ''),
+              bytes: r.bytes,
+              cards: r.cards,
+              counts: r.counts,
+              pruned,
+            },
+          };
+        } catch (e) {
+          return { code: 200, body: { ok: false, error: e.message } };
+        }
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/memory/restore') {
+        const { listSnapshots, restoreBundle } = await import('./memory-backup.mjs');
+        try {
+          let file = String(body?.file || '');
+          if (!file) {
+            const list = listSnapshots(this.root);
+            if (!list.length) return { code: 200, body: { ok: false, error: '还没有任何快照' } };
+            file = list[0].name;
+          }
+          // 只允许 data/backups 里的文件，挡路径穿越
+          const name = file.split(/[\\/]/).pop();
+          const full = path.join(this.root, 'data', 'backups', name);
+          if (!fs.existsSync(full)) {
+            return { code: 200, body: { ok: false, error: '找不到快照：' + name } };
+          }
+          const bundle = JSON.parse(fs.readFileSync(full, 'utf8'));
+          const r = restoreBundle(this.root, bundle, { dryRun: body?.dryRun === true });
+
+          if (!r.dryRun) {
+            // 恢复后重新加载引擎数据，不用重启服务
+            try {
+              this.config = JSON.parse(fs.readFileSync(path.join(this.root, 'config.json'), 'utf8'));
+              if (this.engine) {
+                this.engine.config = this.config;
+                this.engine.reloadScopedStores?.();
+              }
+            } catch {}
+            this.log.info?.('[backup] 已从快照恢复：' + name);
+          }
+
+          return { code: 200, body: { ok: true, file: name, plan: r.plan, safety: r.safety || '' } };
+        } catch (e) {
+          return { code: 200, body: { ok: false, error: e.message } };
+        }
+      }
+
       if (method === 'POST' && pathname === '/api/admin/memory/clear') {
         return { code: 200, body: this.#clearMemory(body) };
       }

@@ -124,6 +124,7 @@ node app.mjs
 | 文件 | 内容 |
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | 每个版本改了什么 |
+| [docs/BUGS.md](docs/BUGS.md) | 修过的真实故障（现象/根因/修复/回归测试） |
 | [docs/adapter-protocol.md](docs/adapter-protocol.md) | 适配器 HTTP 协议 |
 | [docs/plugin-api.md](docs/plugin-api.md) | 插件开发 |
 | [docs/logic-library.md](docs/logic-library.md) | 逻辑库怎么用、安全边界 |

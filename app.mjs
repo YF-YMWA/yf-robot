@@ -533,6 +533,26 @@ async function main() {
   }
   console.log('就绪。Ctrl+C 退出。');
 
+  /**
+   * 启动时自动备份一次记忆（保留最近 20 份）。
+   *
+   * 用户踩过「更新后记忆全没了」：把新版本解压到新文件夹，新目录没有 data/，
+   * 看起来就是谁都不认识。有自动快照至少能退回上一次启动时的状态。
+   * 放在这里而不是最前面：等服务和数据都加载完再打快照。
+   */
+  try {
+    const { exportBundle, pruneSnapshots } = await import('./core/memory-backup.mjs');
+    const root0 = config.root || process.cwd();
+    const snap = exportBundle(root0);
+    const pruned = pruneSnapshots(root0);
+    console.log(
+      `记忆快照：${snap.counts.memories} 条记忆 / ${snap.counts.sessions} 个会话` +
+        (pruned ? `（清掉 ${pruned} 份旧快照）` : ''),
+    );
+  } catch (e) {
+    console.warn('记忆快照失败（不影响使用）：' + e.message);
+  }
+
   // 浏览器由启动器（scripts/start.ps1）负责打开：
   // node 若是从受限会话启动，它拉起的 GUI 窗口可能显示不出来，
   // 所以把「开浏览器」这件事交给和用户同一个桌面会话的 PowerShell。
