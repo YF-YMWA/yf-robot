@@ -10,8 +10,9 @@ import fs from 'node:fs';
 
 const TOKEN = process.env.GH_TOKEN || '';
 const REPO = 'YF-YMWA/yf-robot';
-const TAG = 'v0.9.14';
-const FILE = 'YF-Robot-v0.9.14.zip';
+const VERSION = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+const TAG = 'v' + VERSION;
+const FILE = 'YF-Robot-v' + VERSION + '.zip';
 
 if (!TOKEN) {
   console.error('  缺少 GH_TOKEN');
@@ -25,7 +26,7 @@ const H = {
   'content-type': 'application/json',
 };
 
-const notes = `## YF-Robot v0.9.14
+const notes = `## YF-Robot ${TAG}
 
 解压到纯英文路径（例如 \`D:\\YF-Robot\`），双击 \`YF-Robot.bat\` 启动。
 包内自带 Node 和 Python 运行时，不需要另外安装。
@@ -37,23 +38,26 @@ const notes = `## YF-Robot v0.9.14
 
 要接微信，请把适配器放到 \`adapters/<名字>/\` 下（见 docs/multi-adapter.md）。
 
-### 本次更新
+### 本次更新（0.9.15）
 
-- 多适配器：一个文件夹一个适配器，面板里单选 + 单独启停，按需提权
-- 主人可在对话里管理：改概率/气泡数/开关、清理素材库
-- 明确要表情包时跳过概率；点名要动图只挑 GIF
-- 一键修复（Key 丢了能从备份恢复）/ 一键更新（只覆盖代码不动数据）
+- **记忆备份 / 恢复**：\`备份记忆.bat\` 导出一份 json，\`恢复记忆.bat\` 放回去；
+  启动时还会自动快照（保留最近 20 份），恢复前再存一份「before-restore」
+- **接入状态页显示「发送 成功/失败」**：冷却中标注剩余秒数，
+  一眼分清是没收到消息，还是收到了发不出去
+- **BUGS.md**：12 条真实故障档案（现象 / 根因 / 修复 / 回归测试）
 
 ### 修复
 
-- 换角色卡会串会话历史（新卡能答出上一个角色聊过的事）
-- 大素材上传被掐断（请求体上限 256KB → 素材 24MB）
-- 收同一个表情会把进程卡死；动图发不出去
-- 没发却说「发了」
+- 打包带上 \`.pyc\`，里面嵌着打包机的用户名路径 —— 现在打包会跳过所有缓存
+- 接入状态页的发送健康度一直空着（心跳聚合漏了 \`send\` 字段）
+- 面板启动的适配器崩溃后不会被拉起（缺守护循环）
+- 控制台会把本地令牌也发给局域网访问者（现在只给本机）
+- 微信多开时可能把话发到另一个号（现在检测到 ≥2 个主窗就拒绝发送）
 
 ### 升级说明
 
 直接把新包解压覆盖到旧目录即可：\`config.json\` 和 \`data/\` 不会被覆盖。
+已经解压到新文件夹的，先跑一次 \`备份记忆.bat\`，再用新包覆盖，最后 \`恢复记忆.bat\`。
 `;
 
 async function main() {
