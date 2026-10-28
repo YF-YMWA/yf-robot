@@ -75,6 +75,7 @@ tools/full_*.mjs
 !tools/check-console-pages.mjs
 !tools/check-adapter-start.mjs
 !tools/check-adapter-log.mjs
+!tools/publish-release.mjs
 !tools/scan-dist.mjs
 tools/import_*.mjs
 tools/group_*.mjs
