@@ -316,7 +316,6 @@
     <a data-page="model">模型与功能</a>
     <a data-page="memory">记忆</a>
     <a data-page="active">主动功能</a>
-    <a data-page="stickers">素材库</a>
     <a data-page="learn">联网学习</a>
     <a data-page="tools">工具</a>
     <a data-page="plugins">插件</a>
@@ -1964,7 +1963,7 @@ function showTokenExpired(path) {
  * 以前 15 个平铺入口，知识库/逻辑库/词库、角色卡/主人设置、
  * 接入状态/日志本来就是同一件事的不同角度，平铺着反而难找。
  */
-const PAGE_GROUPS = {"data":{"label":"资料","tabs":[["kb","知识库（事实）"],["logic","逻辑库（经验）"],["words","词库（风格）"]]},"identity":{"label":"身份","tabs":[["persona","角色卡"],["owner","主人设置"]]},"run":{"label":"运行","tabs":[["bridge","接入状态"],["logs","日志"]]}};
+const PAGE_GROUPS = {"data":{"label":"资料","tabs":[["kb","知识库（事实）"],["logic","逻辑库（经验）"],["words","词库（风格）"],["stickers","素材库"]]},"identity":{"label":"身份","tabs":[["persona","角色卡"],["owner","主人设置"]]},"run":{"label":"运行","tabs":[["bridge","接入状态"],["logs","日志"]]}};
 
 /** 页 → 所属分组的反查 */
 const PAGE_TO_GROUP = (() => {
@@ -3025,7 +3024,10 @@ async function loadMediaAll() {
       .map((s, i) => {
         const isGif = /\.gif$/i.test(s.name);
         return `
-      <div class="sticker-cell">
+      <div class="sticker-cell" data-name="${s.name}" data-kind="${s.kind}">
+        <input type="checkbox" class="media-pick" data-name="${s.name}" data-kind="${s.kind}"
+               style="position:absolute;left:6px;top:6px;z-index:3;cursor:pointer"
+               onchange="updateMediaSel()">
         <span class="del" onclick="delMedia('${s.kind}','${s.name}')" title="删除">×</span>
         <span class="kindtag">${LABEL[s.kind] || s.kind}${isGif ? ' · 动图' : ''}</span>
         <img data-idx="${i}" alt="">
@@ -3492,6 +3494,80 @@ async function togglePlugin(id, enabled) {
     loadPlugins();
   } catch (e) {
     toast('操作失败：' + e.message, 'err');
+  }
+}
+
+
+// ===== 素材批量删除 =====
+
+/** 当前选中的素材 */
+function mediaSelected() {
+  return [...document.querySelectorAll('.media-pick:checked')].map((el) => ({
+    name: el.dataset.name,
+    kind: el.dataset.kind,
+  }));
+}
+
+function updateMediaSel() {
+  const n = mediaSelected().length;
+  const hint = $('mediaSelHint');
+  if (hint) hint.textContent = n ? '已选 ' + n + ' 个' : '未选中';
+}
+
+function toggleMediaAll() {
+  const boxes = [...document.querySelectorAll('.media-pick')];
+  if (!boxes.length) return;
+  const allOn = boxes.every((b) => b.checked);
+  boxes.forEach((b) => (b.checked = !allOn));
+  updateMediaSel();
+}
+
+/** 删除选中的（按类型分组调用，一次请求删一批） */
+async function batchDeleteMedia() {
+  const picked = mediaSelected();
+  if (!picked.length) return toast('先勾选要删的图', 'err');
+  if (!confirm('确定删除选中的 ' + picked.length + ' 张？删了就找不回来了')) return;
+
+  const byKind = {};
+  for (const p of picked) (byKind[p.kind] ||= []).push(p.name);
+
+  let deleted = 0;
+  const failed = [];
+  for (const [kind, names] of Object.entries(byKind)) {
+    try {
+      const r = await api('media/delete-batch', { method: 'POST', body: { kind, names } });
+      if (r.ok) {
+        deleted += r.deleted || 0;
+        if (r.failed?.length) failed.push(...r.failed);
+      } else {
+        failed.push({ name: kind, error: r.error });
+      }
+    } catch (e) {
+      failed.push({ name: kind, error: e.message });
+    }
+  }
+
+  toast('已删除 ' + deleted + ' 张' + (failed.length ? '，失败 ' + failed.length : ''));
+  loadMediaAll();
+  if ($('page-stickers')?.classList.contains('active')) loadMedia('generated');
+}
+
+/** 一键清空「她画的图」（先问数量再删） */
+async function clearGenerated() {
+  try {
+    const pre = await api('media/delete-all', { method: 'POST', body: { kind: 'generated', dryRun: true } });
+    if (!pre.ok) throw new Error(pre.error || '查询失败');
+    if (!pre.count) return toast('「她画的图」已经是空的');
+
+    if (!confirm('确定清空「她画的图」里的 ' + pre.count + ' 张？')) return;
+
+    const r = await api('media/delete-all', { method: 'POST', body: { kind: 'generated', only: 'all' } });
+    if (!r.ok) throw new Error(r.error || '删除失败');
+    toast('已清空 ' + (r.deleted || 0) + ' 张');
+    loadMedia('generated');
+    loadMediaAll();
+  } catch (e) {
+    toast('清空失败：' + e.message, 'err');
   }
 }
 

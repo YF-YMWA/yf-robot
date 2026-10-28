@@ -464,6 +464,72 @@ export class AdminApi {
       if (method === 'DELETE' && pathname === '/api/admin/stickers') {
         return { code: 200, body: this.#deleteMedia('stickers', body?.name) };
       }
+      /**
+       * 批量删除：选中哪几张删哪几张。
+       *
+       * 单张删除的接口还在（兼容旧前端），但一张张点太难受了 ——
+       * 试画完一次几十张，得点几十次。
+       */
+      if (method === 'POST' && pathname === '/api/admin/media/delete-batch') {
+        const kind = String(body?.kind || 'generated');
+        const names = Array.isArray(body?.names) ? body.names.map(String) : [];
+        if (!names.length) return { code: 200, body: { ok: false, error: '没有选中任何文件' } };
+        if (names.length > 500) {
+          return { code: 200, body: { ok: false, error: '一次最多删 500 张' } };
+        }
+
+        const deleted = [];
+        const failed = [];
+        for (const n of names) {
+          const r = this.#deleteMedia(kind, n);
+          if (r.ok) deleted.push(n);
+          else failed.push({ name: n, error: r.error });
+        }
+        this.log.info?.(`[admin] 批量删除 ${kind}：成功 ${deleted.length}，失败 ${failed.length}`);
+        return { code: 200, body: { ok: true, deleted: deleted.length, failed } };
+      }
+
+      /**
+       * 按类型清空：试画完想一键清掉自己画的图。
+       */
+      if (method === 'POST' && pathname === '/api/admin/media/delete-all') {
+        const kind = String(body?.kind || 'generated');
+        const only = String(body?.only || 'all');
+
+        const dirs = this.#mediaDirs();
+        const dir = dirs[kind];
+        if (!dir) return { code: 200, body: { ok: false, error: '未知类型' } };
+
+        let files = [];
+        try {
+          files = fs.readdirSync(dir).filter((n) => /^[\w.-]{1,100}$/.test(n));
+        } catch {
+          return { code: 200, body: { ok: false, error: '目录读不到' } };
+        }
+
+        const match = (n) => {
+          if (only === 'all') return true;
+          if (only === 'generated') return n.startsWith('gen_');
+          if (only === 'sticker') return n.startsWith('stk_') || n.startsWith('sticker_');
+          if (only === 'upload') return n.startsWith('img_');
+          return false;
+        };
+
+        const targets = files.filter(match);
+
+        // 先预览：只报数量，前端弹确认后再真删
+        if (body?.dryRun === true) {
+          return { code: 200, body: { ok: true, dryRun: true, count: targets.length, kind, only } };
+        }
+
+        let deleted = 0;
+        for (const n of targets) {
+          if (this.#deleteMedia(kind, n).ok) deleted++;
+        }
+        this.log.info?.(`[admin] 清空 ${kind}（${only}）：删除 ${deleted} 张`);
+        return { code: 200, body: { ok: true, dryRun: false, deleted } };
+      }
+
       // 上传图片
       if (method === 'POST' && pathname === '/api/admin/media/upload') {
         return { code: 200, body: this.#uploadMedia(body) };
