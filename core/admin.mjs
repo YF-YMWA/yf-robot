@@ -3025,6 +3025,8 @@ print('%016x' % bits)
     // 下载
     const downloaded = [];
     const failed = [];
+    /** 下载成功但「不适合当表情包」的，单独记，不算失败 */
+    const skipped = [];
 
     for (const u of urls) {
       if (downloaded.length >= limit) break;
@@ -3047,6 +3049,22 @@ print('%016x' % bits)
         const buf = Buffer.from(await res.arrayBuffer());
         if (buf.length < 1024 || buf.length > 5 * 1024 * 1024) {
           failed.push(`${u.slice(0, 40)} 大小不合适(${buf.length})`);
+          continue;
+        }
+
+        /**
+         * 适不适合当表情包。
+         *
+         * 从网页抠下来的图大半是横幅、文章配图、网站图标 ——
+         * 存进素材库只会让她发出去时很奇怪。
+         * 这里按格式/尺寸/比例挡掉，后面会把跳过原因一起返回，
+         * 让用户知道「不是功能坏了，是这些图确实不像表情」。
+         */
+        const { suitableAsSticker, suitableAsImage } = await import('./media-suit.mjs');
+        const verdict =
+          kind === 'stickers' ? suitableAsSticker(buf) : suitableAsImage(buf);
+        if (!verdict.ok) {
+          skipped.push(`${u.slice(0, 40)} ${verdict.reason}`);
           continue;
         }
 
@@ -3077,13 +3095,21 @@ print('%016x' % bits)
       }
     }
 
+    const usable = downloaded.length;
     return {
-      ok: downloaded.length > 0,
+      ok: usable > 0,
       kind,
       foundUrls: urls.length,
       downloaded,
       failed: failed.slice(0, 5),
-      error: downloaded.length ? undefined : '下载失败，可能站点防盗链',
+      // 下载成功但不像表情包被挡掉的，单独告诉用户，免得以为是功能坏了
+      skipped: skipped.slice(0, 8),
+      skippedCount: skipped.length,
+      error: usable
+        ? undefined
+        : skipped.length
+          ? `抓到 ${urls.length} 张，但都不像表情包（${skipped[0]}）`
+          : '下载失败，可能站点防盗链',
     };
   }
 
