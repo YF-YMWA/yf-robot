@@ -7,7 +7,7 @@
 
 ## wechatauto-replica（不属于本项目）
 
-- **用途**：微信 4.x 客户端自动化（数据库解密读取、UIA 消息发送、媒体下载）
+- **用途**：微信 4.x 客户端自动化
 - **版本**：1.2.7.0
 - **许可证**：Apache License 2.0
 - **源码**：https://github.com/fanyuantaier/wechatauto-replica
