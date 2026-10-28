@@ -42,7 +42,7 @@ import { shapeReply, needsRewrite } from './reply.mjs';
 import { VisionClient, wrapImageMessage } from './vision.mjs';
 import { VoiceClient } from './voice.mjs';
 import { SearchClient, formatSearchResults, needsSearch, checkGrounding } from './search.mjs';
-import { decorateBubbles, detectMood, wantsSticker } from './sticker.mjs';
+import { decorateBubbles, detectMood, wantsSticker, wantsGif } from './sticker.mjs';
 import { ToolKit } from './tools.mjs';
 import { DshClient } from './dsh.mjs';
 import path from 'node:path';
@@ -1137,9 +1137,16 @@ export class ChatEngine {
        * 已经用工具发过图（drawn 非空）就不重复强制，免得刷屏。
        */
       let stickerForced = false;
+      let stickerGif = false;
       try {
         stickerForced = wantsSticker(userText) && (drawn?.length || 0) === 0;
-        if (stickerForced) this.log.info?.('[sticker] 用户明确要图，本轮跳过概率');
+        if (stickerForced) {
+          // 点名要「会动的」→ 只从 GIF 里挑，别给静态图
+          stickerGif = wantsGif(userText);
+          this.log.info?.(
+            '[sticker] 用户明确要图，本轮跳过概率' + (stickerGif ? '（只要动图）' : ''),
+          );
+        }
       } catch {}
 
       {
@@ -1200,6 +1207,8 @@ export class ChatEngine {
         voice,
         // 用户点名要图：适配器看到 true 就不再掷骰子
         stickerForced,
+        // 点名要动图：适配器取图时带 gif=1，只挑 GIF
+        stickerGif,
         mood: { score: moodAfter, label: describeMood(moodAfter).label },
       };
     });

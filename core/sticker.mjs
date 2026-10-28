@@ -148,3 +148,15 @@ export function wantsSticker(text) {
 
   return false;
 }
+
+/**
+ * 用户是不是点名要「会动的」。
+ *
+ * 真实事故：连说三次「发张动图」，她发来的还是那张静态截图，
+ * 用户回「你的窗口不是可以识别会动的图片吗」。
+ * 明确要动图时，挑选必须只在 GIF 里选，不能随机到静态图。
+ */
+export function wantsGif(text) {
+  const t = String(text || '');
+  return /(动图|会动的|动起来|动的|gif)/i.test(t);
+}
