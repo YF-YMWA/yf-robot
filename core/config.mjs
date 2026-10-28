@@ -185,6 +185,10 @@ export const DEFAULTS = {
     maxDelayMs: 6000,
     // 偶尔打错字再改口的概率（0 = 关）
     typoChance: 0.04,
+    // 偶尔只回一句（真人不会每轮都发两三条）
+    terseChance: 0.15,
+    // 短句结尾的句号删掉（微信聊天很少有人打句号）
+    loosePunctuation: 0.75,
     /** 是否移除 Markdown 标记 */
     stripMarkdown: true,
     /** 表情装饰 */

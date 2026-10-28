@@ -121,3 +121,60 @@ export function addTypoSlip(bubbles, cfg = {}) {
   out.splice(pick + 1, 0, fix);
   return out;
 }
+
+/**
+ * 标点自然化：把「太像书面语」的句尾处理掉。
+ *
+ * 实测她 77% 的气泡以句号结尾 —— 这是最像机器的地方。
+ * 中文微信聊天里，句号通常只在强调、生气或者长句里出现，
+ * 平常一句话说完就直接发，什么都不加。
+ *
+ * 规则（都带概率，不然又会变成另一种规律）：
+ *   · 短句（<18 字）结尾的「。」→ 删掉
+ *   · 长句结尾的「。」→ 一半概率保留（书面感），一半删
+ *   · 问号、感叹号、省略号不动（这些是情绪，人也会用）
+ *   · 不止一句的不动（句号在句中是有意义的）
+ *
+ * @param {string[]} bubbles
+ * @param {object} [cfg] { chance }
+ * @returns {string[]}
+ */
+export function naturalizePunctuation(bubbles, cfg = {}) {
+  const chance = Number.isFinite(cfg.chance) ? cfg.chance : 0.75;
+  if (!Array.isArray(bubbles) || !bubbles.length) return bubbles;
+
+  return bubbles.map((raw) => {
+    const text = String(raw || '');
+    if (!text.endsWith('。')) return text;
+
+    // 只处理「最后一句就是结尾」的情况：句中还有句号说明是长段落，保留
+    const inner = text.slice(0, -1);
+    if (inner.includes('。')) return text;
+
+    // 太长的不动（长段落带句号反而正常）
+    if (text.length > 40) return text;
+
+    if (Math.random() >= chance) return text;
+    return inner;
+  });
+}
+
+/**
+ * 偶尔只回一小段。
+ *
+ * 真人有时候就回一句，不会每轮都发两三条。
+ * 概率触发时只保留第一条（前提是第一条本身够完整）。
+ *
+ * @param {string[]} bubbles
+ * @param {object} [cfg] { chance }
+ */
+export function sometimesTerse(bubbles, cfg = {}) {
+  const chance = Number.isFinite(cfg.chance) ? cfg.chance : 0.15;
+  if (!Array.isArray(bubbles) || bubbles.length <= 1) return bubbles;
+  if (Math.random() >= chance) return bubbles;
+
+  const first = String(bubbles[0] || '');
+  // 第一条太短（一两个字）就再带上第二条，否则只发这一条太空
+  if (first.replace(/[^\u4e00-\u9fff]/g, '').length < 4) return bubbles.slice(0, 2);
+  return [bubbles[0]];
+}

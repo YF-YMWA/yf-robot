@@ -29,7 +29,7 @@ import {
   scopeDir,
   generatedDir,
 } from './scoped-paths.mjs';
-import { addTypoSlip } from './humanize.mjs';
+import { addTypoSlip, naturalizePunctuation, sometimesTerse } from './humanize.mjs';
 import { decideVoiceReply } from './voice-reply.mjs';
 import { MoodStore, moodDelta, describeMood } from './mood.mjs';
 import { renderSystemPrompt } from './persona.mjs';
@@ -915,10 +915,23 @@ export class ChatEngine {
       // 用户没情绪时再看回复本身的语气。
       const emojiCfg = this.config.reply.emoji || {};
       const userMood = detectMood(userText);
+      /**
+       * 先做「人味」处理，再加表情。
+       *
+       * 顺序很重要：先删句号（短句），再加 emoji ——
+       * 反过来的话，「今天好累啊😮‍💨。」这种句号在 emoji 后面就很怪。
+       */
+      let shaped = sometimesTerse(bubbles, {
+        chance: this.config.reply?.terseChance ?? 0.15,
+      });
+      shaped = naturalizePunctuation(shaped, {
+        chance: this.config.reply?.loosePunctuation ?? 0.75,
+      });
+
       let finalBubbles =
         emojiCfg.enabled === false
-          ? bubbles
-          : decorateBubbles(bubbles, {
+          ? shaped
+          : decorateBubbles(shaped, {
               chance: emojiCfg.chance ?? 0.35,
               useKaomoji: emojiCfg.kaomoji !== false,
               mood: userMood || undefined,
