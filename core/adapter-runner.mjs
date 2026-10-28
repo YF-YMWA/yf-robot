@@ -330,9 +330,22 @@ export function buildStartCommand(root, id) {
   const entry = a.entry || ENTRY;
   const title = (a.name || '适配器') + '（YF-Robot）— 关掉窗口即停止';
 
+  /**
+   * 启动脚本，带守护循环。
+   *
+   * 参考 whale_gril 的 bridge_loop.bat：适配器崩了或被看门狗杀掉之后，
+   * 得有人把它拉起来，否则「看门狗自愈」就变成「永远不工作」。
+   * 之前这份脚本只跑一次，退出就停在 pause，必须人工重启。
+   *
+   * 退出码约定（和适配器里的看门狗对应）：
+   *   0    正常退出（关窗口 / Ctrl+C）→ 不重启
+   *   7    看门狗自愈（发送卡住超 40 秒）→ 立刻重启
+   *   其它 崩溃 → 等 5 秒重启，最多 6 次，之后停下并提示看崩溃日志
+   */
   const bat = [
     '@echo off',
     'chcp 65001 >nul',
+    'setlocal enabledelayedexpansion',
     // Python 默认按系统编码输出，中文会乱码；强制 UTF-8
     'set PYTHONIOENCODING=utf-8',
     'set PYTHONUTF8=1',
@@ -340,7 +353,44 @@ export function buildStartCommand(root, id) {
     'set YF_NO_SIGINT=1',
     `title ${title}`,
     `cd /d "${a.dir}"`,
+    'set TRIES=0',
+    ':restart',
     `"${py}" ${entry}`,
+    'set RC=%errorlevel%',
+    'if "%RC%"=="0" goto done',
+    'if "%RC%"=="9009" goto noexe',
+    'if "%RC%"=="7" goto selfheal',
+    'echo.',
+    'echo ============================================',
+    'echo   适配器异常退出（代码 %RC%）',
+    'echo   5 秒后自动重启（第 %TRIES%/6 次）',
+    'echo   崩溃现场：data\\bridge-crash.log',
+    'echo ============================================',
+    'echo.',
+    'set /a TRIES+=1',
+    'if %TRIES% GEQ 6 goto gaveup',
+    'timeout /t 5 /nobreak >nul',
+    'goto restart',
+    ':selfheal',
+    'echo.',
+    'echo [守护] 检测到卡死自愈，立刻重启适配器…',
+    'set /a TRIES+=1',
+    'if !TRIES! GEQ 6 goto gaveup',
+    'timeout /t 1 /nobreak >nul',
+    'goto restart',
+    ':gaveup',
+    'echo.',
+    'echo [守护] 连续异常退出 6 次，停止自动重启。',
+    'echo         请把 data\\bridge-crash.log 最后一段发出来。',
+    'pause >nul',
+    'goto done',
+    ':noexe',
+    'echo.',
+    'echo [错误] 找不到 Python（退出码 9009）。',
+    'echo        请改用「启动桥接.bat」，它会自动找可用的 Python。',
+    'pause >nul',
+    'goto done',
+    ':done',
     'echo.',
     'echo [适配器已退出] 按任意键关闭窗口',
     'pause >nul',

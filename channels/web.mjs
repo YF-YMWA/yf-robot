@@ -238,7 +238,27 @@ export class WebChannel {
   }
 
   async start() {
-    const { host, port } = this.config.server;
+    const { port } = this.config.server;
+    let host = this.config.server.host;
+
+    /**
+     * 非回环地址 = 局域网/公网也能访问。
+     *
+     * 这不是不能用，但必须知道风险：控制台会把本地令牌注入页面。
+     * 所以这里把令牌只发给本机（见 #isLoopbackRequest），并且要求
+     * server.allowRemote=true 才允许对外开放 —— 避免「顺手改成 0.0.0.0」
+     * 就把管理接口暴露给同网段的人。
+     */
+    const loopback = !host || host === '127.0.0.1' || host === 'localhost' || host === '::1';
+    if (!loopback && this.config.server.allowRemote !== true) {
+      this.log.warn?.(
+        '[web] server.host=' + host + ' 会对外开放，但没设 server.allowRemote=true —— 已回退到 127.0.0.1',
+      );
+      host = '127.0.0.1';
+    } else if (!loopback) {
+      this.log.warn?.('[web] 正在对外开放（' + host + '）：远程访问需要手动填 token，管理接口会拒绝无 token 的写操作');
+    }
+
     const autoPort = this.config.server.autoPort !== false;
 
     // 依次尝试端口，占用则往后找
@@ -342,10 +362,10 @@ export class WebChannel {
        *   · 控制台那个：调试用，只发文字
        */
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-        return this.#serveWithToken(res, 'index.html', 200);
+        return this.#serveWithToken(res, req, 'index.html', 200);
       }
       if (req.method === 'GET' && url.pathname === '/console') {
-        return this.#serveWithToken(res, 'console.html', 200);
+        return this.#serveWithToken(res, req, 'console.html', 200);
       }
 
       // 给前端取 token 的接口（同源才能读，跨域被浏览器拦）
@@ -1248,18 +1268,25 @@ export class WebChannel {
    *
    * 前端从 window.__TOKEN__ 读取，之后每次管理接口调用都带上。
    * 这样恶意网页即使伪造请求，也拿不到 token。
+   *
+   * 只给**本机**请求注入 token：
+   *   如果 server.host 被设成 0.0.0.0（或对着局域网开放），
+   *   任何同网段的人打开控制台就能从源码里读到 token，
+   *   等于管理接口对他全开（能改 Key、改人设、清素材）。
+   *   远程来源只给页面、不给 token，要用得自己知道 token 再填。
    */
-  #serveWithToken(res, fileName, code = 200) {
+  #serveWithToken(res, request, fileName, code = 200) {
     const file = path.join(__dirname, '..', 'web', fileName);
     try {
       let html = readFileSync(file, 'utf8');
 
-      // 注入 token（放在 head 最前面，确保脚本能用）
-      // 注入 token，外加页面自身的构建时间 —— 用户能一眼看出是不是旧缓存
+      const isLocal = this.#isLoopbackRequest(request);
       const builtAt = new Date().toLocaleString('zh-CN');
+      const tokenToInject = isLocal ? this.token : '';
       const inject =
-        `<script>window.__TOKEN__=${JSON.stringify(this.token)};` +
-        `window.__PAGE_BUILT__=${JSON.stringify(builtAt)};</script>`;
+        `<script>window.__TOKEN__=${JSON.stringify(tokenToInject)};` +
+        `window.__PAGE_BUILT__=${JSON.stringify(builtAt)};` +
+        `window.__REMOTE__=${String(!isLocal)};</script>`;
       if (html.includes('<head>')) {
         html = html.replace('<head>', '<head>\n' + inject);
       } else {
@@ -1284,12 +1311,29 @@ export class WebChannel {
     }
   }
 
-  #servePage(res) {
-    return this.#serveWithToken(res, 'index.html');
+  /**
+   * 这个请求是不是来自本机。
+   *
+   * 为什么要判：控制台页面会把本地令牌写进 HTML。
+   * 一旦 server.host 设成 0.0.0.0，同网段任何人打开页面就能读到令牌，
+   * 等于管理接口对他全开（改 Key、改人设、清素材）。
+   * 所以远程来源只给页面、不给令牌。
+   */
+  #isLoopbackRequest(req) {
+    try {
+      const a = String(req?.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+      return a === '127.0.0.1' || a === '::1' || a === 'localhost' || a === '';
+    } catch {
+      return false;
+    }
   }
 
-  #serveConsole(res) {
-    return this.#serveWithToken(res, 'console.html');
+  #servePage(res, req) {
+    return this.#serveWithToken(res, req, 'index.html');
+  }
+
+  #serveConsole(res, req) {
+    return this.#serveWithToken(res, req, 'console.html');
   }
 
   async stop() {
