@@ -42,7 +42,7 @@ import { shapeReply, needsRewrite } from './reply.mjs';
 import { VisionClient, wrapImageMessage } from './vision.mjs';
 import { VoiceClient } from './voice.mjs';
 import { SearchClient, formatSearchResults, needsSearch, checkGrounding } from './search.mjs';
-import { decorateBubbles, detectMood } from './sticker.mjs';
+import { decorateBubbles, detectMood, wantsSticker } from './sticker.mjs';
 import { ToolKit } from './tools.mjs';
 import { DshClient } from './dsh.mjs';
 import path from 'node:path';
@@ -1130,6 +1130,18 @@ export class ChatEngine {
        * 提示词里已经写了「没做就别说」，但那靠模型自觉；这里做确定性兜底，
        * 反正改一个词比让人白等强。
        */
+      /**
+       * 用户明确要表情包 → 让适配器跳过概率。
+       *
+       * 随机补图是锦上添花；用户点名要的时候再掷骰子，看起来就是「不理人」。
+       * 已经用工具发过图（drawn 非空）就不重复强制，免得刷屏。
+       */
+      let stickerForced = false;
+      try {
+        stickerForced = wantsSticker(userText) && (drawn?.length || 0) === 0;
+        if (stickerForced) this.log.info?.('[sticker] 用户明确要图，本轮跳过概率');
+      } catch {}
+
       {
         const sentSomething = (drawn?.length || 0) > 0 || Boolean(voice);
         const text = finalBubbles.join(' ');
@@ -1186,6 +1198,8 @@ export class ChatEngine {
         images: drawn,
         proactiveDraw: proactiveDraw && drawn.length > 0,
         voice,
+        // 用户点名要图：适配器看到 true 就不再掷骰子
+        stickerForced,
         mood: { score: moodAfter, label: describeMood(moodAfter).label },
       };
     });

@@ -965,6 +965,8 @@ export class WebChannel {
           voice: result.voice || null,
           // 当前情绪（调试用，也方便看看她情绪变化）
           mood: result.mood || null,
+          // 用户明确要表情包：适配器看到 true 就不掷骰子，直接发
+          sticker: Boolean(result.stickerForced),
           // 气泡之间的打字节奏（适配器照这个停顿，不然几条消息会同时到）
           pace: this.#pace(),
         });
@@ -1000,6 +1002,8 @@ export class WebChannel {
         voice: result.voice || null,
         // 当前情绪
         mood: result.mood || null,
+        // 用户明确要图：跳过适配器那边的概率
+        sticker: Boolean(result.stickerForced),
         // 气泡节奏（/api/wechat 这个老入口也带上，保持一致）
         pace: this.#pace(),
       });

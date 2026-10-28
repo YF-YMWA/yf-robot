@@ -127,3 +127,24 @@ export function emojiStats() {
     kaomoji: KAOMOJI.length,
   };
 }
+
+/**
+ * 用户是不是「明确要一张表情包/图」。
+ *
+ * 用来绕过随机概率：点名要的东西不能靠掷骰子。
+ * 只认比较明确的说法，避免「他的表情很奇怪」这种误判。
+ */
+export function wantsSticker(text) {
+  const t = String(text || '').trim();
+  if (!t || t.length > 60) return false;
+
+  // 「表情包 / 动图 / 梗图 / 表情」+ 一个索取动词
+  if (/(表情包|动图|梗图|表情)/.test(t) && /(发|来|给|整|看|收)/.test(t)) return true;
+
+  // 「再发一次」「发回来」「来一张」
+  if (/(再发|发回|来一张|来张|发张)/.test(t)) return true;
+
+  if (/\b(sticker|gif|meme)\b/i.test(t)) return true;
+
+  return false;
+}
