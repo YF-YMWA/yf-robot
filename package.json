@@ -1,6 +1,6 @@
 {
   "name": "yf-robot",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "private": false,
   "type": "module",
   "description": "YF-Robot —— 人设化 AI 助手，支持微信接入、角色卡、长期记忆、看图/画图/语音/联网学习",

@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YF-Robot · 聊天</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #171d26;
+    --text: #e6edf3;
+    --dim: #8b949e;
+    --accent: #3b82f6;
+    --user: #1f6feb;
+    --bot: #21262d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 15px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 12px 18px;
+    border-bottom: 1px solid #21262d;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--panel);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .status { margin-left: auto; font-size: 12px; color: var(--dim); }
+  header button {
+    background: transparent;
+    border: 1px solid #30363d;
+    color: var(--dim);
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  header button:hover { color: var(--text); border-color: #8b949e; }
+
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .row { display: flex; }
+  .row.user { justify-content: flex-end; }
+  .bubble {
+    max-width: 72%;
+    padding: 9px 14px;
+    border-radius: 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .user .bubble { background: var(--user); border-bottom-right-radius: 4px; }
+  .bot .bubble { background: var(--bot); border-bottom-left-radius: 4px; }
+  .bot .bubble.typing::after {
+    content: "▊";
+    animation: blink 1s steps(2) infinite;
+    color: var(--dim);
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .err { color: #f85149; font-size: 13px; padding: 4px 8px; }
+
+  form {
+    display: flex;
+    gap: 8px;
+    padding: 12px 18px;
+    border-top: 1px solid #21262d;
+    background: var(--panel);
+  }
+  textarea {
+    flex: 1;
+    resize: none;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    color: var(--text);
+    padding: 10px 12px;
+    font: inherit;
+    max-height: 120px;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  form button {
+    background: var(--accent);
+    border: none;
+    color: #fff;
+    padding: 0 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 500;
+  }
+  form button:disabled { opacity: .5; cursor: default; }
+
+  .attach {
+    background: transparent;
+    border: 1px solid #30363d;
+    color: var(--dim);
+    border-radius: 10px;
+    padding: 0 14px;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .attach:hover { color: var(--text); border-color: #8b949e; }
+  #preview {
+    display: none;
+    gap: 8px;
+    padding: 8px 18px 0;
+    flex-wrap: wrap;
+  }
+  #preview.on { display: flex; }
+  #preview .thumb {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #30363d;
+  }
+  #preview .thumb img { width: 100%; height: 100%; object-fit: cover; }
+  #preview .thumb button {
+    position: absolute;
+    top: 0; right: 0;
+    background: rgba(0,0,0,.7);
+    border: none;
+    color: #fff;
+    width: 18px; height: 18px;
+    font-size: 12px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .bubble img.msgimg {
+    max-width: 200px;
+    border-radius: 8px;
+    display: block;
+    margin-bottom: 4px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">鲸鲸</h1>
+  <button id="reset">清空对话</button>
+  <span class="status" id="status">就绪</span>
+</header>
+
+<div id="log"></div>
+<div id="preview"></div>
+
+<form id="form">
+  <input type="file" id="file" accept="image/*" multiple hidden>
+  <button class="attach" id="attach" type="button" title="发送图片">📎</button>
+  <textarea id="input" rows="1" placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+  <button id="send" type="submit">发送</button>
+</form>
+
+<script>
+const log = document.getElementById('log');
+const form = document.getElementById('form');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const statusEl = document.getElementById('status');
+const fileEl = document.getElementById('file');
+const attachBtn = document.getElementById('attach');
+const previewEl = document.getElementById('preview');
+
+const sessionId = localStorage.getItem('jj_session') || ('web-' + Math.random().toString(36).slice(2, 10));
+localStorage.setItem('jj_session', sessionId);
+
+/** 待发送的图片：{ dataUrl, name } */
+let pendingImages = [];
+
+function renderPreview() {
+  previewEl.innerHTML = '';
+  if (pendingImages.length === 0) {
+    previewEl.classList.remove('on');
+    return;
+  }
+  previewEl.classList.add('on');
+  pendingImages.forEach((img, i) => {
+    const d = document.createElement('div');
+    d.className = 'thumb';
+    const el = document.createElement('img');
+    el.src = img.dataUrl;
+    const btn = document.createElement('button');
+    btn.textContent = '×';
+    btn.onclick = () => {
+      pendingImages.splice(i, 1);
+      renderPreview();
+    };
+    d.appendChild(el);
+    d.appendChild(btn);
+    previewEl.appendChild(d);
+  });
+}
+
+attachBtn.addEventListener('click', () => fileEl.click());
+
+fileEl.addEventListener('change', async () => {
+  const files = [...fileEl.files].slice(0, 3);
+  for (const f of files) {
+    if (!f.type.startsWith('image/')) continue;
+    // 前端先压缩，避免超大图占用带宽
+    const dataUrl = await shrinkImage(f, 1568);
+    pendingImages.push({ dataUrl, name: f.name });
+  }
+  fileEl.value = '';
+  renderPreview();
+});
+
+/** 用 canvas 压缩到长边 maxEdge，输出 JPEG。 */
+function shrinkImage(file, maxEdge) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      let { width, height } = img;
+      const scale = Math.min(1, maxEdge / Math.max(width, height));
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      // 解码失败就原样传（可能是特殊格式，交给后端 ffmpeg 处理）
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.readAsDataURL(file);
+    };
+    img.src = url;
+  });
+}
+
+function addRow(who, text, cls) {
+  const row = document.createElement('div');
+  row.className = 'row ' + who;
+  const b = document.createElement('div');
+  b.className = 'bubble' + (cls ? ' ' + cls : '');
+  b.textContent = text;
+  row.appendChild(b);
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+  return b;
+}
+
+function addError(msg) {
+  const d = document.createElement('div');
+  d.className = 'err';
+  d.textContent = '⚠ ' + msg;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+
+input.addEventListener('input', () => {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+});
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    form.requestSubmit();
+  }
+});
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  const imgs = pendingImages.slice();
+  if (!text && imgs.length === 0) return;
+
+  // 用户侧展示
+  const row = document.createElement('div');
+  row.className = 'row user';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  for (const img of imgs) {
+    const el = document.createElement('img');
+    el.className = 'msgimg';
+    el.src = img.dataUrl;
+    bubble.appendChild(el);
+  }
+  if (text) {
+    const span = document.createElement('span');
+    span.textContent = text;
+    bubble.appendChild(span);
+  }
+  row.appendChild(bubble);
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+
+  input.value = '';
+  input.style.height = 'auto';
+  pendingImages = [];
+  renderPreview();
+  sendBtn.disabled = true;
+  statusEl.textContent = imgs.length ? '看图中…' : '思考中…';
+
+  // 占位气泡，接收流式文本
+  const botBubble = addRow('bot', '', 'typing');
+  let full = '';
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId,
+        text,
+        images: imgs.map((i) => i.dataUrl),
+      }),
+    });
+
+    if (!res.ok || !res.body) throw new Error('服务返回 ' + res.status);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let bubbles = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      const events = buf.split('\n\n');
+      buf = events.pop() || '';
+
+      for (const evt of events) {
+        const lines = evt.split('\n');
+        let name = 'message', data = '';
+        for (const l of lines) {
+          if (l.startsWith('event:')) name = l.slice(6).trim();
+          else if (l.startsWith('data:')) data += l.slice(5).trim();
+        }
+        if (!data) continue;
+        let obj;
+        try { obj = JSON.parse(data); } catch { continue; }
+
+        if (name === 'delta') {
+          full += obj.text;
+          botBubble.textContent = full;
+          log.scrollTop = log.scrollHeight;
+        } else if (name === 'done') {
+          bubbles = obj.bubbles;
+        } else if (name === 'error') {
+          addError(obj.message);
+        }
+      }
+    }
+
+    botBubble.classList.remove('typing');
+    if (bubbles && bubbles.length) {
+      botBubble.textContent = bubbles[0];
+      for (let i = 1; i < bubbles.length; i++) {
+        addRow('bot', bubbles[i]);
+        await new Promise((r) => setTimeout(r, 260));
+      }
+    } else if (!full) {
+      botBubble.remove();
+    }
+  } catch (err) {
+    botBubble.classList.remove('typing');
+    if (!full) botBubble.remove();
+    addError(err.message);
+  } finally {
+    sendBtn.disabled = false;
+    statusEl.textContent = '就绪';
+    input.focus();
+  }
+});
+
+document.getElementById('reset').addEventListener('click', async () => {
+  await fetch('/api/reset', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  });
+  log.innerHTML = '';
+  statusEl.textContent = '已清空';
+  setTimeout(() => (statusEl.textContent = '就绪'), 1500);
+});
+
+fetch('/api/status').then(r => r.json()).then(s => {
+  document.getElementById('title').textContent = '鲸鲸 · ' + s.model;
+}).catch(() => {});
+
+input.focus();
+</script>
+</body>
+</html>

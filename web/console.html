@@ -335,6 +335,12 @@
       <div class="grid" id="statusGrid"><div class="stat"><div class="k">加载中</div><div class="v">—</div></div></div>
     </div>
     <div class="card">
+      <h2>后台功能<span class="sp"></span><button class="ghost sm" onclick="loadBackend()">刷新</button></h2>
+      <div class="grid" id="backendGrid"><div class="stat"><div class="k">加载中</div><div class="v">—</div></div></div>
+      <div class="hint" style="margin-top:10px">点任意一项跳到对应页面。灰色表示没开启或没接入。</div>
+    </div>
+
+    <div class="card">
       <h2>今日用量<span class="sp"></span><button class="ghost sm" onclick="loadUsage()">刷新</button></h2>
       <div class="grid" id="usageGrid">
         <div class="stat"><div class="k">加载中</div><div class="v">—</div></div>
@@ -345,7 +351,8 @@
     <div class="card">
       <h2>快捷操作</h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button onclick="showPage('chat')">对话调试</button>
+        <button onclick="window.open('/','_blank')">网页聊天</button>
+        <button class="ghost" onclick="showPage('chat')">对话调试</button>
         <button class="ghost" onclick="testModel()">测试模型</button>
         <button class="ghost" onclick="loadAll()">刷新状态</button>
         <button class="ghost" onclick="restartService()">重启服务</button>
@@ -3211,6 +3218,92 @@ async function loadTtsSettings() {
 }
 
 
+// ===== 总览：后台功能面板 =====
+
+/**
+ * 一眼看全「后台在跑什么」。
+ *
+ * 原来总览只有运行状态和服务启停，想知道知识库几篇、逻辑库几条、
+ * 插件开没开、适配器连没连，得挨个页面翻。
+ * 这里把各功能的「有没有开 + 有多少」汇总成一张表，点一下就能跳过去。
+ */
+async function loadBackend() {
+  const el = $('backendGrid');
+  if (!el) return;
+
+  const safe = async (p) => {
+    try {
+      return await api(p);
+    } catch {
+      return null;
+    }
+  };
+
+  const [cfg, words, bridge, stickers, plugins, kb, logic] = await Promise.all([
+    safe('config'),
+    safe('words'),
+    safe('bridge'),
+    safe('sticker-index'),
+    safe('plugins'),
+    safe('kb'),
+    safe('logic'),
+  ]);
+
+  const item = (label, value, ok, page) => ({
+    label,
+    value,
+    ok,
+    page,
+  });
+
+  const banks = words?.banks || [];
+  const wordTotal = banks.reduce((s, b) => s + (b.entries || 0), 0);
+  const logicStats = logic?.stats || {};
+  const pending = logicStats.byStatus?.pending || 0;
+  const loadedPlugins = (plugins?.plugins || []).filter((p) => p.state === 'loaded').length;
+
+  const rows = [
+    item(
+      '微信适配器',
+      bridge?.online ? `在线${bridge.account ? '（' + bridge.account + '）' : ''}` : '未接入',
+      Boolean(bridge?.online),
+      'bridge',
+    ),
+    item('知识库', `${(kb?.docs || []).length} 份文档`, true, 'kb'),
+    item(
+      '逻辑库',
+      `${logicStats.total || 0} 条${pending ? `（${pending} 待审）` : ''}`,
+      Boolean(logic?.enabled !== false),
+      'logic',
+    ),
+    item('词库', `${wordTotal} 条`, true, 'words'),
+    item('素材库', `${stickers?.total || 0} 张`, true, 'stickers'),
+    item('插件', `${loadedPlugins} 个已加载`, loadedPlugins > 0, 'plugins'),
+    item(
+      '联网学习',
+      cfg?.learning?.enabled ? '开着' : '关着',
+      Boolean(cfg?.learning?.enabled),
+      'learn',
+    ),
+    item(
+      '逻辑联网学习',
+      logic?.autoLearn?.enabled ? `开着（每天 ${logic.autoLearn.maxPerDay} 条）` : '关着',
+      Boolean(logic?.autoLearn?.enabled),
+      'logic',
+    ),
+  ];
+
+  el.innerHTML = rows
+    .map(
+      (r) => `
+    <div class="stat" style="cursor:pointer" onclick="showPage('${r.page}')" title="点一下跳过去">
+      <div class="k">${escapeHtml(r.label)}</div>
+      <div class="v" style="font-size:15px;${r.ok ? '' : 'opacity:.55'}">${escapeHtml(r.value)}</div>
+    </div>`,
+    )
+    .join('');
+}
+
 // ===== 今日用量 =====
 
 /**
@@ -5938,6 +6031,7 @@ async function loadAll() {
     loadBridge(),
     loadServerMode(),
     loadUsage(),
+    loadBackend(),
     loadLogic(),
   ]);
 }

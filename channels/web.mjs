@@ -316,15 +316,14 @@ export class WebChannel {
       }
 
       /**
-       * 根路径直接跳到控制台。
+       * 网页聊天页（带传图和流式）。
        *
-       * 以前这里是一个独立的网页聊天页（web/index.html，11KB），
-       * 但控制台里的「对话调试」本来就有输入框和发送按钮，
-       * 两边功能重复。合并成一个入口，少维护一份界面。
+       * 和控制台里的「对话调试」是两种用途：
+       *   · 这个：完整的聊天界面，能传图、能看流式输出，适合当个轻量客户端
+       *   · 控制台那个：调试用，只发文字
        */
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-        res.writeHead(302, { location: '/console' });
-        return res.end();
+        return this.#serveWithToken(res, 'index.html', 200);
       }
       if (req.method === 'GET' && url.pathname === '/console') {
         return this.#serveWithToken(res, 'console.html', 200);
