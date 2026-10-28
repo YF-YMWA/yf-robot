@@ -2449,6 +2449,17 @@ async function loadModel() {
     $('replyMaxChars').value = c.reply.maxChars;
     $('replyBubbles').value = c.reply.maxBubbles;
     $('replyDelay').value = c.reply.bubbleDelayMs;
+
+    /**
+     * 语音合成那块也在这张页面上，必须一起加载。
+     *
+     * 之前只有素材库页的 loadStickerChance() 会调 loadTtsSettings()，
+     * 所以在「模型与功能」页看语音合成，Key 状态、音色下拉、发语音概率全是空的 ——
+     * 但其实配置好好的，她照常发语音。
+     */
+    const vc = c.wechat?.voiceChance ?? 0;
+    if ($('voiceChance')) $('voiceChance').value = Math.round(vc * 100);
+    loadTtsSettings();
   } catch (e) { toast('配置加载失败: ' + e.message, 'err'); }
 }
 
