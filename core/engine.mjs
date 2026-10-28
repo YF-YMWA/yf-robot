@@ -757,7 +757,8 @@ export class ChatEngine {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const res = await this.llm.streamWithTools(msgs, this.tools.definitions());
       // 每轮都记一次：工具循环往往要调好几轮，最费 token 的就是这里
-      this.recordUsage(res.usage, round === 0 ? 'tool-chat' : 'tool-round');
+      // 第 0 轮算普通对话（只是带了工具定义），之后才是真正的工具追问
+      this.recordUsage(res.usage, round === 0 ? 'chat' : 'tool-round');
 
       // 没有工具调用 → 最终回复，模拟流式回调让前端有感知
       if (!res.toolCalls || res.toolCalls.length === 0) {

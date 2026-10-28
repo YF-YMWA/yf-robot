@@ -317,6 +317,14 @@
       <div class="grid" id="statusGrid"><div class="stat"><div class="k">加载中</div><div class="v">—</div></div></div>
     </div>
     <div class="card">
+      <h2>今日用量<span class="sp"></span><button class="ghost sm" onclick="loadUsage()">刷新</button></h2>
+      <div class="grid" id="usageGrid">
+        <div class="stat"><div class="k">加载中</div><div class="v">—</div></div>
+      </div>
+      <div class="hint" style="margin-top:10px;line-height:1.8" id="usageHint"></div>
+    </div>
+
+    <div class="card">
       <h2>快捷操作</h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button onclick="window.open('/','_blank')">打开聊天页</button>
@@ -3041,6 +3049,91 @@ async function loadTtsSettings() {
   } catch {}
 }
 
+
+// ===== 今日用量 =====
+
+/**
+ * 单价（美元 / 百万 token），官方 deepseek-flash。
+ * 峰时：UTC 01-04、06-10 的工作日；其余时段五折。
+ * 价格会变，觉得对不上就改这里。
+ */
+const PRICE = {
+  inPeak: 0.3,
+  outPeak: 1.2,
+  cacheHit: 0.006,
+  cny: 7.1,
+};
+
+/** 现在是不是峰时（北京时间换算成 UTC 判断） */
+function isPeakNow() {
+  const u = new Date();
+  const day = u.getUTCDay(); // 0=周日
+  if (day === 0 || day === 6) return false; // 周末全谷时
+  const h = u.getUTCHours();
+  return (h >= 1 && h < 4) || (h >= 6 && h < 10);
+}
+
+function fmtNum(n) {
+  return Number(n || 0).toLocaleString('en-US');
+}
+
+async function loadUsage() {
+  const grid = $('usageGrid');
+  const hint = $('usageHint');
+  if (!grid) return;
+
+  try {
+    const u = await api('usage');
+    const calls = u.calls || 0;
+    const input = u.input || 0;
+    const output = u.output || 0;
+
+    // 成本：输入里有一部分是稳定前缀（工具+人设），按缓存价算更准
+    // 缓存那部分按约 1,200 token/次 估
+    const cachedPart = Math.min(input, calls * 1200);
+    const missPart = Math.max(0, input - cachedPart);
+    const peak = isPeakNow();
+    const inPrice = peak ? PRICE.inPeak : PRICE.inPeak / 2;
+    const outPrice = peak ? PRICE.outPeak : PRICE.outPeak / 2;
+    const cachePrice = peak ? PRICE.cacheHit : PRICE.cacheHit / 2;
+
+    const costUsd =
+      (missPart / 1e6) * inPrice +
+      (cachedPart / 1e6) * cachePrice +
+      (output / 1e6) * outPrice;
+    const costCny = costUsd * PRICE.cny;
+
+    const tok = (n) => (n >= 10000 ? (n / 1000).toFixed(1) + 'k' : fmtNum(n));
+
+    grid.innerHTML = `
+      <div class="stat"><div class="k">对话次数</div><div class="v">${fmtNum(calls)}</div></div>
+      <div class="stat"><div class="k">输入 token</div><div class="v">${tok(input)}</div></div>
+      <div class="stat"><div class="k">输出 token</div><div class="v">${tok(output)}</div></div>
+      <div class="stat"><div class="k">今日花费</div><div class="v">¥${costCny < 0.01 ? costCny.toFixed(4) : costCny.toFixed(2)}</div></div>
+    `;
+
+    // 按用途拆分
+    const kindName = {
+      chat: '普通对话',
+      'tool-round': '工具追问',
+      summary: '记忆压缩',
+    };
+    const kinds = Object.entries(u.byKind || {})
+      .map(([k, v]) => `${kindName[k] || k} ${fmtNum(v.calls)} 次（${tok(v.input + v.output)}）`)
+      .join(' · ');
+
+    hint.innerHTML =
+      (u.day ? `统计日期 ${u.day}　` : '') +
+      (calls ? `平均每次 ${tok(Math.round(input / calls))} token　` : '') +
+      `当前${peak ? '<b>峰时</b>（单价 ×2）' : '谷时（单价五折）'}` +
+      (kinds ? `<br>${kinds}` : '') +
+      `<br><span style="opacity:.7">单价按官方 deepseek-flash 估算；缓存部分按 ${PRICE.cacheHit} 美元/M 算</span>`;
+  } catch (e) {
+    grid.innerHTML = `<div class="stat"><div class="k">读取失败</div><div class="v">—</div></div>`;
+    hint.textContent = e.message;
+  }
+}
+
 // ===== 插件 =====
 
 async function loadPlugins() {
@@ -5453,6 +5546,7 @@ async function loadAll() {
     loadImagegen(),
     loadBridge(),
     loadServerMode(),
+    loadUsage(),
   ]);
 }
 
