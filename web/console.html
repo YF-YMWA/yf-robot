@@ -1036,6 +1036,7 @@
 
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
         <button class="ghost sm" onclick="toggleSel('media-pick')">全选 / 取消</button>
+        <button class="ghost sm" onclick="cleanMedia()" title="把太小/比例离谱/网页抓来的挪到回收目录">清理不合格</button>
         <button class="ghost sm" onclick="batchDeleteSelected('media-pick','auto')" style="color:var(--err)">删除选中</button>
         <span class="hint" id="mediaSelHint">未选中</span>
       </div>
@@ -3970,6 +3971,25 @@ async function showAdapterLog() {
     }
   } catch (e) {
     pre.textContent = '读取失败：' + e.message;
+  }
+}
+
+
+/** 清理不合格素材：先预览，确认后挪到回收目录 */
+async function cleanMedia() {
+  try {
+    const pre = await api('media/clean', { method: 'POST', body: { kind: 'stickers', dryRun: true } });
+    if (!pre.ok) throw new Error(pre.error || '查询失败');
+    if (!pre.count) return toast('没有不合格的素材');
+
+    const lines = (pre.items || []).slice(0, 6).map((x) => x.name + '：' + x.reason).join(String.fromCharCode(10));
+    if (!confirm('会清理 ' + pre.count + ' 张：' + String.fromCharCode(10, 10) + lines + String.fromCharCode(10, 10) + '不删除，只是挪到 data/stickers-trash/。继续？')) return;
+
+    const r = await api('media/clean', { method: 'POST', body: { kind: 'stickers' } });
+    toast('清理了 ' + (r.moved || 0) + ' 张');
+    loadMediaAll();
+  } catch (e) {
+    toast('清理失败：' + e.message, 'err');
   }
 }
 
