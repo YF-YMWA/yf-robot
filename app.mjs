@@ -462,6 +462,15 @@ async function main() {
     .map(([k]) => k);
   const admin = new AdminApi({ engine, config, channels: enabledChannelNames });
 
+  /**
+   * 把管理能力接到工具层。
+   *
+   * 这样她在对话里就能改设置、清素材库（仅主人），
+   * 不用像以前那样靠 run_command 里跑 python 去调接口。
+   */
+  engine.saveConfigHook = (patch) => admin.saveConfigFromTool(patch);
+  engine.cleanMediaHook = (opts) => admin.cleanMediaFromTool(opts);
+
   const channels = [];
   for (const [name, factory] of Object.entries(CHANNEL_FACTORIES)) {
     const chCfg = config.channels[name];

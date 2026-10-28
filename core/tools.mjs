@@ -62,6 +62,15 @@ export class ToolKit {
     this.logic = opts.logic || null;
     this.learner = opts.learner || null;
 
+    /**
+     * 管理能力回调（仅主人工具用）。
+     *
+     * 之前没赋值，工具执行时 this.adminSaveConfig 是 undefined，
+     * 于是「对话里改设置」报「adminSaveConfig 不是一个函数」。
+     */
+    this.adminSaveConfig = opts.adminSaveConfig || null;
+    this.adminCleanMedia = opts.adminCleanMedia || null;
+
     /** DSH 客户端（可选，由外部注入） */
     this.dsh = opts.dsh || null;
     this.dshEnabled = Boolean(opts.dsh);
@@ -146,6 +155,61 @@ export class ToolKit {
   /** 工具定义（给模型看的）。 */
   definitions() {
     const defs = [
+      /**
+       * ===== 主人专用：远程管理 =====
+       *
+       * 这些工具会改真实设置/删真实文件，所以只对主人开放（run() 里二次校验）。
+       * 限制成「白名单字段」，避免模型把任意配置改坏。
+       */
+      {
+        type: 'function',
+        function: {
+          name: 'admin_config',
+          description:
+            '读取或修改控制台的设置（仅主人）。可改的字段有限：' +
+            'voiceChance（发语音概率 0~1）、stickerChance（表情包概率 0~1）、' +
+            'maxBubbles（每条回复最多几句 1~6）、maxChars（单条字数 50~2000）、' +
+            'toolsEnabled（工具总开关 true/false）、careEnabled（主动搭话开关）。' +
+            '不带 key 就是读取当前值。',
+          parameters: {
+            type: 'object',
+            properties: {
+              key: {
+                type: 'string',
+                enum: [
+                  'voiceChance',
+                  'stickerChance',
+                  'maxBubbles',
+                  'maxChars',
+                  'toolsEnabled',
+                  'careEnabled',
+                  'all',
+                ],
+                description: '要改哪个；填 all 表示读全部',
+              },
+              value: { type: 'string', description: '新值（读取时不用填）' },
+            },
+            required: [],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'admin_media',
+          description:
+            '管理素材库（仅主人）：clean=清理不合格的图（太小的、网页抓来的），' +
+            'dryRun=只预览不真清，stats=看库里有几张。清理只是挪到回收目录，不会直接删。',
+          parameters: {
+            type: 'object',
+            properties: {
+              action: { type: 'string', enum: ['stats', 'dryRun', 'clean'] },
+              kind: { type: 'string', enum: ['stickers', 'images'], description: '默认 stickers' },
+            },
+            required: ['action'],
+          },
+        },
+      },
       {
         type: 'function',
         function: {
@@ -455,6 +519,14 @@ export class ToolKit {
           }
         case 'save_sticker':
           return await this.#saveSticker(args);
+        case 'admin_config': {
+          if (ctx?.isOwner === false) return '（这个只有主人能改）';
+          return await this.#adminConfig(args);
+        }
+        case 'admin_media': {
+          if (ctx?.isOwner === false) return '（这个只有主人能操作）';
+          return await this.#adminMedia(args);
+        }
         case 'list_stickers':
           return this.#listStickers(args);
         case 'draw_image':
@@ -861,6 +933,111 @@ export class ToolKit {
       this.log.warn?.(`[tool] 画图失败: ${e.message}`);
       return `（画图失败：${e.message}）`;
     }
+  }
+
+  /**
+   * 读/改控制台设置（仅主人）。
+   *
+   * 只开放少数几个字段：概率、气泡数、字数、两个总开关。
+   * 别的配置（Key、主人名单、沙箱路径）不给改 —— 模型不该碰这些。
+   */
+  async #adminConfig(args = {}) {
+    const key = String(args.key || 'all');
+    const raw = args.value;
+
+    const c = this.config || {};
+    const snapshot = () => ({
+      voiceChance: c.wechat?.voiceChance ?? 0,
+      stickerChance: c.wechat?.stickerChance ?? 0,
+      maxBubbles: c.reply?.maxBubbles,
+      maxChars: c.reply?.maxChars,
+      toolsEnabled: c.tools?.enabled !== false,
+      careEnabled: c.care?.enabled !== false,
+    });
+
+    if (!key || key === 'all' || raw === undefined || raw === null || String(raw).trim() === '') {
+      const s = snapshot();
+      return (
+        `语音概率 ${Math.round(s.voiceChance * 100)}%，表情包概率 ${Math.round(s.stickerChance * 100)}%，` +
+        `每条最多 ${s.maxBubbles} 句、${s.maxChars} 字，工具${s.toolsEnabled ? '开' : '关'}，` +
+        `主动搭话${s.careEnabled ? '开' : '关'}`
+      );
+    }
+
+    const value = String(raw).trim();
+    const patch = {};
+
+    if (key === 'voiceChance' || key === 'stickerChance') {
+      // 既接受 0.2，也接受「20%」「20」
+      let num = Number(value.replace('%', ''));
+      if (!Number.isFinite(num)) return '（数值看不懂，给个 0~1 或百分数）';
+      if (num > 1) num /= 100;
+      num = Math.max(0, Math.min(1, num));
+      patch.wechat = { [key]: num };
+    } else if (key === 'maxBubbles') {
+      const n = Math.round(Number(value));
+      if (!Number.isFinite(n)) return '（要个 1~6 的整数）';
+      patch.reply = { maxBubbles: Math.max(1, Math.min(6, n)) };
+    } else if (key === 'maxChars') {
+      const n = Math.round(Number(value));
+      if (!Number.isFinite(n)) return '（要个 50~2000 的整数）';
+      patch.reply = { maxChars: Math.max(50, Math.min(2000, n)) };
+    } else if (key === 'toolsEnabled') {
+      patch.tools = { enabled: !/^(false|0|off|关|不)$/i.test(value) };
+    } else if (key === 'careEnabled') {
+      patch.care = { enabled: !/^(false|0|off|关|不)$/i.test(value) };
+    } else {
+      return `（${key} 不给改，只能改：voiceChance / stickerChance / maxBubbles / maxChars / toolsEnabled / careEnabled）`;
+    }
+
+    try {
+      const r = await this.adminSaveConfig(patch);
+      if (r && r.ok === false) return `（没改成：${r.error || '未知原因'}）`;
+    } catch (e) {
+      return `（没改成：${e.message}）`;
+    }
+
+    const s = snapshot();
+    return (
+      `改好了。现在：语音 ${Math.round(s.voiceChance * 100)}%，表情包 ${Math.round(s.stickerChance * 100)}%，` +
+      `每条最多 ${s.maxBubbles} 句、${s.maxChars} 字，工具${s.toolsEnabled ? '开' : '关'}，主动搭话${s.careEnabled ? '开' : '关'}`
+    );
+  }
+
+  /** 素材库统计 / 清理（仅主人） */
+  async #adminMedia(args = {}) {
+    const action = String(args.action || 'stats');
+    const kind = args.kind === 'images' ? 'images' : 'stickers';
+    const dir = path.join(this.#mediaRoot(), 'data', kind);
+
+    if (action === 'stats' || !this.adminCleanMedia) {
+      let files = [];
+      try {
+        files = fs.readdirSync(dir).filter((n) => /\.(jpe?g|png|gif|webp)$/i.test(n));
+      } catch {}
+      const gifs = files.filter((n) => /\.gif$/i.test(n)).length;
+      return `素材库（${kind}）：${files.length} 张，其中动图 ${gifs} 张`;
+    }
+
+    try {
+      const dry = action === 'dryRun';
+      const r = await this.adminCleanMedia({ kind, dryRun: dry });
+      if (!r || r.ok === false) return `（没成功：${r?.error || '未知'}）`;
+      if (dry) {
+        if (!r.count) return '没有不合格的素材，都挺好的';
+        const list = (r.items || []).slice(0, 6).map((x) => x.name + '：' + x.reason).join('；');
+        return `会清理 ${r.count} 张 —— ${list}`;
+      }
+      return `清理完成，挪走 ${r.moved || 0} 张（在 data/${kind}-trash/ 里，不是删掉）`;
+    } catch (e) {
+      return `（清理失败：${e.message}）`;
+    }
+  }
+
+  /** 项目根目录（素材库在 <root>/data 下） */
+  #mediaRoot() {
+    const root = this.config?.root || path.join(this.sandbox, '..');
+    return root;
   }
 
   #listStickers(args = {}) {
