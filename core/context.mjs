@@ -223,17 +223,17 @@ export function assembleContext({
       '要新画一张用 draw_image。别每句都发。';
 
     /**
-     * 刚收进来的那张，把文件名点出来。
+     * 刚收进来的那张，把文件名点出来 —— 但**只在对方明确要「刚才那张」时**。
      *
-     * 真实事故：用户发来一个表情包，她说「这张收了」，用户说「发回给我看看」，
-     * 她嘴上说「发了」—— 但表情包是随机挑的，挑到的是库里另一张旧图，
-     * 用户要的那张根本没发出去。
-     * 告诉她确切文件名，配合 send_image(name=...) 才能真的发回原来那张。
+     * 真实事故：这句提示写得太强，导致「发张图给我看看」「发张动图」时
+     * 她也只发刚收的那张，连着三次都是同一张（20:51→20:54 的聊天记录）。
+     * 所以这里收窄成「要回原图」才提，泛泛要图让她自己挑。
      */
-    if (recentMedia && recentMedia.name) {
+    const askBack = /(刚才那[张个]|刚收的|发回来|发回给|再发一次|同一张|原图)/.test(text);
+    if (recentMedia && recentMedia.name && askBack) {
       hint +=
         `\n【刚收到的素材】对方刚发来一张，已存成 ${recentMedia.name}。` +
-        `她要是说「发回来/再发一次」，就用 send_image(name="${recentMedia.name}")，别随机挑别的。`;
+        `她这次是要「刚才那张」，用 send_image(name="${recentMedia.name}")。`;
     }
 
     if (hint.length > cap('media')) hint = hint.slice(0, cap('media'));

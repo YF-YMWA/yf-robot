@@ -2228,7 +2228,7 @@ print('%016x' % bits)
     return await handler();
   }
 
-  pickSticker(text = '') {
+  pickSticker(text = '', opts = {}) {
     const dirs = this.#mediaDirs();
     const dir = dirs.stickers;
     if (!fs.existsSync(dir)) return { ok: false, reason: '素材库目录不存在' };
@@ -2240,8 +2240,18 @@ print('%016x' % bits)
      * （1x1 像素，微信里就是一片空白）和一张网页抓来的横幅。
      * 判定逻辑在 core/media-suit.mjs，跟抓图入库用的是同一套。
      */
-    const files = this.#onlySuitableStickers(dir);
+    let files = this.#onlySuitableStickers(dir);
     if (!files.length) return { ok: false, reason: '素材库里没有合格的图' };
+
+    /**
+     * 用户点名要动图时，只在 GIF 里挑。
+     * 否则随机到静态图，用户会觉得「我要的动图你给不了」。
+     */
+    if (opts.onlyGif) {
+      const gifs = files.filter((n) => /.gif$/i.test(n));
+      if (gifs.length) files = gifs;
+      else return { ok: false, reason: '素材库里还没有动图' };
+    }
 
     const index = this.#readStickerIndex();
     const t = String(text || '');

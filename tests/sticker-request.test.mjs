@@ -36,3 +36,22 @@ test('太长的话不触发（防止长段落里夹着「表情」）', () => {
     '然后还有很多人评论说这个视频很好笑，我也想发个表情包但是不知道发什么';
   assert.equal(wantsSticker(long), false);
 });
+
+test('要动图：wantsGif 认得出来', async () => {
+  const { wantsGif } = await import('../core/sticker.mjs');
+  assert.equal(wantsGif('发张动图给我看看'), true);
+  assert.equal(wantsGif('来个会动的'), true);
+  assert.equal(wantsGif('发个 gif'), true);
+  assert.equal(wantsGif('发张图给我看看'), false);
+  assert.equal(wantsGif('发个表情包'), false);
+});
+
+test('发回来 vs 随便发：上下文提示只在「要回原图」时出现', () => {
+  // 与 context.mjs 里那条正则保持一致
+  const askBack = /(刚才那[张个]|刚收的|发回来|发回给|再发一次|同一张|原图)/;
+
+  assert.ok(askBack.test('发回来给我看看'), '要回原图');
+  assert.ok(askBack.test('刚才那张再发一下'), '指代刚才那张');
+  assert.ok(!askBack.test('发张图给我看看'), '泛泛要图不该锁死到刚收的那张');
+  assert.ok(!askBack.test('发张动图'), '要动图不该锁死');
+});

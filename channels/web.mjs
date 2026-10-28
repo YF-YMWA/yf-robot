@@ -638,7 +638,9 @@ export class WebChannel {
       // 适配器要发图：按语气挑一张（素材库在核心，适配器那边没有图）
       if (req.method === 'GET' && url.pathname === '/api/media/pick') {
         const text = url.searchParams.get('text') || '';
-        const r = this.admin?.pickSticker?.(text) || { ok: false, reason: '核心未就绪' };
+        // 用户明确要动图时只挑 GIF
+        const onlyGif = url.searchParams.get('gif') === '1';
+        const r = this.admin?.pickSticker?.(text, { onlyGif }) || { ok: false, reason: '核心未就绪' };
         return json(res, 200, r);
       }
 
@@ -979,6 +981,8 @@ export class WebChannel {
           mood: result.mood || null,
           // 用户明确要表情包：适配器看到 true 就不掷骰子，直接发
           sticker: Boolean(result.stickerForced),
+          // 用户点名要动图：适配器取图时带 gif=1
+          stickerGif: Boolean(result.stickerGif),
           // 气泡之间的打字节奏（适配器照这个停顿，不然几条消息会同时到）
           pace: this.#pace(),
         });
@@ -1016,6 +1020,8 @@ export class WebChannel {
         mood: result.mood || null,
         // 用户明确要图：跳过适配器那边的概率
         sticker: Boolean(result.stickerForced),
+        // 用户点名要动图：适配器取图时带 gif=1
+        stickerGif: Boolean(result.stickerGif),
         // 气泡节奏（/api/wechat 这个老入口也带上，保持一致）
         pace: this.#pace(),
       });
