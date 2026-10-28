@@ -3866,8 +3866,14 @@ async function showAdapterLog() {
 
   try {
     const j = await api('adapter/log?lines=80');
-    pre.textContent = j.ok ? j.text || '（日志是空的）' : j.error || '读不到日志';
-    pre.scrollTop = pre.scrollHeight;
+    if (j.ok) {
+      const when = j.at ? new Date(j.at).toLocaleTimeString() : '';
+      const head = '// ' + (j.file || '日志') + (when ? '  更新于 ' + when : '');
+      pre.textContent = head + '\n\n' + (j.text || '（空）');
+      pre.scrollTop = pre.scrollHeight;
+    } else {
+      pre.textContent = j.error || '读不到日志';
+    }
   } catch (e) {
     pre.textContent = '读取失败：' + e.message;
   }
