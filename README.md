@@ -129,6 +129,7 @@ node app.mjs
 | [docs/logic-library.md](docs/logic-library.md) | 逻辑库怎么用、安全边界 |
 | [docs/content-model.md](docs/content-model.md) | 三种库各管什么、为什么不合并 |
 | [docs/data-scoping.md](docs/data-scoping.md) | 按角色卡隔离的目录结构 |
+| [docs/architecture-review.md](docs/architecture-review.md) | 向 AstrBot / NoneBot / Koishi 学了什么、不学什么 |
 
 ---
 
