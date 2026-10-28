@@ -72,6 +72,7 @@ tools/full_*.mjs
 # 控制台检查脚本：CI 要用，得进仓库
 !tools/check-console-js.mjs
 !tools/check-console-fns.mjs
+!tools/check-console-pages.mjs
 !tools/scan-dist.mjs
 tools/import_*.mjs
 tools/group_*.mjs

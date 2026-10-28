@@ -25,14 +25,14 @@ test('Key 丢失：能从归档恢复', async () => {
   const root = freshRoot('restore');
   fs.writeFileSync(
     path.join(root, 'data', 'key-archive', '2026-01-01T00-00-00Z.json'),
-    JSON.stringify({ keys: { voice: 'sk-voice-0123456789abcdef0123456789abcdef' } }),
+    JSON.stringify({ keys: { voice: 'sk-test-voice-0123456789abcdef012345678' } }),
     'utf8',
   );
 
-  const config = { voice: { apiKey: '' }, llm: { apiKey: 'sk-llm-1234567890abcdef' } };
+  const config = { voice: { apiKey: '' }, llm: { apiKey: 'sk-test-llm-1234567890abcdef' } };
   const r = await runRepair({ root, config, writeConfig: noWrite });
 
-  assert.equal(config.voice.apiKey, 'sk-voice-0123456789abcdef0123456789abcdef');
+  assert.equal(config.voice.apiKey, 'sk-test-voice-0123456789abcdef012345678');
   assert.ok(r.fixed.some((x) => x.includes('voice') && x.includes('恢复')));
 });
 
@@ -47,7 +47,7 @@ test('Key 丢失且归档也没有：报问题，不瞎填', async () => {
 
 test('Key 正常时不动它', async () => {
   const root = freshRoot('keep');
-  const good = 'sk-0123456789abcdef0123456789abcdef';
+  const good = 'sk-test-0123456789abcdef0123456789';
   const config = { llm: { apiKey: good } };
   await runRepair({ root, config, writeConfig: noWrite });
   assert.equal(config.llm.apiKey, good);
@@ -57,17 +57,17 @@ test('缩短的 Key 会被当作无效并尝试恢复', async () => {
   const root = freshRoot('short');
   fs.writeFileSync(
     path.join(root, 'data', 'key-archive', 'x.json'),
-    JSON.stringify({ keys: { llm: 'sk-full-key-0123456789abcdef0123' } }),
+    JSON.stringify({ keys: { llm: 'sk-test-full-key-0123456789abcdef01' } }),
     'utf8',
   );
   const config = { llm: { apiKey: 'abc' } };
   await runRepair({ root, config, writeConfig: noWrite });
-  assert.equal(config.llm.apiKey, 'sk-full-key-0123456789abcdef0123');
+  assert.equal(config.llm.apiKey, 'sk-test-full-key-0123456789abcdef01');
 });
 
 test('配置缺段落：补默认值', async () => {
   const root = freshRoot('sections');
-  const config = { llm: { apiKey: 'sk-0123456789abcdef0123456789abcdef' } };
+  const config = { llm: { apiKey: 'sk-test-0123456789abcdef0123456789' } };
   const r = await runRepair({ root, config, writeConfig: noWrite });
 
   assert.ok(config.reply, 'reply 段应该被补上');
@@ -78,7 +78,7 @@ test('配置缺段落：补默认值', async () => {
 
 test('ttsApiKey 无效时清空（退回共用转写那把）', async () => {
   const root = freshRoot('tts');
-  const config = { voice: { apiKey: 'sk-0123456789abcdef0123456789abcdef', ttsApiKey: '短' } };
+  const config = { voice: { apiKey: 'sk-test-0123456789abcdef0123456789', ttsApiKey: '短' } };
   const r = await runRepair({ root, config, writeConfig: noWrite });
   assert.equal(config.voice.ttsApiKey, '');
   assert.ok(r.fixed.some((x) => x.includes('语音合成')));
@@ -112,10 +112,10 @@ test('幂等：第二次跑基本无事可做', async () => {
     path.join(root, 'data', 'key-archive', 'a.json'),
     JSON.stringify({
       keys: {
-        llm: 'sk-0123456789abcdef0123456789abcdef',
+        llm: 'sk-test-0123456789abcdef0123456789',
         vision: '0123456789abcdef0123456789abcdef01234567',
-        voice: 'sk-voice-0123456789abcdef0123456789abcdef',
-        search: 'sk-search-0123456789abcdef0123456789',
+        voice: 'sk-test-voice-0123456789abcdef012345678',
+        search: 'sk-test-search-0123456789abcdef0123',
         imagegen: '0123.0123456789abcdef0123456789abcdef',
       },
     }),
