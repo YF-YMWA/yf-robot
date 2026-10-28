@@ -349,6 +349,19 @@
     </div>
 
     <div class="card">
+      <h2>维护<span class="sp"></span><span class="chip" id="versionChip">v—</span></h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button onclick="runRepair()">一键修复</button>
+        <button class="ghost" onclick="checkUpdate()">检查更新</button>
+      </div>
+      <div class="hint" style="margin-top:10px;line-height:1.7">
+        一键修复会检查：五个 Key 在不在（缺了从备份恢复）、配置有没有缺段落、
+        数据目录、令牌文件。都是本地操作，不联网不花钱。
+      </div>
+      <div id="repairResult" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
       <h2>快捷操作</h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button onclick="window.open('/','_blank')">网页聊天</button>
@@ -2214,9 +2227,13 @@ async function restartService() {
 }
 
 async function loadStatus() {
+  // 版本号显示在「维护」卡片右上角
   try {
     const s = await api('status');
     $('brandSub').textContent = s.model || '';
+
+    // 版本号：维护卡片右上角
+    if ($('versionChip') && s.version) $('versionChip').textContent = 'v' + s.version;
 
     // 页面构建时间：如果和实际不符，说明浏览器在吃缓存，按 Ctrl+Shift+R
     const pb = $('pageBuild');
@@ -3254,8 +3271,34 @@ async function loadTtsSettings() {
       $('ttsKey').placeholder = v.ttsHasKey
         ? '已配置独立 Key（留空不改）'
         : v.ttsKeyIsShared
-          ? '未单独配置，正在用语音转写那把 Key'
+          ? '正在共用语音转写那把 Key（改的话粘贴新 Key）'
           : '还没配 Key';
+    }
+
+    /**
+     * 把「语音合成用哪把 Key」写清楚。
+     *
+     * 之前这一行是写死的「未配置（会用语音转写那把 Key）」——
+     * 用户看到「未配置」就以为 Key 被清空了，其实一直好好的。
+     */
+    const ttsState = $('state-tts');
+    if (ttsState) {
+      if (v.ttsHasKey) {
+        ttsState.className = 'keystate set';
+        ttsState.innerHTML =
+          '<span class="mark"></span><span class="hint">已配置独立 Key（' +
+          escapeHtml(v.ttsApiKeyMasked || '****') +
+          '）</span>';
+      } else if (v.ttsKeyIsShared) {
+        ttsState.className = 'keystate set';
+        ttsState.innerHTML =
+          '<span class="mark"></span><span class="hint">共用「语音转文字」那把 Key（' +
+          escapeHtml(v.apiKeyMasked || '****') +
+          '），不用重复填</span>';
+      } else {
+        ttsState.className = 'keystate';
+        ttsState.innerHTML = '<span class="mark"></span><span class="hint">还没有可用 Key，先在上面填语音转文字的 Key</span>';
+      }
     }
     // 音色下拉：内置 + 导入的语音包
     try {
@@ -3602,6 +3645,75 @@ async function clearGenerated() {
     loadMediaAll();
   } catch (e) {
     toast('清空失败：' + e.message, 'err');
+  }
+}
+
+
+// ===== 维护：一键修复 / 检查更新 =====
+
+async function runRepair() {
+  const box = $('repairResult');
+  box.innerHTML = '<div class="hint">检查中…</div>';
+
+  try {
+    const j = await api('repair', { method: 'POST', body: {} });
+    const fixed = j.fixed || [];
+    const problems = j.problems || [];
+
+    const parts = [];
+    if (fixed.length) {
+      parts.push(
+        '<div style="color:var(--ok);margin-bottom:6px">✓ 修好了 ' + fixed.length + ' 项</div>' +
+          fixed.map((x) => '<div class="hint">· ' + escapeHtml(x) + '</div>').join(''),
+      );
+    }
+    if (problems.length) {
+      parts.push(
+        '<div style="color:var(--warn);margin-top:8px;margin-bottom:6px">还需要你处理 ' +
+          problems.length +
+          ' 项</div>' +
+          problems.map((x) => '<div class="hint">· ' + escapeHtml(x) + '</div>').join(''),
+      );
+    }
+    if (!fixed.length && !problems.length) {
+      parts.push('<div style="color:var(--ok)">✓ 一切正常，没发现问题</div>');
+    }
+
+    box.innerHTML = parts.join('');
+    toast(fixed.length ? '修好了 ' + fixed.length + ' 项' : '没发现问题');
+    loadAll();
+  } catch (e) {
+    box.innerHTML = '<div class="hint" style="color:var(--err)">修复失败：' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function checkUpdate() {
+  const box = $('repairResult');
+  box.innerHTML = '<div class="hint">检查中…</div>';
+
+  try {
+    const j = await api('update/check');
+    if ($('versionChip') && j.local) $('versionChip').textContent = 'v' + j.local;
+
+    if (!j.ok) {
+      box.innerHTML =
+        '<div class="hint" style="color:var(--warn)">' +
+        escapeHtml(j.error || '查不到最新版本') +
+        '　<a href="' + escapeHtml(j.url || '#') + '" target="_blank" rel="noopener">打开 Releases</a></div>';
+      return;
+    }
+
+    box.innerHTML = j.hasUpdate
+      ? '<div style="color:var(--warn)">发现新版本 v' +
+        escapeHtml(j.latest) +
+        '（当前 v' +
+        escapeHtml(j.local) +
+        '）　<a href="' +
+        escapeHtml(j.url) +
+        '" target="_blank" rel="noopener">去下载</a></div>'
+      : '<div style="color:var(--ok)">✓ 已是最新版 v' + escapeHtml(j.local) + '</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="hint" style="color:var(--err)">检查失败：' + escapeHtml(e.message) + '</div>';
   }
 }
 

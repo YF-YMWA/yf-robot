@@ -722,6 +722,115 @@ export class AdminApi {
         return { code: 200, body: this.engine.usage || { calls: 0, input: 0, output: 0 } };
       }
 
+      // ===== 一键修复 =====
+      if (method === 'POST' && pathname === '/api/admin/repair') {
+        const { runRepair } = await import('./repair.mjs');
+        const r = await runRepair({
+          root: this.root,
+          config: this.config,
+          writeConfig,
+          log: this.log,
+        });
+        this.log.info?.('[repair] 修了 ' + r.fixed.length + ' 项，剩 ' + r.problems.length + ' 个问题');
+        return { code: 200, body: r };
+      }
+
+      // ===== 检查更新 =====
+      if (method === 'GET' && pathname === '/api/admin/update/check') {
+        const local = JSON.parse(fs.readFileSync(path.join(this.root, 'package.json'), 'utf8')).version;
+        const repo = this.config.repo || 'YF-YMWA/yf-robot';
+
+        /**
+         * 查最新版本。
+         *
+         * 两个坑：
+         *   1. 项目只打 tag 没发 Release，所以 /releases/latest 是 404 —— 改用 /tags
+         *   2. 某些网络环境下 Node 的 TLS 校验会因为代理拦截失败
+         *      （UNABLE_TO_VERIFY_LEAF_SIGNATURE），这时退回不校验证书的请求，
+         *      只用于「查版本号」这一件事，不涉及任何凭证
+         */
+        const fetchJSON = async (pathname2) => {
+          const url = 'https://api.github.com/repos/' + repo + pathname2;
+          const headers = { 'user-agent': 'YF-Robot', accept: 'application/vnd.github+json' };
+
+          try {
+            const r = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return await r.json();
+          } catch (e) {
+            // TLS 校验失败 → 换成不校验的 https 请求再试一次
+            if (!/certificate|CERT|SSL|TLS|fetch failed/i.test(String(e.message))) throw e;
+
+            const https = await import('node:https');
+            const body = await new Promise((resolve, reject) => {
+              const req = https.request(
+                url,
+                { headers, rejectUnauthorized: false, timeout: 8000 },
+                (res) => {
+                  if (res.statusCode !== 200) {
+                    reject(new Error('HTTP ' + res.statusCode));
+                    res.resume();
+                    return;
+                  }
+                  let data = '';
+                  res.setEncoding('utf8');
+                  res.on('data', (c) => (data += c));
+                  res.on('end', () => resolve(data));
+                },
+              );
+              req.on('error', reject);
+              req.on('timeout', () => req.destroy(new Error('超时')));
+              req.end();
+            });
+            return JSON.parse(body);
+          }
+        };
+
+        try {
+          const tags = await fetchJSON('/tags?per_page=20');
+          const versions = (Array.isArray(tags) ? tags : [])
+            .map((t) => String(t.name || '').replace(/^v/, ''))
+            .filter((v) => /^\d+\.\d+/.test(v));
+
+          // 简单的语义化比较：拆成数字逐段比
+          const cmp = (a, b) => {
+            const pa = String(a).split('.').map(Number);
+            const pb = String(b).split('.').map(Number);
+            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+              const d = (pa[i] || 0) - (pb[i] || 0);
+              if (d) return d;
+            }
+            return 0;
+          };
+
+          // 接口给的是「按创建时间倒序」，但打 tag 的顺序不一定等于版本顺序
+          versions.sort((a, b) => cmp(b, a));
+          const latest = versions[0] || local;
+
+          return {
+            code: 200,
+            body: {
+              ok: true,
+              local,
+              latest,
+              hasUpdate: cmp(latest, local) > 0,
+              url: 'https://github.com/' + repo + '/releases',
+            },
+          };
+        } catch (e) {
+          // 没网 / 被墙 / 仓库还没打 tag —— 都不该让控制台报错
+          return {
+            code: 200,
+            body: {
+              ok: false,
+              local,
+              error: '查不到最新版本（' + e.message + '）',
+              url: 'https://github.com/' + repo + '/releases',
+            },
+          };
+        }
+      }
+
       // ===== 插件 =====
       if (method === 'GET' && pathname === '/api/admin/plugins') {
         return {
@@ -4231,6 +4340,14 @@ print('%016x' % bits)
   }
 
   /** 服务状态。 */
+  #version() {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(this.root, 'package.json'), 'utf8')).version || '';
+    } catch {
+      return '';
+    }
+  }
+
   #status() {
     const uptimeSec = Math.floor((Date.now() - this.startedAt) / 1000);
     return {
@@ -4238,6 +4355,7 @@ print('%016x' % bits)
       uptime: uptimeSec,
       uptimeText: formatUptime(uptimeSec),
       persona: this.config.__personaName || '',
+      version: this.#version(),
       model: this.config.llm.model,
       channels: this.channels,
       ports: {
@@ -4301,6 +4419,7 @@ print('%016x' % bits)
 
         // 语音合成（可以和转写分开配）
         ttsHasKey: Boolean(c.voice?.ttsApiKey),
+        ttsApiKeyMasked: mask(c.voice?.ttsApiKey),
         ttsKeyIsShared: !c.voice?.ttsApiKey && Boolean(c.voice?.apiKey),
         ttsModel: c.voice?.ttsModel || 'qwen3-tts-flash',
         ttsVoice: c.voice?.ttsVoice || 'Cherry',
