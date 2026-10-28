@@ -23,6 +23,7 @@ import { LogicLearner } from './logic-learn.mjs';
 import { assembleContext, renderContext, detectTone, banksForTone } from './context.mjs';
 import { memoryDir, migrateLegacyToScope, scopeName, resolveWordsDir } from './scoped-paths.mjs';
 import { addTypoSlip } from './humanize.mjs';
+import { decideVoiceReply } from './voice-reply.mjs';
 import { renderSystemPrompt } from './persona.mjs';
 import { renderWordBanks } from './words.mjs';
 import { OwnerService } from './owner.mjs';
@@ -910,12 +911,37 @@ export class ChatEngine {
         this.log.info?.(`[draw] 主动画了 ${drawn.length} 张`);
       }
 
+      /**
+       * 语音回复：由核心决定「念哪一段、要不要念」，适配器只负责发。
+       *
+       * 决策放在核心里，是为了让适配器保持「只执行」——
+       * 以前是适配器自己掷骰子并把整段原文拿去念，
+       * 结果把「（尾巴拍了拍）」和 emoji 一起念出来了。
+       */
+      let voice = null;
+      try {
+        const v = decideVoiceReply({
+          text: finalBubbles.join(' '),
+          chance: Number(this.config.wechat?.voiceChance ?? 0),
+          enabled: this.config.voice?.enabled !== false,
+        });
+        if (v.speak) {
+          voice = { text: v.text, chars: v.chars };
+          this.log.info?.(`[voice] 建议补发语音（${v.chars} 字）：${v.text.slice(0, 24)}`);
+        } else {
+          this.log.info?.(`[voice] 不发：${v.reason}`);
+        }
+      } catch (e) {
+        this.log.warn?.(`[voice] 决策失败：${e.message}`);
+      }
+
       return {
         bubbles: finalBubbles,
         text: finalBubbles.join('\n'),
         reason,
         images: drawn,
         proactiveDraw: proactiveDraw && drawn.length > 0,
+        voice,
       };
     });
   }

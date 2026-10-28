@@ -373,6 +373,48 @@ if (WITH_RUNTIME) {
   if (WITH_PYTHON) {
     console.log('  （Python 172MB，需要一点时间…）');
     copyDir(path.join(ROOT, 'runtime', 'python'), path.join(DIST, 'runtime', 'python'), 'Python 运行时');
+
+    /**
+     * 框架包不该带适配器的东西。
+     *
+     * 随包的 Python 运行时里，除了框架自己用得到的 Pillow（图片去重兜底），
+     * 其余都是微信适配器的依赖：wechatauto / uiautomation / pywin32 /
+     * comtypes / pyautogui / pysilk 之类。
+     *
+     * 把它们留在这里有两个问题：
+     *   1. 框架包里躺着微信自动化代码 —— 和「主仓不含平台代码」自相矛盾
+     *   2. 白占 40MB+
+     *
+     * 只有打 --with-adapter（要一起发适配器）时才保留。
+     */
+    if (!WITH_ADAPTER) {
+      const site = path.join(DIST, 'runtime', 'python', 'Lib', 'site-packages');
+      const ADAPTER_ONLY = [
+        'wechatauto', 'uiautomation', 'comtypes', 'pythoncom.py', 'pythonwin',
+        'pywin32_system32', 'win32', 'win32com', 'win32comext', 'winsdk',
+        'pyautogui', 'pyscreeze', 'pygetwindow', 'pyperclip', 'mouseinfo',
+        'pytweening', 'pysilk', 'silkpy', 'psutil', 'zstandard', 'requests',
+        'urllib3', 'certifi', 'charset_normalizer', 'idna', 'cryptography',
+        'cffi', '_cffi_backend.cp312-win_amd64.pyd',
+        'pywin32.pth', 'pywin32',
+        // 框架只用 Pillow 算图片指纹，numpy/colorama 都是适配器带的
+        'numpy', 'numpy.libs', 'colorama',
+      ];
+      let removed = 0;
+      for (const name of ADAPTER_ONLY) {
+        const target = path.join(site, name);
+        if (!fs.existsSync(target)) continue;
+        fs.rmSync(target, { recursive: true, force: true });
+        // 顺带清掉它的 dist-info
+        for (const d of fs.readdirSync(site)) {
+          if (d.toLowerCase().startsWith(name.toLowerCase().split('-')[0]) && d.endsWith('.dist-info')) {
+            fs.rmSync(path.join(site, d), { recursive: true, force: true });
+          }
+        }
+        removed++;
+      }
+      console.log(`  已剔除 ${removed} 个适配器专用库（框架包只留 Pillow）`);
+    }
   } else {
     console.log('  [跳过] Python（用 --no-python 排除了，图片去重会退化成只比 md5）');
   }

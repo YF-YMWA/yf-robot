@@ -701,9 +701,23 @@ export class WebChannel {
         if (!text) return json(res, 400, { ok: false, error: '缺少 text' });
 
         const { synthesize, toVoiceFormat } = await import('../core/tts.mjs');
+
+        /**
+         * 音色优先级：请求指定 > 角色卡自带 > 全局配置 > 默认。
+         *
+         * 加了卡片音色之后，换个角色声音也能跟着换 ——
+         * 一张卡是慵懒大叔、一张是元气少女，共用一个音色会很出戏。
+         */
+        const voice =
+          body?.voice ||
+          this.engine?.persona?.voice ||
+          this.engine?.persona?.data?.voice || // 兼容卡片原始结构
+          this.config.voice?.ttsVoice ||
+          undefined;
+
         const r = await synthesize({
           text,
-          voice: body?.voice || this.config.voice?.ttsVoice || undefined,
+          voice,
           config: this.config,
           log: (m) => this.log.info?.('[tts] ' + m),
         });
@@ -864,6 +878,8 @@ export class WebChannel {
           reply: result.bubbles.join(''),
           bubbles: result.bubbles,
           images: result.images || [],
+          // 核心判断好的语音：适配器照这个发（念哪段、多长都定好了）
+          voice: result.voice || null,
         });
       }
 
@@ -893,6 +909,8 @@ export class WebChannel {
         bubbles: result.bubbles,
         // 她画的图，适配器会发到微信
         images: result.images || [],
+        // 核心判断好的语音：适配器照这个发
+        voice: result.voice || null,
       });
     } catch (e) {
       this.log.error?.('[wechat] ' + e.message);

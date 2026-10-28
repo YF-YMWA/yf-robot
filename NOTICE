@@ -5,16 +5,19 @@
 
 ---
 
-## wechatauto-replica
+## wechatauto-replica（不属于本项目）
 
 - **用途**：微信 4.x 客户端自动化（数据库解密读取、UIA 消息发送、媒体下载）
 - **版本**：1.2.7.0
 - **许可证**：Apache License 2.0
 - **源码**：https://github.com/fanyuantaier/wechatauto-replica
-- **说明**：本项目**不包含**其源码，只在 `bridge_wg/` 里通过 pip 安装后调用其公开 API
-  （`WeChatDB`、`MediaDownloader`、`WeChatGUI`、`Listener` 等）。
-  发行包里的 `runtime/python/Lib/site-packages/wechatauto/` 是其原始分发包，
-  许可证全文见同目录 `wechatauto_replica-*.dist-info/licenses/`。
+- **说明**：本项目（YF-Robot 框架）**不包含、也不使用**这个库。
+  它只被**另一个独立仓库** `yf-robot-wechat-adapter`（微信适配器）使用，
+  那个项目会自己通过 pip 安装。
+  本项目发行的框架包里**不含** `wechatauto`、`uiautomation`、`pywin32`
+  等任何微信自动化依赖 —— 框架只通过 HTTP 和适配器通信。
+  如果使用 `--with-adapter` 打「带适配器」的合并包，则会包含该库，
+  此时它的许可证随适配器仓库一并适用。
 
 ## Node.js
 
@@ -30,17 +33,16 @@
 
 ## Python 第三方库
 
-发行包 `runtime/python/Lib/site-packages/` 内包含：
+框架发行的包 `runtime/python/Lib/site-packages/` 内**只包含 Pillow**：
 
-| 组件 | 许可证 |
-|---|---|
-| Pillow | HPND |
-| numpy | BSD-3-Clause |
-| pywin32 | PSF |
-| comtypes | MIT |
-| cryptography | Apache-2.0 / BSD-3-Clause |
+| 组件 | 用途 | 许可证 |
+|---|---|---|
+| Pillow | 图片指纹兜底（没装 ffmpeg 时算 dHash） | HPND |
 
-各自的许可证文件都在对应的 `*.dist-info/licenses/` 目录里。
+许可证文件在 `PIL/*.dist-info/licenses/` 里。
+
+numpy、pywin32、comtypes、cryptography、requests 等都不在框架包里 ——
+它们是适配器的依赖，只出现在 `--with-adapter` 的合并包里。
 
 ## ffmpeg
 
