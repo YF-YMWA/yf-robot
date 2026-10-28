@@ -98,6 +98,9 @@ export const DEFAULTS = {
     autoDetect: true,
   },
 
+  /** 情绪状态：影响回复长短、发不发语音。 */
+  mood: { enabled: true },
+
   /**
    * 逻辑库：她「怎么想」的经验，和知识库（知道什么）分开。
    */

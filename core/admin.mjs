@@ -494,6 +494,15 @@ export class AdminApi {
         };
       }
 
+      // ===== 情绪状态 =====
+      if (method === 'GET' && pathname === '/api/admin/mood') {
+        try {
+          return { code: 200, body: { ok: true, list: this.engine.mood().list() } };
+        } catch (e) {
+          return { code: 200, body: { ok: false, error: e.message, list: [] } };
+        }
+      }
+
       // ===== 语音包 =====
       if (method === 'GET' && pathname === '/api/admin/voice/packs') {
         const { allVoices, readPacks } = await import('./voice-packs.mjs');

@@ -3285,7 +3285,7 @@ async function loadBackend() {
     }
   };
 
-  const [cfg, words, bridge, stickers, plugins, kb, logic] = await Promise.all([
+  const [cfg, words, bridge, stickers, plugins, kb, logic, moodJ] = await Promise.all([
     safe('config'),
     safe('words'),
     safe('bridge'),
@@ -3293,6 +3293,7 @@ async function loadBackend() {
     safe('plugins'),
     safe('kb'),
     safe('logic'),
+    safe('mood'),
   ]);
 
   const item = (label, value, ok, page) => ({
@@ -3307,6 +3308,9 @@ async function loadBackend() {
   const logicStats = logic?.stats || {};
   const pending = logicStats.byStatus?.pending || 0;
   const loadedPlugins = (plugins?.plugins || []).filter((p) => p.state === 'loaded').length;
+
+  const moodTop = (moodJ?.list || [])[0];
+  const moodText = moodTop ? `${moodTop.label}（${moodTop.score}）` : '还没有记录';
 
   const rows = [
     item(
@@ -3323,6 +3327,7 @@ async function loadBackend() {
       'logic',
     ),
     item('词库', `${wordTotal} 条`, true, 'words'),
+    item('情绪', moodText, true, 'memory'),
     item('素材库', `${stickers?.total || 0} 张`, true, 'stickers'),
     item('插件', `${loadedPlugins} 个已加载`, loadedPlugins > 0, 'plugins'),
     item(

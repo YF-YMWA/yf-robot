@@ -24,6 +24,8 @@ import { assembleContext, renderContext, detectTone, banksForTone } from './cont
 import { memoryDir, migrateLegacyToScope, scopeName, resolveWordsDir } from './scoped-paths.mjs';
 import { addTypoSlip } from './humanize.mjs';
 import { decideVoiceReply } from './voice-reply.mjs';
+import { MoodStore, moodDelta, describeMood } from './mood.mjs';
+import { scopeDir } from './scoped-paths.mjs';
 import { renderSystemPrompt } from './persona.mjs';
 import { renderWordBanks } from './words.mjs';
 import { OwnerService } from './owner.mjs';
@@ -312,6 +314,17 @@ export class ChatEngine {
    * 具体挑哪张还是走 list_stickers / send_image 工具。
    * 读不到就返回 null，不影响别的。
    */
+  /** 情绪状态（懒加载，按角色卡隔离） */
+  mood() {
+    if (!this._mood) {
+      this._mood = new MoodStore({
+        file: path.join(scopeDir(this.config.root || process.cwd(), this.scope), 'mood.json'),
+        log: (m) => this.log.info?.(m),
+      });
+    }
+    return this._mood;
+  }
+
   #mediaSummary() {
     const file = path.join(this.config.root || process.cwd(), 'data', 'stickers', 'index.json');
     let index = {};
@@ -676,6 +689,7 @@ export class ChatEngine {
       let logicNote = '';
       let mediaNote = '';
       let styleNote = '';
+      let moodNote = '';
 
       try {
         const logicHits = [];
@@ -764,6 +778,24 @@ export class ChatEngine {
         this.log.warn?.(`[ctx] 组装失败（不影响回复）：${e.message}`);
       }
 
+      /**
+       * 心情：读当前分数（带时间衰减）拼成一句给模型。
+       *
+       * 在拼提示词之前读、回复之后再落账 ——
+       * 这一轮用的是「说话前」的心情，符合直觉：
+       * 先带着情绪回应，回应完情绪再变化。
+       */
+      let moodScore = 0;
+      if (this.config.mood?.enabled !== false) {
+        try {
+          moodScore = this.mood().score(sessionId);
+          moodNote = this.mood().render(sessionId);
+          this.log.info?.(`[mood] ${describeMood(moodScore).label}（${moodScore}）`);
+        } catch (e) {
+          this.log.warn?.(`[mood] 读取失败：${e.message}`);
+        }
+      }
+
       const messages = this.#buildMessages(
         session,
         userText,
@@ -778,6 +810,7 @@ export class ChatEngine {
         logicNote,
         mediaNote,
         styleNote,
+        moodNote,
       );
 
       let raw = '';
@@ -921,9 +954,17 @@ export class ChatEngine {
        */
       let voice = null;
       try {
+        /**
+         * 心情影响发语音的意愿：
+         *   心情差 × 0.3（不想撒娇），心情好 × 1.5（愿意多说两句）。
+         * 这样「刚被骂完还发语音卖萌」这种出戏场面就不会出现。
+         */
+        const moodFactor = moodScore <= -25 ? 0.3 : moodScore >= 25 ? 1.5 : 1;
+        const chance = Number(this.config.wechat?.voiceChance ?? 0) * moodFactor;
+
         const v = decideVoiceReply({
           text: finalBubbles.join(' '),
-          chance: Number(this.config.wechat?.voiceChance ?? 0),
+          chance: Math.min(1, chance),
           enabled: this.config.voice?.enabled !== false,
         });
         if (v.speak) {
@@ -936,6 +977,25 @@ export class ChatEngine {
         this.log.warn?.(`[voice] 决策失败：${e.message}`);
       }
 
+      /**
+       * 记这一轮对情绪的影响。
+       *
+       * 只看对方怎么说话（骂人 / 夸人 / 敷衍），不看内容对错 ——
+       * 要的是情绪反应，不是理解语义。分数会随时间往中间回归。
+       */
+      let moodAfter = moodScore;
+      if (this.config.mood?.enabled !== false) {
+        try {
+          const delta = moodDelta(userText);
+          if (delta) {
+            moodAfter = this.mood().apply(sessionId, delta);
+            this.log.info?.(`[mood] ${delta > 0 ? '+' : ''}${delta} → ${moodAfter}（${describeMood(moodAfter).label}）`);
+          }
+        } catch (e) {
+          this.log.warn?.(`[mood] 记录失败：${e.message}`);
+        }
+      }
+
       return {
         bubbles: finalBubbles,
         text: finalBubbles.join('\n'),
@@ -943,6 +1003,7 @@ export class ChatEngine {
         images: drawn,
         proactiveDraw: proactiveDraw && drawn.length > 0,
         voice,
+        mood: { score: moodAfter, label: describeMood(moodAfter).label },
       };
     });
   }
@@ -1055,6 +1116,7 @@ export class ChatEngine {
     logicNote = '',
     mediaNote = '',
     styleNote = '',
+    moodNote = '',
   ) {
     const system = renderSystemPrompt(this.persona, {
       ownerName: speakerName || this.persona.ownerName,
@@ -1118,6 +1180,14 @@ export class ChatEngine {
 
     // 素材库提示：只在聊到图的时候才出现
     if (mediaNote) parts.push(mediaNote);
+
+    /**
+     * 此刻的心情。
+     *
+     * 情绪有惯性：上一句被骂了，这一句还热络地撒娇就很假。
+     * 分数由 moodDelta 根据对方说的话加减，时间久了会往中间回归。
+     */
+    if (moodNote) parts.push(moodNote);
 
     // 防编造：模型很容易顺着对方编一段「你上次说过」的假回忆
     parts.push(

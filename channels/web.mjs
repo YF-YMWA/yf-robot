@@ -888,6 +888,8 @@ export class WebChannel {
           images: result.images || [],
           // 核心判断好的语音：适配器照这个发（念哪段、多长都定好了）
           voice: result.voice || null,
+          // 当前情绪（调试用，也方便看看她情绪变化）
+          mood: result.mood || null,
         });
       }
 
@@ -919,6 +921,8 @@ export class WebChannel {
         images: result.images || [],
         // 核心判断好的语音：适配器照这个发
         voice: result.voice || null,
+        // 当前情绪
+        mood: result.mood || null,
       });
     } catch (e) {
       this.log.error?.('[wechat] ' + e.message);
