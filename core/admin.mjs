@@ -4291,6 +4291,8 @@ print('%016x' % bits)
         : '',
       heartbeatAgo: primary.heartbeatAgo,
       stats: { recentMessages: primary.recentMessages },
+      // 发送健康度（适配器心跳里带的）：冷却中说明「收到了但发不出去」
+      send: primary.send || null,
       adapter: { name: primary.name, version: primary.version, root: '', reportedAt: 0 },
 
       // ===== 新：完整列表 =====
