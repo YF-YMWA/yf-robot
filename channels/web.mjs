@@ -326,7 +326,10 @@ export class WebChannel {
 
         // 除 GET/HEAD 外都要读 body —— DELETE 也可能带参数
         const hasBody = !['GET', 'HEAD'].includes(req.method);
-        const body = hasBody ? await readJson(req).catch(() => null) : null;
+        // 管理接口里也可能带大 base64（上传图片、导入语音包），放宽到 16MB
+        const body = hasBody
+          ? await readJson(req, null, 16 * 1024 * 1024).catch(() => null)
+          : null;
         const r = await this.admin.handle(req.method, url.pathname, body);
         if (r) return json(res, r.code, r.body);
       }
@@ -445,7 +448,15 @@ export class WebChannel {
       }
 
       if (req.method === 'POST' && url.pathname === '/api/media/ingest') {
-        const body = await readJson(req).catch(() => null);
+        /**
+         * 素材上传单独放宽到 24MB。
+         *
+         * 默认 readJson 只收 256KB —— 图片转 base64 后动辄几 MB，
+         * 服务端会直接把连接掐掉；适配器看到的是
+         * 「上传核心失败 ConnectionError」，于是退回本地存储，
+         * 用户那边的感受就是「本地上传素材失败 / 收藏了但控制台看不到」。
+         */
+        const body = await readJson(req, null, 24 * 1024 * 1024).catch(() => null);
         if (!body || !body.data) {
           return json(res, 400, { ok: false, error: '缺少 data（base64）' });
         }
@@ -522,7 +533,8 @@ export class WebChannel {
 
       if (req.method === 'POST' && url.pathname === '/api/adapter/contacts') {
         // 适配器上报它知道的会话/联系人，供控制台选「搭话发给谁」和「收藏白名单」
-        const body = await readJson(req).catch(() => null);
+        // 联系人可能上千条，默认 256KB 会不够
+        const body = await readJson(req, null, 4 * 1024 * 1024).catch(() => null);
         const list = Array.isArray(body?.contacts) ? body.contacts : [];
 
         // 按平台分开存：微信的 wxid 和 QQ 的号不该混在一张表里
