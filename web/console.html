@@ -992,6 +992,12 @@
         她用 <code>draw_image</code> 画的图都存在这里，会自动发到微信。<br>
         删除只影响本地存档，已发出的不影响。
       </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <button class="ghost sm" onclick="toggleSel('generated-pick')">全选 / 取消</button>
+        <button class="ghost sm" onclick="batchDeleteSelected('generated-pick','generated')" style="color:var(--err)">删除选中</button>
+        <button class="ghost sm" onclick="clearGenerated()" style="color:var(--err)">清空全部</button>
+        <span class="hint" id="generatedSelHint">未选中</span>
+      </div>
       <div id="generatedGrid" class="sticker-grid">
         <div class="hint">加载中…</div>
       </div>
@@ -1012,6 +1018,11 @@
         表情包她会随机补发；<span style="color:var(--warn)">微信不能发动作表情，但能发 GIF —— 视觉效果一样。</span>
       </div>
 
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <button class="ghost sm" onclick="toggleSel('media-pick')">全选 / 取消</button>
+        <button class="ghost sm" onclick="batchDeleteSelected('media-pick','auto')" style="color:var(--err)">删除选中</button>
+        <span class="hint" id="mediaSelHint">未选中</span>
+      </div>
       <div id="mediaGrid" class="sticker-grid">
         <div class="hint">加载中…</div>
       </div>
@@ -3027,7 +3038,7 @@ async function loadMediaAll() {
       <div class="sticker-cell" data-name="${s.name}" data-kind="${s.kind}">
         <input type="checkbox" class="media-pick" data-name="${s.name}" data-kind="${s.kind}"
                style="position:absolute;left:6px;top:6px;z-index:3;cursor:pointer"
-               onchange="updateMediaSel()">
+               onchange="updateSelHint('media-pick','mediaSelHint')">
         <span class="del" onclick="delMedia('${s.kind}','${s.name}')" title="删除">×</span>
         <span class="kindtag">${LABEL[s.kind] || s.kind}${isGif ? ' · 动图' : ''}</span>
         <img data-idx="${i}" alt="">
@@ -3102,6 +3113,9 @@ async function loadMedia(kind) {
       .map(
         (s) => `
       <div class="sticker-cell">
+        <input type="checkbox" class="generated-pick" data-name="${s.name}"
+               style="position:absolute;left:6px;top:6px;z-index:3;cursor:pointer"
+               onchange="updateSelHint('generated-pick','generatedSelHint')">
         <span class="del" onclick="delMedia('${kind}','${s.name}')" title="删除">×</span>
         <img data-name="${s.name}" alt="">
         <div class="nm">${(s.size / 1024).toFixed(0)}KB</div>
@@ -3498,58 +3512,73 @@ async function togglePlugin(id, enabled) {
 }
 
 
+
+
 // ===== 素材批量删除 =====
 
-/** 当前选中的素材 */
-function mediaSelected() {
-  return [...document.querySelectorAll('.media-pick:checked')].map((el) => ({
-    name: el.dataset.name,
-    kind: el.dataset.kind,
-  }));
+/** 某个列表里选中的文件名 */
+function selNames(cls) {
+  return [...document.querySelectorAll('.' + cls + ':checked')].map((el) => el.dataset.name);
 }
 
-function updateMediaSel() {
-  const n = mediaSelected().length;
-  const hint = $('mediaSelHint');
-  if (hint) hint.textContent = n ? '已选 ' + n + ' 个' : '未选中';
+function updateSelHint(cls, hintId) {
+  const n = selNames(cls).length;
+  const el = $(hintId);
+  if (el) el.textContent = n ? '已选 ' + n + ' 张' : '未选中';
 }
 
-function toggleMediaAll() {
-  const boxes = [...document.querySelectorAll('.media-pick')];
-  if (!boxes.length) return;
+/** 全选 / 取消全选 */
+function toggleSel(cls) {
+  const boxes = [...document.querySelectorAll('.' + cls)];
+  if (!boxes.length) return toast('这个列表是空的', 'err');
   const allOn = boxes.every((b) => b.checked);
   boxes.forEach((b) => (b.checked = !allOn));
-  updateMediaSel();
+  const hintId = cls === 'generated-pick' ? 'generatedSelHint' : 'mediaSelHint';
+  updateSelHint(cls, hintId);
 }
 
-/** 删除选中的（按类型分组调用，一次请求删一批） */
-async function batchDeleteMedia() {
-  const picked = mediaSelected();
-  if (!picked.length) return toast('先勾选要删的图', 'err');
-  if (!confirm('确定删除选中的 ' + picked.length + ' 张？删了就找不回来了')) return;
-
-  const byKind = {};
-  for (const p of picked) (byKind[p.kind] ||= []).push(p.name);
+/**
+ * 删除选中的。
+ * @param {string} cls 勾选框的 class
+ * @param {'generated'|'auto'} kind generated = 全是画；auto = 每张按自己的类型删
+ */
+async function batchDeleteSelected(cls, kind) {
+  const names = selNames(cls);
+  if (!names.length) return toast('先勾选要删的图', 'err');
+  if (!confirm('确定删除选中的 ' + names.length + ' 张？删了找不回来')) return;
 
   let deleted = 0;
   const failed = [];
-  for (const [kind, names] of Object.entries(byKind)) {
+
+  if (kind === 'generated') {
     try {
-      const r = await api('media/delete-batch', { method: 'POST', body: { kind, names } });
-      if (r.ok) {
-        deleted += r.deleted || 0;
-        if (r.failed?.length) failed.push(...r.failed);
-      } else {
-        failed.push({ name: kind, error: r.error });
-      }
+      const r = await api('media/delete-batch', { method: 'POST', body: { kind: 'generated', names } });
+      if (r.ok) deleted = r.deleted || 0;
+      if (r.failed?.length) failed.push(...r.failed);
     } catch (e) {
-      failed.push({ name: kind, error: e.message });
+      failed.push({ name: 'generated', error: e.message });
+    }
+  } else {
+    // 统一列表里图片和表情包混着，按每张自己的类型分组
+    const byKind = {};
+    for (const el of document.querySelectorAll('.' + cls + ':checked')) {
+      const k = el.dataset.kind || 'stickers';
+      (byKind[k] ||= []).push(el.dataset.name);
+    }
+    for (const [k, list] of Object.entries(byKind)) {
+      try {
+        const r = await api('media/delete-batch', { method: 'POST', body: { kind: k, names: list } });
+        if (r.ok) deleted += r.deleted || 0;
+        if (r.failed?.length) failed.push(...r.failed);
+      } catch (e) {
+        failed.push({ name: k, error: e.message });
+      }
     }
   }
 
   toast('已删除 ' + deleted + ' 张' + (failed.length ? '，失败 ' + failed.length : ''));
+  loadMedia('generated');
   loadMediaAll();
-  if ($('page-stickers')?.classList.contains('active')) loadMedia('generated');
 }
 
 /** 一键清空「她画的图」（先问数量再删） */
