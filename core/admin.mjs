@@ -12,6 +12,7 @@
  */
 import { resolveWordsDir, scopeName, generatedDir } from './scoped-paths.mjs';
 import { applyPatch as applySchemaPatch, toPublic as toSchemaPublic } from './config-schema.mjs';
+import { suitableAsSticker } from './media-suit.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -529,6 +530,73 @@ export class AdminApi {
         }
         this.log.info?.(`[admin] 清空 ${kind}（${only}）：删除 ${deleted} 张`);
         return { code: 200, body: { ok: true, dryRun: false, deleted } };
+      }
+
+      /**
+       * 清理不合格素材。
+       *
+       * 不直接删：挪到 data/<kind>-trash/，用户后悔了还能捞回来。
+       */
+      if (method === 'POST' && pathname === '/api/admin/media/clean') {
+        const kind = String(body?.kind || 'stickers');
+        const dirs = this.#mediaDirs();
+        const dir = dirs[kind];
+        if (!dir) return { code: 200, body: { ok: false, error: '未知类型' } };
+
+        let files = [];
+        try {
+          files = fs.readdirSync(dir).filter((n) => /^[\w.-]{1,120}$/.test(n));
+        } catch {
+          return { code: 200, body: { ok: false, error: '目录读不到' } };
+        }
+
+        const { suitableAsSticker, suitableAsImage } = await import('./media-suit.mjs');
+        const judge = kind === 'stickers' ? suitableAsSticker : suitableAsImage;
+
+        const bad = [];
+        for (const n of files) {
+          if (!/\.(jpe?g|png|gif|webp)$/i.test(n)) continue;
+
+          /**
+           * 网页抓来的图单独判死。
+           *
+           * 名字里带 site/web 的是「抓图」功能存进来的（网页横幅、文章配图）。
+           * 它们尺寸可能合格，但语义上不是表情包 —— 之前就真发出去过
+           * 一张 2197×68 的横幅。
+           */
+          if (/^sticker_(site|web)_/.test(n)) {
+            bad.push({ name: n, reason: '网页抓取（不是表情包）' });
+            continue;
+          }
+
+          try {
+            const buf = fs.readFileSync(path.join(dir, n));
+            const v = judge(buf);
+            if (!v.ok) bad.push({ name: n, reason: v.reason || '不合格' });
+          } catch (e) {
+            bad.push({ name: n, reason: '读不出来：' + e.message });
+          }
+        }
+
+        if (body?.dryRun === true) {
+          return { code: 200, body: { ok: true, dryRun: true, count: bad.length, items: bad } };
+        }
+
+        const trash = path.join(this.root, 'data', kind + '-trash');
+        fs.mkdirSync(trash, { recursive: true });
+        let moved = 0;
+        for (const b of bad) {
+          try {
+            fs.renameSync(path.join(dir, b.name), path.join(trash, b.name));
+            moved++;
+          } catch {}
+        }
+
+        // 清掉素材池缓存，下一次挑选会重新扫
+        this.__stickerPoolCache = null;
+        this.log.info?.(`[clean] ${kind} 清掉 ${moved} 张不合格的，移到 data/${kind}-trash/`);
+
+        return { code: 200, body: { ok: true, moved, items: bad.slice(0, 20) } };
       }
 
       // 上传图片
@@ -2053,14 +2121,59 @@ print('%016x' % bits)
    * @param {string} text 刚回复的内容，用来判断语气
    * @returns {{ok:boolean, name?:string, tags?:string[], mood?:string[], reason?:string}}
    */
+  /**
+   * 过滤出「能当表情包」的文件。
+   *
+   * 结果缓存 60 秒：一次对话可能挑好几次，不必每次都读盘解码。
+   */
+  #onlySuitableStickers(dir) {
+    const now = Date.now();
+    if (this.__stickerPoolCache && now - this.__stickerPoolCache.at < 60000) {
+      return this.__stickerPoolCache.list;
+    }
+
+    let all = [];
+    try {
+      all = fs.readdirSync(dir).filter((n) => /\.(jpe?g|png|gif|webp)$/i.test(n));
+    } catch {
+      return [];
+    }
+
+    // 懒加载：避免顶层 import 循环
+    const suitable = (buf) => {
+      try {
+        return suitableAsSticker(buf).ok;
+      } catch {
+        return true; // 判定失败就别拦，宁可发出去也别卡住
+      }
+    };
+
+    const good = [];
+    for (const n of all) {
+      try {
+        const buf = fs.readFileSync(path.join(dir, n));
+        if (suitable(buf)) good.push(n);
+      } catch {}
+    }
+
+    this.__stickerPoolCache = { at: now, list: good };
+    return good;
+  }
+
   pickSticker(text = '') {
     const dirs = this.#mediaDirs();
     const dir = dirs.stickers;
     if (!fs.existsSync(dir)) return { ok: false, reason: '素材库目录不存在' };
 
-    // 只发真实存在的文件（索引里可能留着已经删掉的）
-    const files = fs.readdirSync(dir).filter((n) => /\.(jpe?g|png|gif)$/i.test(n));
-    if (!files.length) return { ok: false, reason: '素材库里没有图' };
+    /**
+     * 只发「合格」的图。
+     *
+     * 以前是「库里有什么就随机发什么」，结果发出去一张 70 字节的测试图
+     * （1x1 像素，微信里就是一片空白）和一张网页抓来的横幅。
+     * 判定逻辑在 core/media-suit.mjs，跟抓图入库用的是同一套。
+     */
+    const files = this.#onlySuitableStickers(dir);
+    if (!files.length) return { ok: false, reason: '素材库里没有合格的图' };
 
     const index = this.#readStickerIndex();
     const t = String(text || '');

@@ -1072,6 +1072,31 @@ export class ChatEngine {
       }
 
       /**
+       * 保险：她声称「发了图/语音」但实际什么都没发时，把话改掉。
+       *
+       * 真实事故：用户说「发个表情包给我看看」，这轮概率没命中，
+       * 系统没发任何图，她却回「发你了，收了没」—— 用户盯着微信等半天。
+       * 提示词里已经写了「没做就别说」，但那靠模型自觉；这里做确定性兜底，
+       * 反正改一个词比让人白等强。
+       */
+      {
+        const sentSomething = (drawn?.length || 0) > 0 || Boolean(voice);
+        const text = finalBubbles.join(' ');
+
+        if (!sentSomething && /发你了|给你发了|发过去了|发出了|发了张|发了张图/.test(text)) {
+          const softened = finalBubbles.map((b) =>
+            b
+              .replace(/发你了/g, '没发出去')
+              .replace(/给你发了/g, '没发出去')
+              .replace(/发过去了/g, '没发出去')
+              .replace(/发了张图?/g, '想发张图没发出去'),
+          );
+          finalBubbles = softened;
+          this.log.warn?.('[honesty] 她声称发了东西但实际没发，已改成「没发出去」');
+        }
+      }
+
+      /**
        * 记这一轮对情绪的影响。
        *
        * 只看对方怎么说话（骂人 / 夸人 / 敷衍），不看内容对错 ——
@@ -1529,7 +1554,14 @@ export class ChatEngine {
           files.find((n) => n === want) ||
           files.find((n) => n.startsWith(want)) ||
           files.find((n) => n.includes(want));
-        if (hit) return hit;
+
+        /**
+         * 命中文件名还不够，还要真的是张能看的图。
+         *
+         * 真实事故：模型输出里带了 "stk_1d5f4c13e625.png"（一张 70 字节的
+         * 测试图），兜底逻辑照着名字就把这片空白发出去了。
+         */
+        if (hit && namedQualityOk(path.join(dir, hit))) return hit;
       }
     }
 
