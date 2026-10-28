@@ -689,9 +689,10 @@
 
       <div class="feature">
         <div class="row"><label>语音回复</label><div class="ctl">
-          <input type="number" id="voiceChance" min="0" max="100" step="5" style="max-width:80px" placeholder="概率%">
+          <input type="number" id="voiceChance" min="0" max="100" step="5" style="max-width:80px" placeholder="概率%"
+                 onchange="saveVoiceChance(true)" title="改完自动保存">
           <span class="hint">% 概率发语音</span>
-          <select id="ttsVoice" style="max-width:200px"></select>
+          <select id="ttsVoice" style="max-width:200px" onchange="saveTtsVoice(true)" title="选完自动保存"></select>
           <button class="ghost sm" onclick="importVoicePack()" title="导入自定义音色（声音复刻得到的音色 ID）">导入语音包</button>
         </div></div>
         <div class="keyrow">
@@ -1085,9 +1086,11 @@
       <div class="row">
         <label>发送概率</label>
         <div class="ctl">
-          <input type="number" id="stickerChance" min="0" max="100" step="5" style="max-width:90px">
+          <input type="number" id="stickerChance" min="0" max="100" step="5" style="max-width:90px"
+                 onchange="saveStickerChance(true)" title="改完自动保存">
           <span class="hint">%。每次回复后有这个概率补一个表情包</span>
           <button class="ghost sm" onclick="saveStickerChance()">保存</button>
+          <span class="hint" id="stickerStatus"></span>
         </div>
       </div>
     </div>
@@ -3220,22 +3223,50 @@ async function delMedia(kind, name) {
   }
 }
 
-async function saveStickerChance() {
-  const v = Number($('stickerChance').value) / 100;
+async function saveStickerChance(quiet) {
+  const el = $('stickerChance');
+  const raw = String(el?.value ?? '').trim();
+  if (!raw) return; // 空着不动，别把概率清成 0
+
+  const pct = Math.max(0, Math.min(100, Number(raw)));
+  if (!Number.isFinite(pct)) return;
+
+  const status = $('stickerStatus');
   try {
-    await api('config', { method: 'POST', body: { wechat: { stickerChance: v } } });
-    toast('已保存：' + Math.round(v * 100) + '% 概率发表情包');
+    const r = await api('config', { method: 'POST', body: { wechat: { stickerChance: pct / 100 } } });
+    if (r && r.ok === false) throw new Error(r.error || '保存失败');
+    if (el) el.value = pct;
+    if (status) {
+      status.textContent = '✓ 已保存 ' + pct + '%';
+      setTimeout(() => (status.textContent = ''), 2500);
+    }
+    if (!quiet) toast('已保存：' + pct + '% 概率发表情包');
   } catch (e) {
+    if (status) status.textContent = '✗ ' + e.message;
     toast('保存失败: ' + e.message, 'err');
   }
 }
 
-async function saveVoiceChance() {
-  const v = Number($('voiceChance').value) / 100;
+async function saveVoiceChance(quiet) {
+  const el = $('voiceChance');
+  const raw = String(el?.value ?? '').trim();
+  if (!raw) return; // 空着不动，别把概率清成 0
+
+  const pct = Math.max(0, Math.min(100, Number(raw)));
+  if (!Number.isFinite(pct)) return;
+
+  const status = $('ttsStatus');
   try {
-    await api('config', { method: 'POST', body: { wechat: { voiceChance: v } } });
-    toast('已保存：' + Math.round(v * 100) + '% 概率发语音');
+    const r = await api('config', { method: 'POST', body: { wechat: { voiceChance: pct / 100 } } });
+    if (r && r.ok === false) throw new Error(r.error || '保存失败');
+    if (el) el.value = pct;
+    if (status) {
+      status.textContent = '✓ 已保存 ' + pct + '%';
+      setTimeout(() => (status.textContent = ''), 2500);
+    }
+    if (!quiet) toast('已保存：' + pct + '% 概率发语音');
   } catch (e) {
+    if (status) status.textContent = '✗ ' + e.message;
     toast('保存失败: ' + e.message, 'err');
   }
 }
@@ -3269,12 +3300,21 @@ async function clearTtsKey() {
   }
 }
 
-async function saveTtsVoice() {
-  const v = $('ttsVoice').value;
+async function saveTtsVoice(quiet) {
+  const v = $('ttsVoice')?.value;
+  if (!v) return;
+
+  const status = $('ttsStatus');
   try {
-    await api('config', { method: 'POST', body: { voice: { ttsVoice: v } } });
-    toast('已保存音色：' + v);
+    const r = await api('config', { method: 'POST', body: { voice: { ttsVoice: v } } });
+    if (r && r.ok === false) throw new Error(r.error || '保存失败');
+    if (status) {
+      status.textContent = '✓ 音色：' + v;
+      setTimeout(() => (status.textContent = ''), 2500);
+    }
+    if (!quiet) toast('已保存音色：' + v);
   } catch (e) {
+    if (status) status.textContent = '✗ ' + e.message;
     toast('保存失败：' + e.message, 'err');
   }
 }
