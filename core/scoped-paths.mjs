@@ -109,6 +109,13 @@ export function migrateLegacyToScope(root, card) {
     ['logic', LEGACY.logic(root), logicFile(root, card)],
     ['memory', LEGACY.memory(root), memoryDir(root, card)],
     ['generated', path.join(root, 'data', 'generated'), generatedDir(root, card)],
+    /**
+     * 会话历史（老版本一直是全局 data/sessions）。
+     *
+     * 换卡串历史就是因为它没跟着卡走：新角色能答出上一个角色聊过的内容。
+     * 升级时把旧的搬进当前卡，之后按卡分开存。
+     */
+    ['sessions', path.join(root, 'data', 'sessions'), path.join(scopeDir(root, card), 'sessions')],
   ];
 
   for (const [name, from, to] of check) {
