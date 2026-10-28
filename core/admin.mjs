@@ -488,6 +488,11 @@ export class AdminApi {
         };
       }
 
+      // ===== 用量统计 =====
+      if (method === 'GET' && pathname === '/api/admin/usage') {
+        return { code: 200, body: this.engine.usage || { calls: 0, input: 0, output: 0 } };
+      }
+
       // ===== 插件 =====
       if (method === 'GET' && pathname === '/api/admin/plugins') {
         return {

@@ -117,6 +117,14 @@ export class ChatEngine {
         log: (m) => logger.info?.(m),
       });
 
+      /**
+       * 用量统计。
+       *
+       * 记每次调用的输入/输出 token，按天累计，写进 data/token-stats.json。
+       * 目的是能回答「这个功能一次花多少」这种问题 —— 之前完全没数据。
+       */
+      this.usage = { day: '', calls: 0, input: 0, output: 0, byKind: {} };
+
       this.tools = new ToolKit({
         plugins: this.plugins,
         sandbox: config.tools.sandbox || path.join(config.root || '.', 'agent-workspace'),
@@ -323,6 +331,41 @@ export class ChatEngine {
    * @param {(chunk: string) => void} [input.onDelta] 流式增量回调
    * @returns {Promise<{bubbles: string[], text: string, reason: string}>}
    */
+  /**
+   * 记一次调用用量。
+   * @param {object} u 服务商返回的 usage
+   * @param {string} kind 这次调用是干什么的（chat / summary / tool …）
+   */
+  recordUsage(u, kind = 'chat') {
+    if (!u) return;
+    const inTok = Number(u.prompt_tokens ?? u.input_tokens ?? 0) || 0;
+    const outTok = Number(u.completion_tokens ?? u.output_tokens ?? 0) || 0;
+    if (!inTok && !outTok) return;
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (this.usage.day !== today) {
+      this.usage = { day: today, calls: 0, input: 0, output: 0, byKind: {} };
+    }
+
+    this.usage.calls += 1;
+    this.usage.input += inTok;
+    this.usage.output += outTok;
+
+    const k = (this.usage.byKind[kind] ||= { calls: 0, input: 0, output: 0 });
+    k.calls += 1;
+    k.input += inTok;
+    k.output += outTok;
+
+    this.log.info?.(`[token] ${kind} in=${inTok} out=${outTok} total=${inTok + outTok}`);
+
+    // 落盘（每天一份，覆盖写；数据很小）
+    try {
+      const f = path.join(this.config.root || process.cwd(), 'data', 'token-stats.json');
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, JSON.stringify(this.usage, null, 2), 'utf8');
+    } catch {}
+  }
+
   async handle(input) {
     const { sessionId, text, speakerName, isOwner, onDelta, images, audio, enableSearch, ownerCheck } = input;
     if (!sessionId) throw new Error('缺少 sessionId');
@@ -573,7 +616,9 @@ export class ChatEngine {
             return { bubbles: [], text: '', reason: 'llm_error', error: r.error };
           }
         } else {
-          for await (const chunk of this.llm.stream(messages)) {
+          for await (const chunk of this.llm.stream(messages, {
+            onUsage: (u) => this.recordUsage(u, 'chat'),
+          })) {
             raw += chunk;
             onDelta?.(chunk);
           }
@@ -711,6 +756,8 @@ export class ChatEngine {
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const res = await this.llm.streamWithTools(msgs, this.tools.definitions());
+      // 每轮都记一次：工具循环往往要调好几轮，最费 token 的就是这里
+      this.recordUsage(res.usage, round === 0 ? 'tool-chat' : 'tool-round');
 
       // 没有工具调用 → 最终回复，模拟流式回调让前端有感知
       if (!res.toolCalls || res.toolCalls.length === 0) {
@@ -1173,7 +1220,9 @@ export class ChatEngine {
         lines.join('\n');
 
       let summary = '';
-      for await (const chunk of this.llm.stream([{ role: 'user', content: prompt }])) {
+      for await (const chunk of this.llm.stream([{ role: 'user', content: prompt }], {
+        onUsage: (u) => this.recordUsage(u, 'summary'),
+      })) {
         summary += chunk;
       }
 

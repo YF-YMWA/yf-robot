@@ -74,6 +74,8 @@ export class LlmClient {
       model: opts.model || provider.model,
       messages,
       stream: true,
+      // 让服务商在最后一个 chunk 里带上用量，好统计花费
+      stream_options: { include_usage: true },
       temperature: opts.temperature ?? this.cfg.temperature,
       max_tokens: opts.maxTokens ?? this.cfg.maxTokens,
     };
@@ -114,7 +116,14 @@ export class LlmClient {
         return;
       }
 
-      yield* parseSseStream(res.body);
+      yield* parseSseStream(res.body, (u) => {
+        // 只有支持 include_usage 的服务商才会给，没有就算了
+        if (opts.onUsage && u) {
+          try {
+            opts.onUsage(u);
+          } catch {}
+        }
+      });
     } catch (e) {
       if (e instanceof LlmError) throw e;
       if (e.name === 'AbortError') {
@@ -211,6 +220,7 @@ export class LlmClient {
         text: typeof msg.content === 'string' ? msg.content : '',
         toolCalls: Array.isArray(msg.tool_calls) && msg.tool_calls.length ? msg.tool_calls : null,
         finishReason: choice?.finish_reason || 'stop',
+        usage: json?.usage || null,
       };
     } catch (e) {
       if (e instanceof LlmError) throw e;
@@ -231,7 +241,7 @@ export class LlmClient {
  * 解析 SSE 流，产出增量文本。
  * @param {ReadableStream} body
  */
-export async function* parseSseStream(body) {
+export async function* parseSseStream(body, onUsage = null) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -257,6 +267,13 @@ export async function* parseSseStream(body) {
           const json = JSON.parse(payload);
           const delta = json?.choices?.[0]?.delta?.content;
           if (typeof delta === 'string' && delta) yield delta;
+
+          // 用量（通常只在最后一个 chunk 里出现）
+          if (onUsage && json?.usage) {
+            try {
+              onUsage(json.usage);
+            } catch {}
+          }
 
           // 某些服务商把结束原因放在这里
           const finish = json?.choices?.[0]?.finish_reason;
