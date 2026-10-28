@@ -178,13 +178,13 @@ test('toPublic：包含所有声明过的字段', () => {
 test('toPublic：密钥只给掩码和「有没有」', () => {
   const cfg = defaults();
   // llm 不在 SECTION_SCHEMA 里（字段由客户端自己管），手动补上
-  cfg.llm = { apiKey: 'sk-real-key-0123456789abcdef0123456789' };
+  cfg.llm = { apiKey: 'sk-test-key-0123456789abcdef012345' };
   cfg.vision.apiKey = '';
 
   const p = toPublic(cfg, { mask: (s) => (s ? s.slice(0, 4) + '****' : '') });
 
-  assert.ok(!JSON.stringify(p).includes('sk-real-key'), '明文 Key 不能出现在对外配置里');
-  assert.equal(p.llm.apiKeyMasked, 'sk-r****');
+  assert.ok(!JSON.stringify(p).includes('sk-test-key'), '明文 Key 不能出现在对外配置里');
+  assert.equal(p.llm.apiKeyMasked, 'sk-t****');
   assert.equal(p.llm.apiKeyPresent, true);
   assert.equal(p.vision.apiKeyPresent, false);
 });
