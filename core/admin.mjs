@@ -769,7 +769,7 @@ export class AdminApi {
       // ===== 适配器进程（从面板启动 / 停止）=====
       if (method === 'GET' && pathname === '/api/admin/adapter/status') {
         const { status } = await import('./adapter-runner.mjs');
-        return { code: 200, body: status(this.root) };
+        return { code: 200, body: await status(this.root) };
       }
       if (method === 'POST' && pathname === '/api/admin/adapter/start') {
         const { start } = await import('./adapter-runner.mjs');

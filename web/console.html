@@ -3813,7 +3813,9 @@ async function loadAdapterCtl() {
     if (msg) {
       msg.textContent = j.running
         ? '正在运行（pid ' + j.pid + '）· 目录 ' + (j.mode === 'bundled' ? 'adapter/' : '隔壁仓库')
-        : '没有在跑。点「启动适配器」会弹 UAC。';
+        : j.elevated
+          ? '没有在跑。服务已是管理员，点「启动适配器」不会弹 UAC。'
+          : '没有在跑。点「启动适配器」会弹一次 UAC（点「是」）。不想每次弹，就用管理员身份运行 桌面控制台.bat。';
     }
   } catch (e) {
     if (msg) msg.textContent = '状态查询失败：' + e.message;
