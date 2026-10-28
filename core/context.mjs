@@ -140,6 +140,7 @@ export function assembleContext({
   logicHits = [],
   kbHits = [],
   media = null,
+  recentMedia = null,
   styleText = '',
   budget = DEFAULT_BUDGET,
 } = {}) {
@@ -201,8 +202,13 @@ export function assembleContext({
   }
 
   // 3. 素材提示：只有真的在聊图才给
+  //
+  // 刚收过图也算「在聊图」：用户发来一个表情包，紧接着说「发回给我看看」
+  // 「再发一次」—— 这几句里没有「图」字，按关键词判断会漏掉，
+  // 于是素材块整块不出现，她只能瞎猜。
   const talkingAboutMedia =
     mentionsMedia(text) ||
+    Boolean(recentMedia) ||
     [...logicLines, ...kbLines].some((l) => mentionsMedia(l));
 
   if (media && talkingAboutMedia && media.total > 0) {
@@ -215,6 +221,20 @@ export function assembleContext({
       `【手上的图】素材库里有 ${media.total} 张图，情绪标签：${tagText || '暂无'}。\n` +
       '想发的时候用 list_stickers 挑一张，再用 send_image 发出去；' +
       '要新画一张用 draw_image。别每句都发。';
+
+    /**
+     * 刚收进来的那张，把文件名点出来。
+     *
+     * 真实事故：用户发来一个表情包，她说「这张收了」，用户说「发回给我看看」，
+     * 她嘴上说「发了」—— 但表情包是随机挑的，挑到的是库里另一张旧图，
+     * 用户要的那张根本没发出去。
+     * 告诉她确切文件名，配合 send_image(name=...) 才能真的发回原来那张。
+     */
+    if (recentMedia && recentMedia.name) {
+      hint +=
+        `\n【刚收到的素材】对方刚发来一张，已存成 ${recentMedia.name}。` +
+        `她要是说「发回来/再发一次」，就用 send_image(name="${recentMedia.name}")，别随机挑别的。`;
+    }
 
     if (hint.length > cap('media')) hint = hint.slice(0, cap('media'));
 

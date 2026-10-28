@@ -496,6 +496,24 @@ export class WebChannel {
         });
 
         if (r.ok && r.name) {
+          /**
+           * 记住「刚收进来的这张」。
+           *
+           * 用户发来一个表情包 → 她说「这张收了」→ 用户说「发回给我」。
+           * 没有这个记录，她只能随机挑一张，挑到的往往不是刚收的那张。
+           * 记下来之后，上下文会告诉她确切文件名。
+           */
+          try {
+            if (this.engine) {
+              this.engine.recentMedia = {
+                name: r.name,
+                kind,
+                at: Date.now(),
+                from: senderId || chatId,
+              };
+            }
+          } catch {}
+
           // 顺手给这张图打描述（异步，不阻塞适配器）
           this.admin?.describeMediaOne?.(r.name, kind).catch?.(() => {});
         }
