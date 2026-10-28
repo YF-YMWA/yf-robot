@@ -481,7 +481,19 @@ export class WebChannel {
         }
 
         const lib = this.#mediaLib();
-        const r = await lib.save({ kind, data: buf, note: `（来自 ${senderId || chatId || '适配器'}）` });
+        const r = await lib.save({
+          kind,
+          data: buf,
+          note: `（来自 ${senderId || chatId || '适配器'}）`,
+          /**
+           * 适配器可以指定文件名（例如按表情 md5 命名）。
+           *
+           * 好处：同一张表情重复发来会命中同名文件，直接判重，
+           * 不会在素材库里堆出七八张一模一样的图。
+           * 只接受字母数字和 ._-，挡掉路径穿越。
+           */
+          name: /^[\w.-]{1,80}$/.test(String(body.name || '')) ? String(body.name) : undefined,
+        });
 
         if (r.ok && r.name) {
           // 顺手给这张图打描述（异步，不阻塞适配器）
