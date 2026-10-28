@@ -11,6 +11,7 @@
  * 所有写操作都要校验，避免控制台把配置改坏。
  */
 import { resolveWordsDir, scopeName, generatedDir } from './scoped-paths.mjs';
+import { applyPatch as applySchemaPatch, toPublic as toSchemaPublic } from './config-schema.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -4426,7 +4427,17 @@ print('%016x' % bits)
   #publicConfig() {
     const mask = (s) => (s ? s.slice(0, 4) + '****' + s.slice(-4) : '');
     const c = this.config;
-    return {
+
+    /**
+     * schema 生成的段落（mood / tools / reply / wechat / learning / logic / ...）。
+     *
+     * 字段、默认值、脱敏都由 config-schema.mjs 决定，这里不再手写一遍 ——
+     * 之前正是「手写两份」导致读接口漏字段（tools 就是这么消失的）。
+     * 下面手工部分保留：server / search 的派生值，以及不在 schema 里的段。
+     */
+    const generated = toSchemaPublic(c, { mask });
+
+    const out = {
       /** 后台运行相关 */
       server: {
         port: c.server?.port,
@@ -4568,6 +4579,39 @@ print('%016x' % bits)
       },
       card: c.card || null,
     };
+
+    /**
+     * schema 里声明了、但手工块还没写的段落，自动补上。
+     *
+     * 规则：手工优先，schema 只补缺。
+     * 这样以后往 config-schema.mjs 加一个新段落（比如 mood、session），
+     * 读接口自动就能返回，不需要再改这里 —— 之前就是漏了这一步，
+     * 导致「配置里存着、界面上读不到」。
+     */
+    for (const [section, value] of Object.entries(generated)) {
+      if (!(section in out)) out[section] = value;
+    }
+
+    return out;
+  }
+
+  /** 手工写了展示逻辑的段落（这些不会被 schema 结果整体覆盖） */
+  #manualSections() {
+    return {
+      server: 1,
+      llm: 1,
+      vision: 1,
+      voice: 1,
+      search: 1,
+      share: 1,
+      care: 1,
+      learning: 1,
+      logic: 1,
+      wechat: 1,
+      imagegen: 1,
+      reply: 1,
+      group: 1,
+    };
   }
 
   /** 保存配置。只接受白名单字段。 */
@@ -4580,6 +4624,15 @@ print('%016x' % bits)
     const current = JSON.parse(fs.readFileSync(file, 'utf8'));
 
     // 逐项白名单合并
+    /**
+     * 先让 schema 合并一遍。
+     *
+     * schema 声明过的段落（mood/tools/reply/wechat/learning/...）都由它统一处理，
+     * 加字段不用再改这里 —— 之前每加一项都要在读写两处各写一遍，漏一处就静默失效。
+     * Key 相关的仍然走下面的守卫逻辑（要归档、要掩码、要防覆盖）。
+     */
+    const schemaResult = applySchemaPatch(current, patch);
+
     /**
      * 安全地处理 Key 更新。
      *
@@ -5102,6 +5155,9 @@ print('%016x' % bits)
     return {
       ok: true,
       saved: true,
+      // 哪些字段真改了、哪些名字不认识（排查「保存没反应」用）
+      applied: schemaResult.applied,
+      ignored: schemaResult.ignored,
       // API 类改动已即时重建客户端；只有通道开关这类才真的要重启
       needsRestart: Boolean(patch.channels),
       message: touchedApi
