@@ -11,12 +11,16 @@ Node.js 写核心（零第三方依赖），Python 只给适配器用。Windows 
 
 ## 快速开始
 
-**方式一：下载发行包**（不想碰代码）
+**方式一：下载发行包**（不想碰代码，推荐）
 
-到 [Releases](../../releases) 下载最新的 `YF-Robot-vX.zip`，解压到**纯英文路径**
-（例如 `D:\YF-Robot`），双击 `YF-Robot.bat`。包内自带 Node 和 Python。
+👉 **[下载最新版](../../releases/latest)** —— 约 52 MB，包内自带 Node 和 Python 运行时，
+不用装任何环境。
+
+解压到**纯英文路径**（例如 `D:\YF-Robot`），双击 `YF-Robot.bat`。
+第一次启动会让你填模型 Key（DeepSeek / 智谱 / 通义 / Ollama 都行）。
 
 > 别解压到桌面或「文档」—— Windows 的受控文件夹访问可能拦住写配置。
+> 升级就解压覆盖到旧目录：`config.json` 和 `data/` 不会被覆盖，记忆还在。
 
 **方式二：从源码跑**
 
@@ -171,7 +175,11 @@ node tools/pack.mjs                # 打包
 - 绕过微信安全机制的代码
 - 任何平台的登录凭证或账号数据
 
-适配器是独立项目，其风险与合规责任由使用者自行承担。
+适配器是独立项目，其风险与合规责任由使用者自行承担：
+
+- 微信适配器：<https://github.com/YF-YMWA/yf-robot-wechat-adapter>
+  （Windows UI 自动化方案，**违反微信个人账号使用规范，有封号风险**，仅供学习研究）
+- 适配器协议文档：[docs/adapter-protocol.md](docs/adapter-protocol.md) —— 想接其他平台照着实现即可
 
 ---
 
