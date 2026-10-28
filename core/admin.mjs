@@ -737,88 +737,23 @@ export class AdminApi {
 
       // ===== 检查更新 =====
       if (method === 'GET' && pathname === '/api/admin/update/check') {
-        const local = JSON.parse(fs.readFileSync(path.join(this.root, 'package.json'), 'utf8')).version;
+        const local = this.#version();
         const repo = this.config.repo || 'YF-YMWA/yf-robot';
 
-        /**
-         * 查最新版本。
-         *
-         * 两个坑：
-         *   1. 项目只打 tag 没发 Release，所以 /releases/latest 是 404 —— 改用 /tags
-         *   2. 某些网络环境下 Node 的 TLS 校验会因为代理拦截失败
-         *      （UNABLE_TO_VERIFY_LEAF_SIGNATURE），这时退回不校验证书的请求，
-         *      只用于「查版本号」这一件事，不涉及任何凭证
-         */
-        const fetchJSON = async (pathname2) => {
-          const url = 'https://api.github.com/repos/' + repo + pathname2;
-          const headers = { 'user-agent': 'YF-Robot', accept: 'application/vnd.github+json' };
-
-          try {
-            const r = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            return await r.json();
-          } catch (e) {
-            // TLS 校验失败 → 换成不校验的 https 请求再试一次
-            if (!/certificate|CERT|SSL|TLS|fetch failed/i.test(String(e.message))) throw e;
-
-            const https = await import('node:https');
-            const body = await new Promise((resolve, reject) => {
-              const req = https.request(
-                url,
-                { headers, rejectUnauthorized: false, timeout: 8000 },
-                (res) => {
-                  if (res.statusCode !== 200) {
-                    reject(new Error('HTTP ' + res.statusCode));
-                    res.resume();
-                    return;
-                  }
-                  let data = '';
-                  res.setEncoding('utf8');
-                  res.on('data', (c) => (data += c));
-                  res.on('end', () => resolve(data));
-                },
-              );
-              req.on('error', reject);
-              req.on('timeout', () => req.destroy(new Error('超时')));
-              req.end();
-            });
-            return JSON.parse(body);
-          }
-        };
-
         try {
-          const tags = await fetchJSON('/tags?per_page=20');
-          const versions = (Array.isArray(tags) ? tags : [])
-            .map((t) => String(t.name || '').replace(/^v/, ''))
-            .filter((v) => /^\d+\.\d+/.test(v));
-
-          // 简单的语义化比较：拆成数字逐段比
-          const cmp = (a, b) => {
-            const pa = String(a).split('.').map(Number);
-            const pb = String(b).split('.').map(Number);
-            for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-              const d = (pa[i] || 0) - (pb[i] || 0);
-              if (d) return d;
-            }
-            return 0;
-          };
-
-          // 接口给的是「按创建时间倒序」，但打 tag 的顺序不一定等于版本顺序
-          versions.sort((a, b) => cmp(b, a));
-          const latest = versions[0] || local;
-
+          const { latest, versions } = await this.#latestTag(repo);
           return {
             code: 200,
             body: {
               ok: true,
               local,
               latest,
-              hasUpdate: cmp(latest, local) > 0,
+              versions: versions.slice(0, 5),
+              hasUpdate: this.#cmpVersion(latest, local) > 0,
               url: 'https://github.com/' + repo + '/releases',
             },
           };
         } catch (e) {
-          // 没网 / 被墙 / 仓库还没打 tag —— 都不该让控制台报错
           return {
             code: 200,
             body: {
@@ -829,6 +764,31 @@ export class AdminApi {
             },
           };
         }
+      }
+
+      // ===== 一键更新（下载新版本、覆盖代码、保留配置和数据）=====
+      if (method === 'POST' && pathname === '/api/admin/update/apply') {
+        const local = this.#version();
+        const repo = this.config.repo || 'YF-YMWA/yf-robot';
+
+        // 先查最新版本（复用检查更新的逻辑）
+        let latest = '';
+        try {
+          const check = await this.#latestTag(repo);
+          latest = check.latest || '';
+        } catch (e) {
+          return { code: 200, body: { ok: false, steps: [], error: '查不到最新版本：' + e.message } };
+        }
+
+        const { applyUpdate } = await import('./updater.mjs');
+        const r = await applyUpdate({
+          root: this.root,
+          repo,
+          latest,
+          local,
+          log: (m) => this.log.info?.(m),
+        });
+        return { code: 200, body: { ...r, local, latest } };
       }
 
       // ===== 插件 =====
@@ -4340,6 +4300,69 @@ print('%016x' % bits)
   }
 
   /** 服务状态。 */
+  /**
+   * 查仓库最新的 tag 版本号。
+   *
+   * 项目只打 tag 没发 Release，所以用 /tags 而不是 /releases/latest。
+   * TLS 被代理拦截时退回不校验证书的请求 —— 只查版本号，不涉及凭证。
+   */
+  async #latestTag(repo) {
+    const fetchJSON = async (p) => {
+      const url = 'https://api.github.com/repos/' + repo + p;
+      const headers = { 'user-agent': 'YF-Robot', accept: 'application/vnd.github+json' };
+
+      try {
+        const r = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return await r.json();
+      } catch (e) {
+        if (!/certificate|CERT|SSL|TLS|fetch failed/i.test(String(e.message))) throw e;
+
+        const https = await import('node:https');
+        const body = await new Promise((resolve, reject) => {
+          const req = https.request(
+            url,
+            { headers, rejectUnauthorized: false, timeout: 8000 },
+            (res) => {
+              if (res.statusCode !== 200) {
+                reject(new Error('HTTP ' + res.statusCode));
+                res.resume();
+                return;
+              }
+              let data = '';
+              res.setEncoding('utf8');
+              res.on('data', (c) => (data += c));
+              res.on('end', () => resolve(data));
+            },
+          );
+          req.on('error', reject);
+          req.on('timeout', () => req.destroy(new Error('超时')));
+          req.end();
+        });
+        return JSON.parse(body);
+      }
+    };
+
+    const tags = await fetchJSON('/tags?per_page=50');
+    const versions = (Array.isArray(tags) ? tags : [])
+      .map((t) => String(t.name || '').replace(/^v/, ''))
+      .filter((v) => /^\d+\.\d+/.test(v))
+      .sort((a, b) => this.#cmpVersion(b, a));
+
+    return { latest: versions[0] || '', versions };
+  }
+
+  /** 语义化版本比较：返回 >0 表示 a 更新 */
+  #cmpVersion(a, b) {
+    const pa = String(a).split('.').map(Number);
+    const pb = String(b).split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const d = (pa[i] || 0) - (pb[i] || 0);
+      if (d) return d;
+    }
+    return 0;
+  }
+
   #version() {
     try {
       return JSON.parse(fs.readFileSync(path.join(this.root, 'package.json'), 'utf8')).version || '';

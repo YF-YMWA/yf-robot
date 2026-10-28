@@ -353,6 +353,7 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button onclick="runRepair()">一键修复</button>
         <button class="ghost" onclick="checkUpdate()">检查更新</button>
+        <button class="ghost" onclick="applyUpdate()" id="updateBtn" style="display:none">一键更新</button>
       </div>
       <div class="hint" style="margin-top:10px;line-height:1.7">
         一键修复会检查：五个 Key 在不在（缺了从备份恢复）、配置有没有缺段落、
@@ -3703,17 +3704,58 @@ async function checkUpdate() {
       return;
     }
 
+    // 有新版才显示「一键更新」按钮
+    const btn = $('updateBtn');
+    if (btn) btn.style.display = j.hasUpdate ? '' : 'none';
+
     box.innerHTML = j.hasUpdate
       ? '<div style="color:var(--warn)">发现新版本 v' +
         escapeHtml(j.latest) +
         '（当前 v' +
         escapeHtml(j.local) +
-        '）　<a href="' +
+        '）　点上面的「一键更新」或 <a href="' +
         escapeHtml(j.url) +
         '" target="_blank" rel="noopener">去下载</a></div>'
       : '<div style="color:var(--ok)">✓ 已是最新版 v' + escapeHtml(j.local) + '</div>';
   } catch (e) {
     box.innerHTML = '<div class="hint" style="color:var(--err)">检查失败：' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+
+/** 一键更新：下载新版本、覆盖代码、保留配置和数据 */
+async function applyUpdate() {
+  if (
+    !confirm(
+      '确定更新？\n\n会做的事：先备份配置和数据 → 下载新版本 → 只覆盖代码 → 需要重启才生效。\n不会碰你的 Key、记忆、素材。',
+    )
+  )
+    return;
+
+  const box = $('repairResult');
+  const btn = $('updateBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '更新中…'; }
+  box.innerHTML = '<div class="hint">下载并覆盖中，可能要半分钟…</div>';
+
+  try {
+    const j = await api('update/apply', { method: 'POST', body: {} });
+    const steps = j.steps || [];
+
+    if (j.ok) {
+      box.innerHTML =
+        '<div style="color:var(--ok);margin-bottom:6px">✓ 更新到 v' + escapeHtml(j.latest) + '</div>' +
+        steps.map((x) => '<div class="hint">· ' + escapeHtml(x) + '</div>').join('') +
+        '<div style="margin-top:8px"><button onclick="restartService()">现在重启</button></div>';
+      toast('更新完成，重启后生效');
+    } else {
+      box.innerHTML =
+        '<div style="color:var(--warn)">' + escapeHtml(j.error || '更新失败') + '</div>' +
+        steps.map((x) => '<div class="hint">· ' + escapeHtml(x) + '</div>').join('');
+    }
+  } catch (e) {
+    box.innerHTML = '<div class="hint" style="color:var(--err)">更新失败：' + escapeHtml(e.message) + '</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '一键更新'; }
   }
 }
 

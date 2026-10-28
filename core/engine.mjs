@@ -160,9 +160,15 @@ export class ChatEngine {
     // 主人身份识别
     this.owner = new OwnerService(config.owner || {});
 
-    // 长期记忆（事实 + 摘要，跨会话持久化）
+    /**
+     * 长期记忆（事实 + 摘要，跨会话持久化）。
+     *
+     * 目录必须按角色卡算 —— 之前这里写的是全局 data/memory，
+     * 结果「独立记忆」只在换过一次卡之后才生效，重启又退回全局：
+     * 换个角色，上一个角色的记忆原样还在。
+     */
     this.memory = new MemoryStore({
-      dir: path.join(config.root || process.cwd(), 'data', 'memory'),
+      dir: memoryDir(config.root || process.cwd(), this.scope),
       maxFacts: config.memory?.maxFacts || 50,
       maxSummaries: config.memory?.maxSummaries || 10,
     });
