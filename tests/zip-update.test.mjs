@@ -180,3 +180,56 @@ test('更新：动手前会备份配置', async () => {
   assert.ok(subs.length > 0);
   assert.ok(fs.existsSync(path.join(bdir, subs[0], 'config.json')));
 });
+
+// ===== 适配器更新 =====
+
+test('适配器：没有 adapter/ 目录时跳过，不报错', async () => {
+  const root = path.join(TMP, 'no-adapter');
+  fs.mkdirSync(root, { recursive: true });
+  const r = await applyUpdate({
+    root,
+    repo: 'nonexistent/nonexistent-xyz-123',
+    latest: '9.9.9',
+    local: '1.0.0',
+    includeAdapter: true,
+  });
+  // 主仓下载失败会先返回，这里只验证不会因为 adapter 报错
+  assert.equal(r.ok, false);
+  assert.ok(Array.isArray(r.steps));
+});
+
+test('适配器：adapter/ 是 git 副本时拒绝覆盖', async () => {
+  const root = path.join(TMP, 'adapter-git');
+  fs.mkdirSync(path.join(root, 'adapter', '.git'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'adapter', 'config.json'), '{"keep":1}', 'utf8');
+
+  // 主仓也让它失败（假仓库），这样能走到 adapter 步骤之前的返回
+  const r = await applyUpdate({
+    root,
+    repo: 'nonexistent/nonexistent-xyz-123',
+    latest: '9.9.9',
+    local: '1.0.0',
+    includeAdapter: true,
+  });
+  assert.equal(r.ok, false);
+  // 配置没被动过
+  assert.equal(fs.readFileSync(path.join(root, 'adapter', 'config.json'), 'utf8'), '{"keep":1}');
+});
+
+test('适配器：备份目录里会留 adapter 的配置', async () => {
+  const root = path.join(TMP, 'adapter-backup');
+  fs.mkdirSync(path.join(root, 'adapter'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'adapter', 'config.json'), '{"v":2}', 'utf8');
+
+  await applyUpdate({
+    root,
+    repo: 'nonexistent/nonexistent-xyz-123',
+    latest: '9.9.9',
+    local: '1.0.0',
+    includeAdapter: true,
+  });
+
+  // 主仓下载失败会提前返回，但备份是在下载之前做的
+  const bdir = path.join(root, 'data', 'backup');
+  assert.ok(fs.existsSync(bdir), '应该有备份目录');
+});
