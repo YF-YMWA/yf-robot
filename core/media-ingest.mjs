@@ -189,7 +189,7 @@ export class MediaLibrary {
    * @param {string} [opts.note] 日志备注
    * @returns {Promise<{ok:boolean, name?:string, dup?:boolean, replaced?:string, error?:string}>}
    */
-  async save({ kind, data, note = '' }) {
+  async save({ kind, data, note = '', name: wanted = '' }) {
     const info = KINDS[kind];
     if (!info) return { ok: false, error: '未知类别' };
     if (!data || !data.length) return { ok: false, error: '空数据' };
@@ -205,8 +205,17 @@ export class MediaLibrary {
       return { ok: false, error: `建目录失败：${e.message}` };
     }
 
+    /**
+     * 名字来源。
+     *
+     * 默认按内容 md5 命名（同样的字节就是同一张图）。
+     * 但动图表情是「连拍合成」的，同一个表情每次截出来的帧都不一样，
+     * 按内容算就永远认不出是同一张 —— 所以允许调用方指定名字（适配器用
+     * 微信 XML 里的表情 md5 命名）。名字只接受安全字符，防路径穿越。
+     */
     const md5 = crypto.createHash('md5').update(data).digest('hex').slice(0, 12);
-    const name = `${info.prefix}${md5}${ext}`;
+    const useWanted = /^[\w.-]{1,80}$/.test(String(wanted || ''));
+    const name = useWanted ? String(wanted) : `${info.prefix}${md5}${ext}`;
     const full = path.join(dir, name);
 
     // 第一层：内容完全一样
