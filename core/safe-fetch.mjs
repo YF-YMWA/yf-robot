@@ -189,26 +189,6 @@ export async function safeFetchText(url, opts = {}) {
   throw new SafeFetchError('跳转次数过多');
 }
 
-/**
- * HTML 转纯文本（够用就行，不追求完美）。
- * 顺带把 <script>/<style> 整段丢掉 —— 那里面最容易藏东西。
- */
-export function htmlToPlainText(html) {
-  return String(html || '')
-    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<\/(p|div|li|h[1-6]|tr|section|article)>/gi, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
+// HTML 转纯文本统一实现在 html-text.mjs，这里转出去方便调用方
+import { htmlToPlainText } from './html-text.mjs';
+export { htmlToPlainText };

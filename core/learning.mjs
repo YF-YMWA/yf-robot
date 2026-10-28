@@ -13,7 +13,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { safeFetchText, SafeFetchError, htmlToPlainText } from './safe-fetch.mjs';
+import { safeFetchText, SafeFetchError } from './safe-fetch.mjs';
+import { htmlToPlainText, decodeEntities } from './html-text.mjs';
 
 /** 默认学习配置。 */
 export const LEARNING_DEFAULTS = {
@@ -31,18 +32,7 @@ export const LEARNING_DEFAULTS = {
   pendingFile: 'learned-words.json',
 };
 
-/** HTML 实体解码（只处理常见的，够用）。 */
-function decodeEntities(s) {
-  return String(s)
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&amp;/gi, '&')
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
-}
+// HTML 实体解码与「HTML → 纯文本」统一放在 core/html-text.mjs
 
 /**
  * 从 HTML 里抠出图片直链。
@@ -166,47 +156,12 @@ export async function fetchSiteImages(url, opts = {}) {
  * 不引第三方库：去掉 script/style/nav/footer 等噪声块，
  * 再把标签剥掉，压缩空白。够模型看懂内容，不必完美。
  */
+/**
+ * 兼容旧接口：HTML → 纯文本。
+ * 唯一实现在 core/html-text.mjs。
+ */
 export function htmlToText(html) {
-  let s = String(html || '');
-
-  /** 去掉整块噪声（含内容）。 */
-  const stripBlocks = (t) =>
-    t
-      .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
-      .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
-      .replace(/<header\b[\s\S]*?<\/header>/gi, ' ')
-      .replace(/<footer\b[\s\S]*?<\/footer>/gi, ' ')
-      .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
-      .replace(/<!--[\s\S]*?-->/g, ' ');
-
-  // 关键顺序：先解实体再剥标签。
-  // 反过来会把 &lt;style&gt; 解码成真标签，导致 CSS 混进正文（百度首页实测）。
-  s = decodeEntities(s);
-  s = stripBlocks(s);
-
-  // 换行标签先变真换行
-  s = s.replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/tr)\b[^>]*>/gi, '\n');
-
-  // 剥掉剩下的标签
-  s = s.replace(/<[^>]+>/g, ' ');
-
-  // 解码一遍残留实体（&nbsp; 之类）
-  s = decodeEntities(s);
-
-  // 解码后可能又冒出标签（双层转义），再剥一次并清掉残块
-  s = stripBlocks(s);
-  s = s.replace(/<[^>]+>/g, ' ');
-
-  // 压缩空白：行内多空格变一个，多空行变一个
-  s = s
-    .split('\n')
-    .map((l) => l.replace(/[ \t\u00a0]+/g, ' ').trim())
-    .filter(Boolean)
-    .join('\n');
-
-  return s.trim();
+  return htmlToPlainText(html);
 }
 
 /**

@@ -9,6 +9,7 @@
  * 只依赖正则，不引第三方库（feedparser 之类的在打包时会拖一堆依赖）。
  */
 import { htmlToText, extractImageUrls } from './learning.mjs';
+import { safeFetchText, SafeFetchError } from './safe-fetch.mjs';
 
 /** XML 实体解码。 */
 function decodeXml(s) {
@@ -208,18 +209,19 @@ export async function fetchFeed(url, opts = {}) {
 
   const attempt = async (n) => {
     try {
-      return await fetch(target, {
-        headers: {
-          'user-agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-          accept:
-            'application/rss+xml,application/atom+xml,application/xml,text/xml;q=0.9,*/*;q=0.8',
-          'accept-language': 'zh-CN,zh;q=0.9',
-        },
-        signal: AbortSignal.timeout(opts.timeoutMs || 20000),
-        redirect: 'follow',
+      /**
+       * 统一走 safe-fetch：以前这里只检查了协议就 fetch(target, {redirect:'follow'})，
+       * 抓 http://127.0.0.1:8899/... 或内网地址都能成功。
+       * RSS 本来就是纯文本 XML，不需要浏览器 UA。
+       */
+      return await safeFetchText(target, {
+        maxBytes: 2 * 1024 * 1024,
+        timeoutMs: opts.timeoutMs || 20000,
+        log: (m) => opts.log?.(m),
       });
     } catch (e) {
+      // 安全策略明确拒绝的，重试也没用
+      if (e instanceof SafeFetchError && /不允许|只支持/.test(e.message)) throw e;
       if (n > 0) {
         await new Promise((r) => setTimeout(r, 600));
         return attempt(n - 1);
@@ -229,12 +231,8 @@ export async function fetchFeed(url, opts = {}) {
   };
 
   try {
-    const res = await attempt(1);
-    if (!res.ok) {
-      return { ok: false, url: target, title: '', items: [], error: `HTTP ${res.status}` };
-    }
-
-    const xml = await res.text();
+    const page = await attempt(1);
+    const xml = page.text;
     const parsed = parseFeed(xml, target);
 
     return {

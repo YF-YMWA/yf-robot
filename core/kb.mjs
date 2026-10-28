@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { htmlToPlainText } from './safe-fetch.mjs';
 
 /** 支持的扩展名 */
 export const SUPPORTED = ['.txt', '.md', '.markdown', '.docx', '.html', '.htm'];
@@ -105,20 +106,14 @@ function docxToText(buf) {
   );
 }
 
-/** html → 纯文本 */
+/**
+ * html → 纯文本。
+ *
+ * 实现统一放在 core/safe-fetch.mjs —— 以前这里一份、learning.mjs 一份、
+ * safe-fetch 又一份，三份行为略有差别（多一个空格的差异），纯属历史遗留。
+ */
 function htmlToText(s) {
-  return String(s)
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return htmlToPlainText(s);
 }
 
 /**

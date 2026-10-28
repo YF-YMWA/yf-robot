@@ -284,6 +284,26 @@
   .item.active { border-color: var(--accent); }
   .item .nm { font-weight: 600; }
   .item .meta { font-size: 12px; color: var(--dim); }
+  .tabbar {
+    display: flex;
+    gap: 6px;
+    margin: 0 0 14px;
+    flex-wrap: wrap;
+  }
+  .tabbar button {
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--fg);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .tabbar button.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
 </style>
 </head>
 <body>
@@ -294,23 +314,20 @@
     <a data-page="overview" class="active">总览</a>
     <a data-page="chat">对话调试</a>
     <a data-page="model">模型与功能</a>
-    <a data-page="persona">角色卡</a>
-    <a data-page="owner">主人设置</a>
     <a data-page="memory">记忆</a>
-    <a data-page="words">词库</a>
     <a data-page="active">主动功能</a>
     <a data-page="stickers">素材库</a>
     <a data-page="learn">联网学习</a>
-    <a data-page="kb">知识库</a>
-    <a data-page="logic">逻辑库</a>
     <a data-page="plugins">插件</a>
-    <a data-page="bridge">接入状态</a>
-    <a data-page="logs">日志</a>
+      <a data-page="data" data-group="data">资料</a>
+    <a data-page="identity" data-group="identity">身份</a>
+    <a data-page="run" data-group="run">运行</a>
   </nav>
   <div class="pagebuild" id="pageBuild"></div>
 </aside>
 
 <main>
+    <div class="tabbar" id="tabBar" style="display:none"></div>
   <div class="page active" id="page-overview">
     <h1>总览</h1>
     <div class="card">
@@ -1904,27 +1921,94 @@ function showTokenExpired(path) {
   setTimeout(() => location.reload(), 1500);
 }
 
+/**
+ * 页面分组：同类的页合并到一个入口，用顶部标签栏切换。
+ *
+ * 以前 15 个平铺入口，知识库/逻辑库/词库、角色卡/主人设置、
+ * 接入状态/日志本来就是同一件事的不同角度，平铺着反而难找。
+ */
+const PAGE_GROUPS = {"data":{"label":"资料","tabs":[["kb","知识库（事实）"],["logic","逻辑库（经验）"],["words","词库（风格）"]]},"identity":{"label":"身份","tabs":[["persona","角色卡"],["owner","主人设置"]]},"run":{"label":"运行","tabs":[["bridge","接入状态"],["logs","日志"]]}};
+
+/** 页 → 所属分组的反查 */
+const PAGE_TO_GROUP = (() => {
+  const m = {};
+  for (const [gid, g] of Object.entries(PAGE_GROUPS)) {
+    for (const [page] of g.tabs) m[page] = gid;
+  }
+  return m;
+})();
+
+/** 进页面时的加载动作 */
+function loadPageData(page) {
+  if (page === 'logs') loadLogs();
+  if (page === 'bridge') loadBridge();
+  if (page === 'active') loadActive();
+  if (page === 'stickers') {
+    loadMediaAll();
+    loadMedia('generated');
+    loadStickerChance();
+    loadStickerIndex();
+  }
+  if (page === 'learn') loadLearn();
+  if (page === 'owner') loadOwner();
+  if (page === 'memory') loadMemory();
+  if (page === 'kb') loadKb();
+  if (page === 'logic') loadLogic();
+  if (page === 'words') loadWords();
+  if (page === 'persona') loadCards();
+}
+
+/** 渲染标签栏 */
+function renderTabBar(page) {
+  const bar = $('tabBar');
+  if (!bar) return;
+  const gid = PAGE_TO_GROUP[page];
+  if (!gid) {
+    bar.style.display = 'none';
+    bar.innerHTML = '';
+    return;
+  }
+  const g = PAGE_GROUPS[gid];
+  bar.style.display = '';
+  bar.innerHTML = g.tabs
+    .map(
+      ([p, label]) =>
+        `<button class="${p === page ? 'on' : ''}" onclick="showPage('${p}')">${label}</button>`,
+    )
+    .join('');
+}
+
+/** 统一的页面切换入口 */
+function showPage(page) {
+  // 点「资料」这种组入口时，落到组里第一个标签
+  if (PAGE_GROUPS[page]) page = PAGE_GROUPS[page].tabs[0][0];
+
+  document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
+  const el = $('page-' + page);
+  if (el) el.classList.add('active');
+
+  // 侧栏高亮：组内页面高亮所属分组
+  const gid = PAGE_TO_GROUP[page] || page;
+  document.querySelectorAll('aside nav a').forEach((x) => {
+    x.classList.toggle('active', x.dataset.page === gid);
+  });
+
+  renderTabBar(page);
+  loadPageData(page);
+  try {
+    location.hash = page;
+  } catch {}
+}
+
 document.querySelectorAll('aside nav a').forEach((a) => {
-  a.onclick = () => {
-    document.querySelectorAll('aside nav a').forEach((x) => x.classList.remove('active'));
-    document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
-    a.classList.add('active');
-    $('page-' + a.dataset.page).classList.add('active');
-    if (a.dataset.page === 'logs') loadLogs();
-    if (a.dataset.page === 'bridge') loadBridge();
-    if (a.dataset.page === 'active') loadActive();
-    if (a.dataset.page === 'stickers') {
-      // 图片和表情包合成一个列表显示
-      loadMediaAll();
-      loadMedia('generated');
-      loadStickerChance();
-      loadStickerIndex();
-    }
-    if (a.dataset.page === 'learn') loadLearn();
-    if (a.dataset.page === 'owner') loadOwner();
-    if (a.dataset.page === 'memory') loadMemory();
-  };
+  a.onclick = () => showPage(a.dataset.page);
 });
+
+// 支持 #kb 这种直接定位（刷新后停在原页）
+if (location.hash) {
+  const p = location.hash.slice(1);
+  if ($('page-' + p)) setTimeout(() => showPage(p), 0);
+}
 
 function toggleSw(id) { $(id).classList.toggle('on'); }
 function setSw(id, on) { const el = $(id); if (el) el.className = 'switch' + (on ? ' on' : ''); }

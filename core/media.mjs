@@ -9,6 +9,7 @@
  *   5. sendmessage 发媒体引用（不传文件本体）
  */
 import crypto from 'node:crypto';
+import { assertFetchable } from './safe-fetch.mjs';
 
 /**
  * AES-128-ECB 加密，PKCS7 padding。
@@ -212,6 +213,15 @@ export function buildImageItem(media) {
  */
 export async function downloadMedia({ url, aesKeyB64, fetchImpl }) {
   const fetch = fetchImpl || globalThis.fetch;
+
+  /**
+   * 只允许公网 http/https。
+   *
+   * 这个 url 平时来自微信 CDN，看着可信；但它毕竟是「别人给的地址」，
+   * 万一适配器被换成恶意的，就能让核心去读内网。
+   * 代价几乎为零，加一道更稳。
+   */
+  assertFetchable(url);
 
   const res = await fetch(url);
   if (!res.ok) throw new Error(`CDN 下载失败: HTTP ${res.status}`);

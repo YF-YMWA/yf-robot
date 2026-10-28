@@ -34,6 +34,7 @@ jobs:
         run: |
           node tools/check-console-js.mjs
           node tools/check-console-fns.mjs
+          node tools/check-console-pages.mjs
 
   leak-scan:
     name: 敏感信息扫描
