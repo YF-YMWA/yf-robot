@@ -760,14 +760,26 @@ export class WebChannel {
       }
       // 主动搭话：生成内容
       if (req.method === 'GET' && url.pathname === '/api/care') {
-        const text = composeCare({
-          // 从人设取，别写死（换角色卡后还叫旧名会很怪）
-          persona:
-            this.engine.persona?.name ||
-            this.engine.config?.__personaName ||
-            '',
+        const idleMinutes = Number(url.searchParams.get('idle') || 60);
+        const target = url.searchParams.get('target') || '';
+
+        /**
+         * 优先让模型现写一句。
+         *
+         * 以前是纯模板（「早，醒了没？」「在干啥呢」），翻来覆去就这几句，
+         * 聊三天就能背下来，比不说话还假。
+         * 模型写不出来（超时/报错/太长）会自动退回模板。
+         */
+        const { composeCareLine } = await import('../core/care-compose.mjs');
+        const care = await composeCareLine({
+          llm: this.engine.llm,
+          persona: this.engine.persona,
+          memory: target ? this.engine.memory?.render(target) || '' : '',
+          idleMinutes,
+          log: (m) => this.log.info?.(m),
         });
-        return json(res, 200, { text });
+
+        return json(res, 200, { text: care.text, source: care.source });
       }
       // B站分享：拿一个视频
       if (req.method === 'GET' && url.pathname === '/api/share') {

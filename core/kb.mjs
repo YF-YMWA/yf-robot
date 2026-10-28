@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { htmlToPlainText } from './safe-fetch.mjs';
+import { kbDir } from './scoped-paths.mjs';
 
 /** 支持的扩展名 */
 export const SUPPORTED = ['.txt', '.md', '.markdown', '.docx', '.html', '.htm'];
@@ -248,11 +249,12 @@ export class KnowledgeBase {
    * @param {object} opts.config 核心配置（读 kb.* 和 vision.apiKey）
    * @param {Function} [opts.log]
    */
-  constructor({ root, config, log = () => {} }) {
+  constructor({ root, config, log = () => {}, card = '' }) {
     this.root = root;
     this.config = config;
     this.log = log;
-    this.dir = path.join(root, 'data', 'kb');
+    // 按角色卡隔离：换卡就换一整套文档
+    this.dir = kbDir(root, card);
     this.docs = new Map(); // id → { id, name, chunks: [{text, vec}], addedAt }
     this.loaded = false;
   }

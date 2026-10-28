@@ -475,6 +475,23 @@ async function main() {
   }
 
   // 逐个启动，单个失败不影响其他
+  /**
+   * 把老版本（全局一份）的知识库/逻辑库/记忆搬到「当前角色卡」的作用域下。
+   *
+   * 不搬的话，升级后她会突然「失忆」——文件都在，只是路径变了。
+   * 只在目标还没有数据时搬，只搬一次。
+   */
+  try {
+    const { migrateLegacyToScope } = await import('./core/scoped-paths.mjs');
+    const r = migrateLegacyToScope(config.root || process.cwd(), config.card || 'default');
+    if (r.moved.length) {
+      console.log(`[scope] 已把老数据搬进当前角色卡：${r.moved.join('、')}`);
+    }
+    for (const skipped of r.skipped) console.warn(`[scope] 跳过 ${skipped}`);
+  } catch (e) {
+    console.warn(`[scope] 数据迁移失败（不影响启动）：${e.message}`);
+  }
+
   // 加载插件（别人给她加的功能）。失败不影响主流程。
   try {
     await engine.plugins.load();

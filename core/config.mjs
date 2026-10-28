@@ -180,6 +180,8 @@ export const DEFAULTS = {
     jitter: 0.35,
     // 单条气泡最多等多久
     maxDelayMs: 6000,
+    // 偶尔打错字再改口的概率（0 = 关）
+    typoChance: 0.04,
     /** 是否移除 Markdown 标记 */
     stripMarkdown: true,
     /** 表情装饰 */

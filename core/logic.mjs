@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { bigrams, lexicalScore, cosine } from './kb.mjs';
+import { logicFile } from './scoped-paths.mjs';
 
 /** 单条规则正文上限（防止有人往库里灌长文） */
 const MAX_RULE_CHARS = 600;
@@ -99,8 +100,9 @@ export class LogicLibrary {
    * @param {Function} [opts.log]
    * @param {Function} [opts.embed] 可选的向量化函数（有则用混合检索）
    */
-  constructor({ root, config = {}, log = () => {}, embed = null }) {
-    this.file = path.join(root, 'data', 'logic.json');
+  constructor({ root, config = {}, log = () => {}, embed = null, card = '' }) {
+    // 按角色卡隔离
+    this.file = logicFile(root, card);
     this.config = config;
     this.log = log;
     this.embed = embed;

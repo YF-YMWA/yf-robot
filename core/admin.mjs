@@ -10,6 +10,7 @@
  *
  * 所有写操作都要校验，避免控制台把配置改坏。
  */
+import { resolveWordsDir, scopeName } from './scoped-paths.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -322,7 +323,12 @@ export class AdminApi {
 
       // 词库列表
       if (method === 'GET' && pathname === '/api/admin/words') {
-        return { code: 200, body: this.#listWordBanks() };
+        const banks = this.#listWordBanks();
+        // scoped = 当前用角色卡自己的一份（而不是公共 resources/）
+        return {
+          code: 200,
+          body: { ...banks, scoped: this.#wordsDir() !== path.join(this.root, 'resources') },
+        };
       }
 
       // 词库：手动添加词条
@@ -1058,11 +1064,9 @@ export class AdminApi {
 
   // ===== 词库管理 =====
 
-  /** 词库目录。 */
+  /** 词库目录（按角色卡解析：卡内有就用自己的，否则用公共的）。 */
   #wordsDir() {
-    // 词库属于核心能力（不接微信也能用），所以放在核 resources/ 下。
-    // 以前放在 bridge/resources，两个仓库一分家就断链了。
-    return path.join(this.root, 'resources');
+    return resolveWordsDir(this.root, scopeName(this.config.card || 'default'));
   }
 
   /** 列出词库文件。 */
@@ -4850,6 +4854,8 @@ print('%016x' % bits)
       if (who && this.engine) {
         this.engine.persona = who;
         this.config.__personaName = who.name || id;
+        // 数据也按卡隔离：换卡后重新指向新卡的知识库/逻辑库/记忆
+        this.engine.reloadScopedStores();
         hot = true;
       }
     } catch (e) {

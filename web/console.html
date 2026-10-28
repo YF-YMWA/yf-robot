@@ -1807,6 +1807,7 @@
     </div>
 
     <div class="card">
+      <div class="hint" id="wordsScopeHint" style="margin-bottom:8px"></div>
       <h2>词库文件 <span class="sp"></span>
         <button class="ghost sm" onclick="loadWords()">刷新</button>
         <button class="ghost sm" onclick="createBank()">新建词库</button>
@@ -5736,6 +5737,14 @@ async function testOwner() {
 async function loadWords() {
   try {
     const j = await api('words');
+
+    // 告诉用户这份词库是公共的还是当前角色卡自己的
+    const hint = $('wordsScopeHint');
+    if (hint) {
+      hint.innerHTML = j.scoped
+        ? '当前用的是角色卡自己的一份（data/&lt;卡片&gt;/words/），不影响其它卡。'
+        : '当前用的是公共词库（resources/）。想给这张卡单独一套，在 data/&lt;卡片&gt;/words/ 放 .txt 就行。';
+    }
     if (!j.banks.length) {
       $('bankList').innerHTML = '<div class="hint">还没有词库</div>';
       $('bankToggles').innerHTML = '<div class="hint">还没有词库</div>';

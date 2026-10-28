@@ -21,6 +21,8 @@ import { PluginHost } from './plugins.mjs';
 import { LogicLibrary } from './logic.mjs';
 import { LogicLearner } from './logic-learn.mjs';
 import { assembleContext, renderContext, detectTone, banksForTone } from './context.mjs';
+import { memoryDir, migrateLegacyToScope, scopeName, resolveWordsDir } from './scoped-paths.mjs';
+import { addTypoSlip } from './humanize.mjs';
 import { renderSystemPrompt } from './persona.mjs';
 import { renderWordBanks } from './words.mjs';
 import { OwnerService } from './owner.mjs';
@@ -266,12 +268,36 @@ export class ChatEngine {
    *
    * 只有真的配了文档才建实例；没文档时完全不产生开销。
    */
+  /** 当前数据作用域（跟角色卡走） */
+  get scope() {
+    return scopeName(this.config.card || 'default');
+  }
+
+  /**
+   * 换卡后重建「按卡隔离」的几个存储。
+   *
+   * 不重建的话，旧卡片的知识库/逻辑库实例还挂在内存里，
+   * 换卡看起来「没生效」。
+   */
+  reloadScopedStores() {
+    this._kb = null;
+    this._logic = null;
+    this._learner = null;
+    this.memory = new MemoryStore({
+      dir: memoryDir(this.config.root || process.cwd(), this.scope),
+      maxFacts: this.config.memory?.maxFacts || 50,
+      maxSummaries: this.config.memory?.maxSummaries || 10,
+    });
+    this.log.info?.(`[scope] 已切到「${this.scope}」的数据`);
+  }
+
   #kb() {
     if (!this._kb) {
       this._kb = new KnowledgeBase({
         root: this.config.root || process.cwd(),
         config: this.config,
         log: (m) => this.log.info?.(m),
+        card: this.scope,
       });
     }
     return this._kb;
@@ -313,6 +339,7 @@ export class ChatEngine {
         root: this.config.root || process.cwd(),
         config: this.config,
         log: (m) => this.log.info?.(m),
+        card: this.scope,
         /**
          * 复用知识库那套嵌入（智谱 embedding-3）。
          *
@@ -699,7 +726,8 @@ export class ChatEngine {
         try {
           const tone = detectTone(userText);
           styleText = renderWordBanks({
-            dir: path.join(this.config.root || process.cwd(), 'resources'),
+            // 卡片自己有一份词库就用它的，没有就用公共 resources/
+            dir: resolveWordsDir(this.config.root || process.cwd(), this.scope),
             banks: this.config.words || {},
             only: banksForTone(tone),
           });
@@ -822,7 +850,7 @@ export class ChatEngine {
       // 用户没情绪时再看回复本身的语气。
       const emojiCfg = this.config.reply.emoji || {};
       const userMood = detectMood(userText);
-      const finalBubbles =
+      let finalBubbles =
         emojiCfg.enabled === false
           ? bubbles
           : decorateBubbles(bubbles, {
@@ -830,6 +858,16 @@ export class ChatEngine {
               useKaomoji: emojiCfg.kaomoji !== false,
               mood: userMood || undefined,
             });
+
+      /**
+       * 偶尔「手滑打错字，然后改口」。
+       *
+       * 默认 4%，只对第二条以后动手。真人不可能一条错字都没有，
+       * 但错太多就成了故意装傻，所以概率压得很低。
+       */
+      finalBubbles = addTypoSlip(finalBubbles, {
+        chance: this.config.reply?.typoChance ?? 0.04,
+      });
 
       // 记历史：多模态消息只记摘要，避免历史膨胀
       let historyText = userText;
