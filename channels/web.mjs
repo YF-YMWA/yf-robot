@@ -393,7 +393,16 @@ export class WebChannel {
         && !url.pathname.startsWith('/api/media/file/')
         && (url.pathname.startsWith('/api/sticker/') || url.pathname.startsWith('/api/media/'))
       ) {
-        if (!checkToken(req, url, this.token)) {
+        /**
+         * 图片要能被 <img src> 直接加载，而浏览器不会给 <img> 带自定义请求头。
+         *
+         * 所以：本机来的请求免令牌（服务默认只监听 127.0.0.1，外部连不上），
+         * 远程请求（host 改成 0.0.0.0 时）仍然要带 token。
+         * 不做这个区分，面板里刚画好的图就会显示成裂图 ——
+         * 用户看到的现象就是「画图坏了」。
+         */
+        const localViewer = this.#isLoopbackRequest(req);
+        if (!localViewer && !checkToken(req, url, this.token)) {
           return json(res, 403, { error: '未授权' });
         }
 
