@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import cryptoMod from 'node:crypto';
+import { spawnSync as spawnSyncMod } from 'node:child_process';
 import { ROOT } from './config.mjs';
 import { listCards, loadAnyPersona } from './card.mjs';
 import {
@@ -665,7 +666,7 @@ export class AdminApi {
 
       // 上传图片
       if (method === 'POST' && pathname === '/api/admin/media/upload') {
-        return { code: 200, body: this.#uploadMedia(body) };
+        return { code: 200, body: await this.#uploadMedia(body) };
       }
 
       // 语音合成测试：现场合成一句，返回音频信息
@@ -4392,7 +4393,7 @@ print('%016x' % bits)
    *
    * @param {object} body { kind: 'stickers'|'images', name, data: 'base64' }
    */
-  #uploadMedia(body = {}) {
+  async #uploadMedia(body = {}) {
     const kind = body.kind === 'images' ? 'images' : 'stickers';
     const b64 = String(body.data || '');
 
@@ -4435,13 +4436,167 @@ print('%016x' % bits)
       fs.writeFileSync(full, buf);
     }
 
+    /**
+     * 存完立刻识别一次，把情绪标签写进索引。
+     *
+     * 不打标签的话这张图永远挑不中（挑图是按语气匹配标签的），
+     * 用户看到的就是「收了但从来不用」。
+     * 识别失败不影响上传本身 —— 返回里会说明，之后还能用
+     * 「重建索引」补。
+     */
+    let tagInfo = null;
+    try {
+      tagInfo = await this.#tagOneMedia(kind, name, buf);
+    } catch (e) {
+      this.log.warn?.('[upload] 自动打标签失败：' + e.message);
+      tagInfo = { ok: false, error: e.message };
+    }
+
     return {
       ok: true,
       name,
       size: buf.length,
       kind,
-      message: `已上传（${(buf.length / 1024).toFixed(0)}KB）`,
+      tags: tagInfo?.tags || [],
+      desc: tagInfo?.desc || '',
+      tagged: Boolean(tagInfo?.ok),
+      message:
+        `已上传（${(buf.length / 1024).toFixed(0)}KB）` +
+        (tagInfo?.ok
+          ? `，已识别：${(tagInfo.tags || []).join('、') || '（没匹配到情绪词）'}`
+          : `，但没识别成功：${tagInfo?.error || '未知原因'}`),
     };
+  }
+
+  /**
+   * 识别一张素材并写进索引（上传和重建索引共用同一套逻辑）。
+   *
+   * @returns {{ok:boolean, tags:string[], desc:string, error?:string}}
+   */
+  async #tagOneMedia(kind, name, buf) {
+    if (!this.engine?.vision?.enabled) {
+      return { ok: false, tags: [], desc: '', error: '看图模型没启用，打不了标签' };
+    }
+
+    /**
+     * 给「打标签」用的提示词要简单。
+     *
+     * 踩过的坑：为了让描述格式统一，提示词里写死了
+     * 「格式固定：<主体>，<情绪>，<主色调>，<风格>」，并要求只能从固定词表里选情绪。
+     * 结果 glm-4v-flash 受不了这种强约束，直接回一个特殊标记 `<|observation|>` ——
+     * 于是「识别成功但描述是空的」，上传的动图永远没有标签。
+     * 换成普通的「一句话描述」，识别立刻正常。
+     */
+    const PROMPT = '用一句话描述这张图的主体、人物表情和整体色调，不要分段。';
+
+    const cleanUp = (t) =>
+      this.#cleanDesc(
+        String(t || '')
+          // 模型偶尔吐出来的特殊标记，留着只会让标签匹配失败
+          .replace(/<\|[^|>]*\|>/g, '')
+          .trim(),
+      );
+
+    const isBad = (d) => !d || d.includes('看不清') || d.length < 2;
+
+    let desc = '';
+    let usedSource = 'original';
+
+    try {
+      const r = await this.engine.vision.describe(buf, { prompt: PROMPT });
+      desc = cleanUp(r?.description);
+    } catch (e) {
+      this.log.warn?.('[tag] 识别失败：' + e.message);
+    }
+
+    // 动图识别不出来 → 抽第一帧再认（帧多、体积大的动图经常这样）
+    if (isBad(desc) && this.#looksLikeGif(buf)) {
+      const frame = this.#gifFirstFrame(buf);
+      if (frame) {
+        try {
+          const r2 = await this.engine.vision.describe(frame, { prompt: PROMPT });
+          const d2 = cleanUp(r2?.description);
+          if (!isBad(d2)) {
+            desc = d2;
+            usedSource = 'first-frame';
+            this.log.info?.('[tag] 动图首帧识别成功：' + d2.slice(0, 30));
+          }
+        } catch (e) {
+          this.log.warn?.('[tag] 首帧识别也失败：' + e.message);
+        }
+      }
+    }
+
+    if (isBad(desc)) {
+      return {
+        ok: false,
+        tags: [],
+        desc: '',
+        error: '识别结果为空或看不清（动图会先抽第一帧，仍失败就只能手动打标签）',
+      };
+    }
+    if (this.#looksLikeBadDesc(desc)) {
+      return { ok: false, tags: [], desc: '', error: '描述不可用（像截歪了）' };
+    }
+
+    const TAGS = this.#emojiTags();
+    const tags = [];
+    for (const [tag, words] of Object.entries(TAGS)) {
+      if (words.some((w) => desc.includes(w))) tags.push(tag);
+    }
+
+    const index = this.#readStickerIndex();
+    const entry = {
+      ...(index[name] || {}),
+      desc: desc.slice(0, 200),
+      tags: tags.length ? tags : ['普通'],
+      at: new Date().toISOString(),
+      kind,
+      source: usedSource,
+    };
+    index[name] = entry;
+    this.#writeStickerIndex(index);
+
+    return { ok: true, tags: entry.tags, desc };
+  }
+
+  /** 是不是 GIF（看文件头，不看扩展名） */
+  #looksLikeGif(buf) {
+    return Buffer.isBuffer(buf) && buf.slice(0, 3).toString() === 'GIF';
+  }
+
+  /**
+   * 用 ffmpeg 把动图的第一帧抽成 jpg。
+   *
+   * 找不到 ffmpeg 就返回 null（不影响上传，只是这张图没标签）。
+   */
+  #gifFirstFrame(buf) {
+    const ffmpeg =
+      this.config?.vision?.ffmpeg || this.config?.imagegen?.ffmpeg || 'ffmpeg';
+
+    const tmpDir = path.join(this.root, 'data', 'tmp');
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const src = path.join(tmpDir, `_gif_${Date.now()}.gif`);
+    const out = path.join(tmpDir, `_frame_${Date.now()}.jpg`);
+
+    try {
+      fs.writeFileSync(src, buf);
+      const r = spawnSyncMod(ffmpeg, ['-y', '-i', src, '-vframes', '1', '-q:v', '3', out], {
+        timeout: 20000,
+        windowsHide: true,
+      });
+      if (r.status !== 0 || !fs.existsSync(out)) return null;
+      return fs.readFileSync(out);
+    } catch {
+      return null;
+    } finally {
+      try {
+        fs.unlinkSync(src);
+      } catch {}
+      try {
+        fs.unlinkSync(out);
+      } catch {}
+    }
   }
 
   /**
