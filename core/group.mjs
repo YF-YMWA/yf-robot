@@ -238,6 +238,21 @@ export class GroupTrigger {
 
     // 5. 仍在接话窗口内
     if (Number(ctx.state?.engagedUntil) > now) {
+      /**
+       * 窗口内不是「什么都接」。
+       *
+       * 以前窗口一开就无条件接话（默认 8 分钟），群里别人聊别的事她也会插一嘴 ——
+       * 用户说的「群里误触发」主要就是这里。
+       * 现在窗口内只按概率接：被 @ / 叫名字的在上面已经提前返回，
+       * 能走到这里的都是「没明确点名」的消息。
+       */
+      const engagedChance = Number.isFinite(cfg.engagedReplyChance)
+        ? cfg.engagedReplyChance
+        : 0.35;
+      if (Math.random() >= engagedChance) {
+        return { wake: false, reason: 'engaged_skip' };
+      }
+
       // 如果窗口是别人开启的，只有同一个人接着说话才继续
       const by = String(ctx.state?.engagedBy || '');
       const sender = String(ctx.senderId || '');
@@ -248,10 +263,13 @@ export class GroupTrigger {
       return { wake: true, reason: 'engaged_other' };
     }
 
-    // 6. 被骂了（带了指向她的词）
+    // 6. 被骂了（必须真的指向她：叫名字 / 机器人）
+    //    以前 AIMED_RE 里有裸的「你」——「你个傻逼」这种冲别人开火的话
+    //    也会把她叫出来。现在要求出现她的名字或「机器人」这类词。
     const INSULT_RE = /(傻|笨|蠢|滚|闭嘴|废物|垃圾|有病)/;
-    const AIMED_RE = /(机器人|鲸|肥鱼|你)/;
-    if (INSULT_RE.test(text) && AIMED_RE.test(text)) {
+    const botWords = ['机器人', '鲸', '肥鱼', ...(cfg.aliases || []).filter(Boolean)];
+    const aimedAtBot = botWords.some((w) => text.includes(w));
+    if (INSULT_RE.test(text) && aimedAtBot) {
       return { wake: true, reason: 'insulted' };
     }
 

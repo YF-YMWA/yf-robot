@@ -20,6 +20,8 @@ const baseCfg = {
   cooldownSec: 0,
   masterAlwaysReply: true,
   engagedMinutes: 6,
+  // 窗口内「无条件接」已改成按概率接；这些老用例测的是「会接」那一档
+  engagedReplyChance: 1,
   maxRepliesPerHour: 1000,
   muteDefaultMinutes: 30,
   aliases: ['鲸鲸'],

@@ -237,6 +237,8 @@ export const SECTION_SCHEMA = {
       cooldownSec: F('number', 3, { min: 0, max: 600 }),
       masterAlwaysReply: F('boolean', true),
       engagedMinutes: F('number', 5, { min: 0, max: 120 }),
+      /** 接话窗口内、没明确点名时还接的概率（防群里误触发） */
+      engagedReplyChance: F('number', 0.35, { min: 0, max: 1 }),
       maxRepliesPerHour: F('number', 20, { min: 0, max: 500 }),
       aliases: F('array', []),
       ownerIds: F('array', []),
