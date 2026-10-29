@@ -3690,6 +3690,21 @@ print('%016x' % bits)
           continue;
         }
 
+        /**
+         * 再看一眼「内容」。
+         *
+         * 尺寸/比例挡不住二维码和广告图 —— 那些往往正好是方的、大小也合适。
+         * 用户实测搜「大肥鱼表情包」下载了一堆二维码，就是这一层缺了。
+         * 只在表情包场景做，且最多检查 6 张，控制调用次数。
+         */
+        if (kind === 'stickers' && downloaded.length < 3 && !this.__junkVisionOff) {
+          const junk = await this.#looksLikeJunkImage(buf);
+          if (junk) {
+            skipped.push(`${u.slice(0, 40)} 看图判断：${junk}`);
+            continue;
+          }
+        }
+
         // 按文件头判断真实格式
         let ext = '';
         if (buf[0] === 0x89 && buf[1] === 0x50) ext = '.png';
@@ -4494,6 +4509,48 @@ print('%016x' % bits)
    *
    * @param {object} body { kind: 'stickers'|'images', name, data: 'base64' }
    */
+  /**
+   * 这张图看起来是不是垃圾（二维码 / 广告 / 网页截图 / 纯文字）？
+   *
+   * 返回问题描述（表示该跳过）或空字符串（表示可以留）。
+   * 看图模型没启用时一律放行 —— 不能因为没配 Key 就把功能停了。
+   */
+  async #looksLikeJunkImage(buf) {
+    if (!this.engine?.vision?.enabled) return '';
+
+    try {
+      const r = await this.engine.vision.describe(buf, {
+        prompt:
+          '这张图里主要是什么？只回答一个词：' +
+          '如果是二维码就回答「二维码」，是网页/聊天截图就回答「截图」，' +
+          '是广告或横幅就回答「广告」，是纯文字就回答「文字」，' +
+          '是人物/卡通/表情包就回答「图案」。',
+      });
+
+      const d = String(r?.description || '');
+      /**
+       * 垃圾图的典型描述词。
+       * 「棋盘格」「网格」也算 —— 实测把二维码喂给 glm-4v 时，
+       * 它回的是「黑白棋盘格图案」，不写「二维码」这三个字。
+       */
+      const JUNK = [
+        '二维码', 'QR', '条形码', '棋盘格', '网格', '方块', '马赛克',
+        '截图', '广告', '横幅', '水印', '纯文字', '表格', '图表',
+        'logo', 'Logo', 'LOGO', '图标',
+      ];
+      const hit = JUNK.find((w) => d.includes(w));
+      return hit ? hit : '';
+    } catch (e) {
+      /**
+       * 判断失败就放行，并且本轮不再问。
+       * 看图接口有免费额度限制，实测连续判断会 429（访问量过大）——
+       * 真遇到这种情况还硬问，「搜图」就会变成几分钟没反应。
+       */
+      if (/429|访问量|rate/i.test(e.message)) this.__junkVisionOff = true;
+      return '';
+    }
+  }
+
   async #uploadMedia(body = {}) {
     const kind = body.kind === 'images' ? 'images' : 'stickers';
     const b64 = String(body.data || '');

@@ -285,6 +285,29 @@ export class ToolKit {
           },
         },
       },
+      {
+        type: 'function',
+        function: {
+          name: 'read_url',
+          /**
+           * 只给链接、不打开正文 = 「只能看外表」。
+           *
+           * 用户原话：「无法打开你给的 http 链接，依旧只能看外表不能读取内容」。
+           * 以前没有这个工具，对方发链接过来她只能说「你发我看看」，看完也只有标题。
+           * 现在能读正文（去脚本、去标签的纯文本）。
+           */
+          description:
+            '打开一个网页链接，读它的正文内容。对方发来链接、或你想确认某个页面写了什么时用。' +
+            '返回去掉网页标签后的正文，最多 4000 字。',
+          parameters: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', description: 'http 或 https 链接' },
+            },
+            required: ['url'],
+          },
+        },
+      },
     ];
 
     // DSH 工具（需要运行环境就绪才提供）
@@ -517,6 +540,8 @@ export class ToolKit {
               .map((r, i) => `${i + 1}. ${r.title}\n   ${(r.snippet || '').slice(0, 150)}`)
               .join('\n');
           }
+        case 'read_url':
+          return await this.#readUrl(args);
         case 'save_sticker':
           return await this.#saveSticker(args);
         case 'admin_config': {
@@ -941,6 +966,127 @@ export class ToolKit {
    * 只开放少数几个字段：概率、气泡数、字数、两个总开关。
    * 别的配置（Key、主人名单、沙箱路径）不给改 —— 模型不该碰这些。
    */
+  /**
+   * 打开网页读正文。
+   *
+   * 为什么要有：以前她只能「看图」和「搜索」，对方甩一个链接过来，
+   * 她只能回复「你发我看看」—— 因为根本没有抓网页的能力。
+   * 这里抓下来、去掉脚本/样式/标签，给模型一段纯文本。
+   *
+   * 安全边界：
+   *   · 只允许 http/https
+   *   · 禁止本机地址（防止拿她当内网探针）
+   *   · 限制 1.5MB、15 秒，防止一个页面把内存和上下文吃光
+   */
+  async #readUrl(args = {}) {
+    const raw = String(args.url || '').trim();
+    if (!raw) return '（要读哪个链接？）';
+
+    let u;
+    try {
+      u = new URL(raw);
+    } catch {
+      return '（这个链接格式不对）';
+    }
+    if (!/^https?:$/.test(u.protocol)) return '（只支持 http/https 链接）';
+
+    // 挡掉本机/内网地址：不要把机器人变成内网扫描器
+    const host = u.hostname.toLowerCase();
+    const isLocal =
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host.endsWith('.local') ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host);
+    if (isLocal) return '（这个地址在本机/内网，我不去读）';
+
+    let html = '';
+    try {
+      const r = await fetch(raw, {
+        headers: {
+          // 有些站点对没有 UA 的请求直接 403
+          'user-agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+          accept: 'text/html,application/xhtml+xml',
+        },
+        signal: AbortSignal.timeout(15000),
+        redirect: 'follow',
+      });
+      if (!r.ok) return `（打不开：HTTP ${r.status}）`;
+
+      const ctype = r.headers.get('content-type') || '';
+      if (!/text\/html|application\/xhtml|text\/plain/i.test(ctype)) {
+        return `（这个不是网页，是 ${ctype || '未知类型'}，读不了正文）`;
+      }
+
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (buf.length > 1.5 * 1024 * 1024) {
+        return '（页面太大了，可能有 1.5MB 以上，读不了）';
+      }
+      html = buf.toString('utf8');
+    } catch (e) {
+      return `（打开失败：${e.message}）`;
+    }
+
+    const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').trim();
+    const text = this.#htmlToText(html);
+
+    if (!text || text.length < 20) {
+      return `（${title || '这个页面'} 里没读到正文，可能是要靠脚本加载的）`;
+    }
+
+    const body = text.slice(0, 4000);
+    return (
+      (title ? `【${title}】\n` : '') +
+      body +
+      (text.length > 4000 ? `\n…（后面还有 ${text.length - 4000} 字，没全读）` : '')
+    );
+  }
+
+  /** 粗略去标签取正文（不引第三方库，够用就行） */
+  #htmlToText(html) {
+    let t = String(html || '');
+
+    // 整段丢掉不产生正文的部分
+    t = t
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      // 结尾可能写成 </style >（带空格），所以允许 \s*
+      .replace(/<style[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ');
+
+    // 块级标签换行，避免整页挤成一行
+    t = t.replace(/<\/?(p|div|br|li|tr|h[1-6]|section|article|header|footer)[^>]*>/gi, '\n');
+    t = t.replace(/<[^>]+>/g, ' ');
+
+    // 实体
+    t = t
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+
+    return t
+      .replace(/[ \t\u00a0]+/g, ' ')
+      .split('\n')
+      .map((x) => x.trim())
+      .filter(Boolean)
+      /**
+       * 有些页面（比如百度）的 <style> 没有闭合标签，
+       * 上面按整块删删不掉，CSS 正文就混进了正文里。
+       * 这里把「像 CSS 规则的行」丢掉：含属性名 + 花括号那段。
+       */
+      .filter((line) => !/\{[^{}]*:[^{}]*\}/.test(line) && !/^(html|body|\.|#|@media)[\s\S]{0,40}\{/.test(line))
+      .join('\n')
+      .trim();
+  }
+
   async #adminConfig(args = {}) {
     const key = String(args.key || 'all');
     const raw = args.value;
