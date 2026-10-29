@@ -567,12 +567,30 @@ export class AdminApi {
         const dir = dirs[kind];
         if (!dir) return { code: 200, body: { ok: false, error: '未知类型' } };
 
-        let files = [];
-        try {
-          files = fs.readdirSync(dir).filter((n) => /^[\w.-]{1,100}$/.test(n));
-        } catch {
-          return { code: 200, body: { ok: false, error: '目录读不到' } };
-        }
+        /**
+         * 老目录里的图也要算进来。
+         *
+         * 以前只扫角色卡目录（data/<卡片>/generated），而列表是把老目录
+         * （data/generated）合并显示的 —— 结果用户在列表里看到 15 张，
+         * 点「清空全部」却提示没东西可删/失败。两处必须看同一批文件。
+         */
+        const legacyDir =
+          kind === 'generated' ? path.join(this.root, 'data', 'generated') : null;
+
+        const collect = (d) => {
+          if (!d) return [];
+          try {
+            return fs
+              .readdirSync(d)
+              .filter((n) => /^[\w.-]{1,100}$/.test(n))
+              .filter((n) => /\.(jpg|jpeg|png|gif|webp)$/i.test(n));
+          } catch {
+            return [];
+          }
+        };
+
+        const files = collect(dir);
+        const legacyFiles = collect(legacyDir).filter((n) => !files.includes(n));
 
         const match = (n) => {
           if (only === 'all') return true;
@@ -582,19 +600,47 @@ export class AdminApi {
           return false;
         };
 
-        const targets = files.filter(match);
+        const targets = [...files, ...legacyFiles].filter(match);
 
         // 先预览：只报数量，前端弹确认后再真删
         if (body?.dryRun === true) {
-          return { code: 200, body: { ok: true, dryRun: true, count: targets.length, kind, only } };
+          return {
+            code: 200,
+            body: { ok: true, dryRun: true, count: targets.length, kind, only },
+          };
+        }
+
+        if (!targets.length) {
+          return {
+            code: 200,
+            body: {
+              ok: true,
+              dryRun: false,
+              deleted: 0,
+              message: '本来就没有可删的图',
+            },
+          };
         }
 
         let deleted = 0;
+        const failed = [];
         for (const n of targets) {
-          if (this.#deleteMedia(kind, n).ok) deleted++;
+          const r = this.#deleteMedia(kind, n);
+          if (r.ok) deleted++;
+          else failed.push({ name: n, error: r.error });
         }
-        this.log.info?.(`[admin] 清空 ${kind}（${only}）：删除 ${deleted} 张`);
-        return { code: 200, body: { ok: true, dryRun: false, deleted } };
+        this.log.info?.(`[admin] 清空 ${kind}（${only}）：删除 ${deleted} 张，失败 ${failed.length}`);
+        return {
+          code: 200,
+          body: {
+            ok: deleted > 0,
+            dryRun: false,
+            deleted,
+            total: targets.length,
+            failed,
+            ...(deleted === 0 ? { error: '一张都没删掉：' + (failed[0]?.error || '未知原因') } : {}),
+          },
+        };
       }
 
       /**

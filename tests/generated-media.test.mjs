@@ -104,3 +104,47 @@ test('画一张新图：存在角色卡目录，并且立刻出现在列表里',
     '刚画的图应该立刻出现在列表里',
   );
 });
+
+test('清空全部：老目录里的图也要算进去（预览数量 = 实际能删的数量）', async (t) => {
+  if (!(await alive())) {
+    t.skip('服务没在跑');
+    return;
+  }
+
+  const cfg = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+  const card = cfg.card || 'dafeiyu';
+  const scoped = path.join(process.cwd(), 'data', card, 'generated');
+  const legacy = path.join(process.cwd(), 'data', 'generated');
+
+  const countIn = (d) =>
+    fs.existsSync(d) ? fs.readdirSync(d).filter((n) => /\.(jpe?g|png)$/i.test(n)).length : 0;
+
+  const onDisk = countIn(scoped) + countIn(legacy);
+
+  const pre = await api('media/delete-all', { kind: 'generated', dryRun: true });
+  assert.ok(pre.ok, '预览应该成功');
+  assert.equal(
+    pre.count,
+    onDisk,
+    `磁盘上有 ${onDisk} 张，预览只说 ${pre.count} 张（老目录没算进去就会点不动）`,
+  );
+});
+
+test('清空全部：没有图时给出明白的结果，而不是失败', async (t) => {
+  if (!(await alive())) {
+    t.skip('服务没在跑');
+    return;
+  }
+
+  // 先用预览确认当前是空的（上面那个测试删过，或者本来就空）
+  const pre = await api('media/delete-all', { kind: 'generated', dryRun: true });
+  if (pre.count > 0) {
+    t.skip('库里还有图，跳过（避免误删）');
+    return;
+  }
+
+  const r = await api('media/delete-all', { kind: 'generated', only: 'all' });
+  assert.equal(r.ok, true, '空库清空不该算失败');
+  assert.equal(r.deleted, 0);
+  assert.match(String(r.message || ''), /没有可删/);
+});
