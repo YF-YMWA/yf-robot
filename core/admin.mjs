@@ -672,14 +672,48 @@ export class AdminApi {
       if (method === 'POST' && pathname === '/api/admin/test/tts') {
         const text = String(body?.text || '主人好，我是大肥鱼，语音测试。').slice(0, 200);
         const voice = body?.voice || this.config.voice?.ttsVoice || undefined;
+
         const { synthesize } = await import('./tts.mjs');
+
+        /**
+         * 允许「先测后存」：面板上填了新的 Key / 地址 / 模型名，
+         * 不保存直接点「测试语音」也能测到那份配置。
+         * 以前这里一律用已保存的配置 —— 测试通过、实际却还是旧模型，
+         * 用户完全没法判断问题出在哪。
+         */
+        const preview = { ...(this.config.voice || {}) };
+        if (body?.apiKey) preview.ttsApiKey = String(body.apiKey).trim();
+        if (body?.baseUrl) preview.baseUrl = String(body.baseUrl).trim();
+        if (body?.model) preview.ttsModel = String(body.model).trim();
+
         const r = await synthesize({
           text,
           voice,
-          config: this.config,
+          config: { ...this.config, voice: preview },
           log: (m) => this.log.info?.('[tts] ' + m),
         });
-        if (!r.ok) return { code: 200, body: { ok: false, error: r.error } };
+        if (!r.ok) {
+          /**
+           * 失败时把「用的哪个模型、发到哪个地址」写进错误。
+           * 上游的报错经常只有一句 "InvalidParameter"，
+           * 用户根本不知道是自己填的模型名不对、还是 Key 和它不配套。
+           */
+          const usedModel = body?.model
+            ? String(body.model).trim()
+            : this.config.voice?.ttsModel || 'qwen3-tts-flash';
+          const usedUrl = preview.baseUrl || '（默认）';
+          return {
+            code: 200,
+            body: {
+              ok: false,
+              model: usedModel,
+              error:
+                r.error +
+                `（合成模型：${usedModel}；地址：${usedUrl}）` +
+                ' —— 模型名要和 Key 属于同一家服务商。',
+            },
+          };
+        }
         return {
           code: 200,
           body: {
@@ -687,7 +721,9 @@ export class AdminApi {
             chars: r.chars,
             bytes: r.buf.length,
             voice: voice || 'Cherry',
-            model: this.config.voice?.ttsModel || 'qwen3-tts-flash',
+            model: body?.model
+              ? String(body.model).trim()
+              : this.config.voice?.ttsModel || 'qwen3-tts-flash',
             preview: 'data:audio/wav;base64,' + r.buf.toString('base64'),
           },
         };
@@ -1173,6 +1209,52 @@ export class AdminApi {
       if (method === 'POST' && pathname === '/api/admin/test/imagegen') {
         return { code: 200, body: await this.#testImageGen(body) };
       }
+      /**
+       * 各功能实际在用哪个模型？
+       *
+       * 起因：用户换了新 Key 之后，语音「显示 qwen3.7-plus」、画图不出图 ——
+       * 其实模型名是各功能各自配置的，换 Key 不会跟着换。
+       * 但界面上看不到「这个功能到底拿哪把 Key、发哪个模型名」，
+       * 只能靠猜。这个接口把它们一次列清楚，并且带上游返回的原文。
+       */
+      if (method === 'GET' && pathname === '/api/admin/models') {
+        const c = this.config || {};
+        const mask = (k) => (k ? String(k).slice(0, 4) + '****' + String(k).slice(-4) : '');
+        const row = (feature, cfg, model, extra = {}) => ({
+          feature,
+          model: model || '（未设置）',
+          baseUrl: cfg?.baseUrl || '（未设置）',
+          hasKey: Boolean(cfg?.apiKey),
+          key: mask(cfg?.apiKey),
+          ...extra,
+        });
+
+        return {
+          code: 200,
+          body: {
+            ok: true,
+            list: [
+              row('对话', c.llm, c.llm?.model),
+              row('看图', c.vision, c.vision?.model),
+              row('画图', c.imagegen, c.imagegen?.model),
+              row('语音转文字', c.voice, c.voice?.model),
+              row('语音合成', c.voice, c.voice?.ttsModel, {
+                voice: c.voice?.ttsVoice || 'Cherry',
+                // 合成和转写共用 voice 段，但模型名是分开的两个字段
+                hasKey: Boolean(c.voice?.ttsApiKey || c.voice?.apiKey),
+                key: mask(c.voice?.ttsApiKey || c.voice?.apiKey),
+              }),
+              row('联网搜索', c.search, c.search?.model || c.search?.provider),
+              row('知识库嵌入', c.kb, c.kb?.embeddingModel || c.vision?.embeddingModel || 'embedding-3', {
+                hasKey: Boolean(c.kb?.apiKey || c.vision?.apiKey),
+                key: mask(c.kb?.apiKey || c.vision?.apiKey),
+              }),
+            ],
+            hint: '换 Key 不会自动改模型名。Key 和模型名必须属于同一家服务商，否则会报「model not found」。',
+          },
+        };
+      }
+
       if (method === 'POST' && pathname === '/api/admin/test/all') {
         return { code: 200, body: await this.#testAll() };
       }
@@ -2359,7 +2441,13 @@ print('%016x' % bits)
     try {
       return { ok: true, buf: fs.readFileSync(file) };
     } catch (e) {
-      return { ok: false, error: e.message };
+      const usedModel = body?.model
+        ? String(body.model).trim()
+        : this.config.imagegen?.model || '';
+      const hint = /模型不存在|model/i.test(e.message)
+        ? `（画图模型：${usedModel}）—— 模型名要和 Key 属于同一家服务商。`
+        : '';
+      return { ok: false, model: usedModel, error: e.message + hint };
     }
   }
 
@@ -2638,8 +2726,29 @@ print('%016x' % bits)
 
   /** 试画一张，验证 Key 和模型可用。 */
   async #testImageGen(body = {}) {
-    const gen = this.engine.imagegen;
+    let gen = this.engine.imagegen;
     if (!gen) return { ok: false, error: '画图模块未初始化' };
+
+    /**
+     * 「先测后存」：面板上填了新 Key / 模型名，不保存也能测。
+     * 否则测试用的是旧配置，通过与否都不能说明新配置能不能用。
+     */
+    const wantOverride = body?.apiKey || body?.baseUrl || body?.model;
+    if (wantOverride) {
+      try {
+        const { ImageGenClient } = await import('./imagegen.mjs');
+        const merged = {
+          ...(this.config.imagegen || {}),
+          ...(body.apiKey ? { apiKey: String(body.apiKey).trim() } : {}),
+          ...(body.baseUrl ? { baseUrl: String(body.baseUrl).trim() } : {}),
+          ...(body.model ? { model: String(body.model).trim() } : {}),
+          enabled: true,
+        };
+        gen = new ImageGenClient(merged);
+      } catch (e) {
+        return { ok: false, error: '临时配置初始化失败：' + e.message };
+      }
+    }
 
     if (!gen.enabled) {
       return {
@@ -2655,6 +2764,7 @@ print('%016x' % bits)
 
       return {
         ok: true,
+        model: body?.model ? String(body.model).trim() : this.config.imagegen?.model || '',
         names: images.map((i) => i.name),
         sizes: images.map((i) => i.size),
         // 控制台直接预览

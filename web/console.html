@@ -695,6 +695,11 @@
           <select id="ttsVoice" style="max-width:200px" onchange="saveTtsVoice(true)" title="选完自动保存"></select>
           <button class="ghost sm" onclick="importVoicePack()" title="导入自定义音色（声音复刻得到的音色 ID）">导入语音包</button>
         </div></div>
+        <div class="row"><label>合成模型</label><div class="ctl">
+          <input type="text" id="ttsModel" placeholder="qwen3-tts-flash" style="max-width:220px"
+                 onchange="saveTtsModel(true)" title="换 Key 或换服务商时要一起改">
+          <span class="hint">换 Key 不会自动改模型名 —— Key 和模型名必须属于同一家</span>
+        </div></div>
         <div class="keyrow">
           <label>合成 Key</label>
           <input type="password" id="ttsKey" placeholder="留空则用上面「语音转文字」那把 Key">
@@ -2423,6 +2428,7 @@ async function loadModel() {
     // 各能力
     $('visionModel').value = c.vision.model || '';
     $('voiceModel').value = c.voice.model || '';
+    if ($('ttsModel')) $('ttsModel').value = c.voice.ttsModel || '';
     $('searchProvider').value = c.search.provider || 'bocha';
     onProviderChange();
 
@@ -3319,14 +3325,46 @@ async function saveTtsVoice(quiet) {
   }
 }
 
+/**
+ * 保存语音合成模型名。
+ *
+ * 为什么单独给个输入框：合成和转写是两个不同的模型（例如
+ * qwen3-asr-flash 转写、qwen3-tts-flash 合成）。以前只有转写那个能改，
+ * 合成模型名写死在代码里 —— 换了别的 Key（或者别家的 TTS）就无法对应，
+ * 报错信息只会说模型不存在，用户根本不知道是哪里不对。
+ */
+async function saveTtsModel(quiet) {
+  const v = $('ttsModel')?.value.trim();
+  if (!v) return;
+  const status = $('ttsStatus');
+  try {
+    const r = await api('config', { method: 'POST', body: { voice: { ttsModel: v } } });
+    if (r && r.ok === false) throw new Error(r.error || '保存失败');
+    if (status) {
+      status.textContent = '✓ 合成模型：' + v;
+      setTimeout(() => (status.textContent = ''), 2500);
+    }
+    if (!quiet) toast('已保存合成模型：' + v);
+  } catch (e) {
+    if (status) status.textContent = '✗ ' + e.message;
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
 async function testTts() {
   const text = $('ttsTestText').value.trim() || '主人好，我是大肥鱼。';
   const st = $('ttsStatus');
   st.textContent = '合成中…';
   try {
-    const j = await api('test/tts', { method: 'POST', body: { text } });
+    // 带上面板上当前填的 Key/模型：改完不保存也能先试
+    const body = { text };
+    const k = $('ttsKey')?.value.trim();
+    if (k) body.apiKey = k;
+    const m = $('ttsModel')?.value.trim();
+    if (m) body.model = m;
+    const j = await api('test/tts', { method: 'POST', body });
     if (!j.ok) throw new Error(j.error || '合成失败');
-    st.textContent = `${j.chars} 字 / ${Math.round(j.bytes / 1024)} KB / ${j.model} / ${j.voice}`;
+    st.textContent = `${j.chars} 字 / ${Math.round(j.bytes / 1024)} KB / 模型 ${j.model} / 音色 ${j.voice}`;
     const a = $('ttsAudio');
     a.src = j.preview;
     a.style.display = '';
@@ -5833,10 +5871,15 @@ async function testImageGen() {
   const t0 = Date.now();
 
   try {
-    const j = await api('imagegen/test', {
-      method: 'POST',
-      body: { prompt: '一只蓝色胖鲸鱼，卡通风格，白底' },
-    });
+    // 带上面板上当前填的 Key/地址/模型：改完不保存也能先试
+    const body = { prompt: '一只蓝色胖鲸鱼，卡通风格，白底' };
+    const _k = $('igApiKey')?.value.trim();
+    const _u = $('igBaseUrl')?.value.trim();
+    const _m = $('igModel')?.value.trim();
+    if (_k) body.apiKey = _k;
+    if (_u) body.baseUrl = _u;
+    if (_m) body.model = _m;
+    const j = await api('imagegen/test', { method: 'POST', body });
 
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
 

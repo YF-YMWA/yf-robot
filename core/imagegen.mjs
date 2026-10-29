@@ -114,7 +114,17 @@ export class ImageGenClient {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new ImageGenError(`绘图接口返回 ${res.status}: ${body.slice(0, 200)}`);
+      /**
+       * 把「用的哪个模型」写进错误。
+       *
+       * 上游常常只回一句「模型不存在，请检查模型代码」—— 看着这句话，
+       * 用户不知道是模型名填错了，还是这把 Key 根本不开这个模型。
+       */
+      const cf = this.cfg || {};
+      const hint = /模型|model/i.test(body)
+        ? `（画图模型：${cf.model || '未设置'}；地址：${cf.baseUrl || '未设置'}）`
+        : '';
+      throw new ImageGenError(`绘图接口返回 ${res.status}: ${body.slice(0, 200)}${hint}`);
     }
 
     const j = await res.json();
