@@ -30,7 +30,9 @@ if not exist "%~dp0runtime\node.exe" (
     exit /b 1
 )
 
-start "" /min "%~dp0runtime\node.exe" "%~dp0app.mjs"
+REM 输出同时写进日志：出事以后要能查（以前只留在最小化窗口里，窗口一关就没）
+if not exist "%~dp0data" mkdir "%~dp0data"
+start "" /min cmd /c ""%~dp0runtime\node.exe" "%~dp0app.mjs" >> "%~dp0data\app.out.log" 2>> "%~dp0data\app.err.log""
 
 REM 最多等 20 秒
 set /a N=0

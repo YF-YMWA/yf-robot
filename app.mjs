@@ -652,8 +652,52 @@ async function main() {
     process.exit(0);
   };
 
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  /**
+   * [exit-log] 退出与崩溃一律写日志。
+   *
+   * 真实事故：今早 8 点多聊着聊着就没了，但 app.out.log 里什么都没有 ——
+   * 因为用户是用「桌面控制台.bat」启动的，那条路是 start /min，
+   * stdout 进了最小化的控制台窗口，窗口一关就全没了。
+   * 于是事后完全查不出是崩溃、被关窗口、还是外部杀进程。
+   *
+   * 这里补三层记录：
+   *   · uncaughtException / unhandledRejection：未捕获异常（含堆栈）
+   *   · exit：无论怎么退出都记一行原因和运行时长
+   */
+  const EXIT_LOG = path.join(config.root || '.', 'data', 'exit.log');
+  const startedAt = Date.now();
+  let leaving = false;
+
+  const noteExit = (why, extra) => {
+    try {
+      fs.mkdirSync(path.dirname(EXIT_LOG), { recursive: true });
+      const mins = ((Date.now() - startedAt) / 60000).toFixed(1);
+      const line =
+        `[${new Date().toISOString()}] ${why}（运行 ${mins} 分钟）` +
+        (extra ? '\n' + extra : '') +
+        '\n';
+      fs.appendFileSync(EXIT_LOG, line, 'utf8');
+    } catch {
+      /* 记不下来也不能影响退出 */
+    }
+  };
+
+  process.on('uncaughtException', (e) => {
+    console.error('[crash] 未捕获异常：', e);
+    noteExit('未捕获异常：' + (e && e.message), e && e.stack);
+  });
+
+  process.on('unhandledRejection', (r) => {
+    console.error('[crash] 未处理的 Promise 拒绝：', r);
+    noteExit('未处理拒绝：' + (r && r.message ? r.message : String(r)), r && r.stack);
+  });
+
+  process.on('exit', (code) => {
+    if (!leaving) noteExit('进程退出，代码 ' + code);
+  });
+
+  process.on('SIGINT', () => { leaving = true; noteExit('收到 Ctrl+C'); shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { leaving = true; noteExit('收到终止信号'); shutdown('SIGTERM'); });
 }
 
 main().catch((e) => {
