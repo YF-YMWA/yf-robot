@@ -1497,6 +1497,11 @@ export class ChatEngine {
 
     const facts = session.factSummary();
     const parts = [system];
+    /**
+     * 易变内容单独放。
+     * 它们每分钟都变，混在 system 里会让上游缓存永远不命中。
+     */
+    const late = [];
 
     /**
      * 当前时间。
@@ -1513,7 +1518,7 @@ export class ChatEngine {
       const d = now.getDate();
       const hh = String(now.getHours()).padStart(2, '0');
       const mm = String(now.getMinutes()).padStart(2, '0');
-      parts.push(
+      late.push(
         `【现在的时间】${y}年${mo}月${d}日 星期${WEEK[now.getDay()]} ${hh}:${mm}\n` +
           '（这就是「今天」的真实日期。对方问几号、星期几、今年是哪年，' +
           '直接按这个回答，不要说查不到；只有问天气/新闻这类才需要联网。）',
@@ -1527,7 +1532,7 @@ export class ChatEngine {
        * 只注入一行，不替她决定说什么，只给个处境。
        */
       const state = timeOfDayState(now);
-      if (state) parts.push(`【此刻】${state}`);
+      if (state) late.push(`【此刻】${state}`);
     } catch (e) {
       this.log.warn?.(`[engine] 注入当前时间失败: ${e.message}`);
     }
@@ -1559,7 +1564,7 @@ export class ChatEngine {
      * 情绪有惯性：上一句被骂了，这一句还热络地撒娇就很假。
      * 分数由 moodDelta 根据对方说的话加减，时间久了会往中间回归。
      */
-    if (moodNote) parts.push(moodNote);
+    if (moodNote) late.push(moodNote);
 
     // 防编造：模型很容易顺着对方编一段「你上次说过」的假回忆
     parts.push(
@@ -1569,12 +1574,12 @@ export class ChatEngine {
     );
 
     // 主动画图：给她一个「想画点什么」的冲动（她自己判断要不要真画）
-    if (proactiveDraw) parts.push(renderProactiveHint());
+    if (proactiveDraw) late.push(renderProactiveHint());
 
     // 素材库清单：她不用调工具就知道有哪些图可以发
     try {
       const lib = this.#libraryNote();
-      if (lib) parts.push(lib);
+      if (lib) late.push(lib);
     } catch (e) {
       this.log.warn?.(`[engine] 素材库清单失败: ${e.message}`);
     }
@@ -1586,7 +1591,7 @@ export class ChatEngine {
      * 以前是在这里直接 renderWordBanks 全拼 —— 每轮约 1900 字，
      * 和被骂、说正经事都不相干，还占掉检索的预算。
      */
-    if (styleNote) parts.push(styleNote);
+    if (styleNote) late.push(styleNote);
 
     // 主人身份：让她知道谁是主人、能用什么
     try {
@@ -1694,10 +1699,18 @@ export class ChatEngine {
         ? `${userText}\n\n[注意] ${noRealtimeNote}`
         : userText;
 
+    /**
+     * 易变内容挂在这轮的提问前面。
+     *
+     * 这样 system + 历史 组成的前缀在一段时间内完全一致，
+     * 上游可以命中缓存；而「现在几点、心情如何」这类信息照样看得到。
+     */
+    const lateBlock = late.length ? `【本轮情况】\n${late.join('\n\n')}\n\n` : '';
+
     return [
       { role: 'system', content: systemFull },
       ...session.toMessages(),
-      { role: 'user', content: finalUser },
+      { role: 'user', content: lateBlock + finalUser },
     ];
   }
 

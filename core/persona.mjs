@@ -149,8 +149,17 @@ export function renderSystemPrompt(persona, ctx = {}) {
   ];
   lines.push('【不要做】\n' + forbidden.map((r) => '- ' + r).join('\n'));
 
-  // 环境信息
-  lines.push(`【当前时间】${formatTime(now)}`);
+  /**
+   * 时间默认**不**放进系统提示词。
+   *
+   * 它是每分钟都变的内容，混在系统提示词里会让上游的上下文缓存
+   * （prompt caching）永远命中不了 —— 钱和延迟都白花。
+   * 引擎会把它和其他易变信息一起挂到「本轮情况」里，模型照样看得到。
+   * 需要老行为时传 { withTime: true }。
+   */
+  if (ctx.withTime === true) {
+    lines.push(`【当前时间】${formatTime(now)}`);
+  }
 
   if (ctx.isOwner === false) {
     lines.push('【注意】对方不是你的主人。保持礼貌但有距离，不要过度亲近。');
