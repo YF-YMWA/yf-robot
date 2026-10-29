@@ -98,11 +98,28 @@ export class ChatEngine {
 
     // 画图能力（要在 ToolKit 之前建，工具需要它）
     // 画图存到当前角色卡的目录（路径在构造后按 this.scope 算，见 #generatedSaveDir）
-    this.imagegen = new ImageGenClient(config.imagegen || {}, {
-      apiKey: config.imagegen?.apiKey || config.vision?.apiKey || config.llm?.apiKey || '',
-      root: config.root || process.cwd(),
-      logger,
-    });
+    this.imagegen = new ImageGenClient(
+      {
+        ...(config.imagegen || {}),
+        /**
+         * 启动时就要用角色卡目录。
+         *
+         * 以前这里直接传 config.imagegen（saveDir = 老的 data/generated），
+         * 只有 reloadClients() 之后才换成 data/<卡片>/generated。
+         * 结果：刚启动那段时间画的图全落在老目录，而面板列的是卡片目录 ——
+         * 「画好了但列表里 0 张」。这里一次算对，不再依赖后面有没有 reload。
+         */
+        saveDir: path.relative(
+          config.root || process.cwd(),
+          path.join(generatedDir(config.root || process.cwd(), config.card || 'default'), ''),
+        ),
+      },
+      {
+        apiKey: config.imagegen?.apiKey || config.vision?.apiKey || config.llm?.apiKey || '',
+        root: config.root || process.cwd(),
+        logger,
+      },
+    );
     if (this.imagegen.enabled) {
       this.log.info?.(`[imagegen] 绘图已启用: ${config.imagegen?.model || 'cogview-3-flash'}`);
     }

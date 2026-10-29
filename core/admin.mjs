@@ -1885,25 +1885,50 @@ export class AdminApi {
     const dirs = this.#mediaDirs();
     const dir = dirs[kind] || dirs.stickers;
 
+    /**
+     * 老版本把画好的图放在 data/generated（不按卡片分）。
+     * 那些图不该因为改了目录结构就「消失」—— 列表把两个目录合并显示，
+     * 用户在面板里仍然看得到、也删得掉。
+     */
+    const legacyDir =
+      kind === 'generated' ? path.join(this.root, 'data', 'generated') : null;
+
     // 目录不存在时也返回一致的字段（否则前端拿到 undefined）
-    if (!fs.existsSync(dir)) {
+    if (!fs.existsSync(dir) && !(legacyDir && fs.existsSync(legacyDir))) {
       return { items: [], dir, kind, count: 0 };
     }
 
     const items = [];
-    for (const name of fs.readdirSync(dir)) {
-      if (!/\.(jpg|jpeg|png|gif|webp)$/i.test(name)) continue;
-      const full = path.join(dir, name);
-      const stat = fs.statSync(full);
-      items.push({
-        name,
-        size: stat.size,
-        added: stat.mtime.toISOString(),
-        url: `/api/media/${kind}/${encodeURIComponent(name)}`,
-      });
-    }
+    const seen = new Set();
+
+    const scan = (d, isLegacy) => {
+      if (!d || !fs.existsSync(d)) return;
+      for (const name of fs.readdirSync(d)) {
+        if (!/\.(jpg|jpeg|png|gif|webp)$/i.test(name)) continue;
+        if (seen.has(name)) continue;
+        let stat;
+        try {
+          stat = fs.statSync(path.join(d, name));
+        } catch {
+          continue;
+        }
+        seen.add(name);
+        items.push({
+          name,
+          size: stat.size,
+          added: stat.mtime.toISOString(),
+          url: `/api/media/${kind}/${encodeURIComponent(name)}`,
+          // 老目录里的图：删之前得知道它不在新位置
+          legacy: Boolean(isLegacy),
+        });
+      }
+    };
+
+    scan(dir, false);
+    scan(legacyDir, true);
+
     items.sort((a, b) => new Date(b.added) - new Date(a.added));
-    return { items, dir, kind, count: items.length };
+    return { items, dir, kind, count: items.length, legacyDir };
   }
 
   #deleteMedia(kind, name) {
@@ -1924,12 +1949,26 @@ export class AdminApi {
       return { ok: false, error: '路径越界' };
     }
 
-    if (!fs.existsSync(full)) {
+    /**
+     * 老目录里的图也要能删。
+     * 列表已经把 data/generated 合并进来了，删除却只认新目录的话，
+     * 用户会看到「点了删除没反应」。
+     */
+    const candidates = [full];
+    if (kind === 'generated') {
+      const legacy = path.join(this.root, 'data', 'generated', safe);
+      if (path.resolve(legacy).startsWith(path.resolve(this.root, 'data', 'generated') + path.sep)) {
+        candidates.push(legacy);
+      }
+    }
+
+    const target = candidates.find((f) => fs.existsSync(f));
+    if (!target) {
       return { ok: false, error: `文件不存在：${safe}` };
     }
 
     try {
-      fs.unlinkSync(full);
+      fs.unlinkSync(target);
       this.log.info?.(`[admin] 删除素材 ${kind}/${safe}`);
       return { ok: true, message: `已删除 ${safe}` };
     } catch (e) {
@@ -2437,19 +2476,20 @@ print('%016x' % bits)
     if (!/^[\w.\-]{1,120}$/.test(String(name || ''))) {
       return { ok: false, error: '非法文件名' };
     }
-    const file = path.join(dir, name);
-    if (!fs.existsSync(file)) return { ok: false, error: '文件不存在' };
-    try {
-      return { ok: true, buf: fs.readFileSync(file) };
-    } catch (e) {
-      const usedModel = body?.model
-        ? String(body.model).trim()
-        : this.config.imagegen?.model || '';
-      const hint = /模型不存在|model/i.test(e.message)
-        ? `（画图模型：${usedModel}）—— 模型名要和 Key 属于同一家服务商。`
-        : '';
-      return { ok: false, model: usedModel, error: e.message + hint };
+
+    // 先找角色卡目录，再找老目录（data/generated 之类）
+    const candidates = [path.join(dir, name)];
+    if (kind === 'generated') candidates.push(path.join(this.root, 'data', 'generated', name));
+
+    for (const file of candidates) {
+      if (!fs.existsSync(file)) continue;
+      try {
+        return { ok: true, buf: fs.readFileSync(file) };
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
     }
+    return { ok: false, error: '文件不存在' };
   }
 
   /**
@@ -2740,6 +2780,15 @@ print('%016x' % bits)
         const { ImageGenClient } = await import('./imagegen.mjs');
         const merged = {
           ...(this.config.imagegen || {}),
+          /**
+           * 存图目录必须以角色卡为准，不能用 config 里的全局 saveDir。
+           * 全局那个是 data/generated，而面板列的是 data/<卡片>/generated ——
+           * 不一致的结果就是「画好了但列表里 0 张」。
+           */
+          saveDir: path.relative(
+            this.root,
+            generatedDir(this.root, scopeName(this.config.card || 'default')),
+          ),
           ...(body.apiKey ? { apiKey: String(body.apiKey).trim() } : {}),
           ...(body.baseUrl ? { baseUrl: String(body.baseUrl).trim() } : {}),
           ...(body.model ? { model: String(body.model).trim() } : {}),
@@ -2772,7 +2821,13 @@ print('%016x' % bits)
         url: `/api/media/generated/${encodeURIComponent(images[0].name)}`,
       };
     } catch (e) {
-      return { ok: false, error: e.message };
+      const usedModel = body?.model
+        ? String(body.model).trim()
+        : this.config.imagegen?.model || '';
+      const hint = /模型不存在|model/i.test(e.message)
+        ? `（画图模型：${usedModel}）—— 模型名要和 Key 属于同一家服务商。`
+        : '';
+      return { ok: false, model: usedModel, error: e.message + hint };
     }
   }
 
