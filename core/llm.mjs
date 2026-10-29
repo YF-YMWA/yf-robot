@@ -185,8 +185,13 @@ export class LlmClient {
     };
 
     if (tools && tools.length) {
-      body.tools = tools;
-      body.tool_choice = 'auto';
+      // 已知不支持工具的服务商就别带了（省一次 400 往返）
+      if (provider.supportsTools === false) {
+        this.log?.warn?.(`[llm] ${provider.label} 之前被判定为不支持工具调用，本次不带工具`);
+      } else {
+        body.tools = tools;
+        body.tool_choice = 'auto';
+      }
     }
 
     const ac = new AbortController();
@@ -206,6 +211,35 @@ export class LlmClient {
 
       if (!res.ok) {
         const detail = await safeText(res);
+
+        /**
+         * 服务商不支持工具调用时自动降级。
+         *
+         * 不是所有 OpenAI 兼容接口都支持 function calling：有的直接 400
+         * （提示 tools 不被支持），有的把 tools 当非法参数。以前整轮对话
+         * 直接失败 —— 用户只是换了个 Key，却发现「话都不回了」。
+         *
+         * 现在：认出这是「工具相关」的拒绝 → 去掉 tools 重试一次，
+         * 并在该 provider 上记住不支持工具（以后不再带，省一次失败往返）。
+         */
+        const looksLikeToolRejection =
+          (res.status === 400 || res.status === 422) &&
+          /tool|function/i.test(detail || '') &&
+          Array.isArray(tools) &&
+          tools.length > 0 &&
+          !opts.__withoutTools;
+
+        if (looksLikeToolRejection) {
+          provider.supportsTools = false;
+          this.log?.warn?.(
+            `[llm] ${provider.label} 不支持工具调用，本轮改用纯对话（发图/收藏/搜索这类功能会暂时用不了）`,
+          );
+          return await this.#callWithTools(provider, messages, null, {
+            ...opts,
+            __withoutTools: true,
+          });
+        }
+
         throw new LlmError(
           `${provider.label} 返回 ${res.status}${detail ? ': ' + detail.slice(0, 150) : ''}`,
           { status: res.status, provider: provider.label, retryable: RETRYABLE_STATUS.has(res.status) },
