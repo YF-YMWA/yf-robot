@@ -511,6 +511,27 @@ export class WebChannel {
           return json(res, 400, { ok: false, error: '数据为空或超过 12MB' });
         }
 
+        /**
+         * 入库前先过质量门槛。
+         *
+         * 真实事故：测试脚本往这里传了一张「1×1 PNG + 600KB 空白」，
+         * 它作为表情包进了库，之后还被真的挑出来发给别人 ——
+         * 用户看到的就是「发来一张什么都看不出来的图」。
+         * 门槛和挑选时用的是同一套（media-suit），保证「进得来的就能用」。
+         */
+        if (kind !== 'generated') {
+          const { suitableAsSticker, suitableAsImage } = await import('../core/media-suit.mjs');
+          const judge = kind === 'sticker' ? suitableAsSticker : suitableAsImage;
+          const v = judge(buf);
+          if (!v.ok) {
+            return json(res, 200, {
+              ok: false,
+              rejected: true,
+              error: '没入库：' + (v.reason || '尺寸不合适'),
+            });
+          }
+        }
+
         const lib = this.#mediaLib();
         const r = await lib.save({
           kind,

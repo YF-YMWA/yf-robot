@@ -43,6 +43,7 @@ import { VisionClient, wrapImageMessage } from './vision.mjs';
 import { VoiceClient } from './voice.mjs';
 import { SearchClient, formatSearchResults, needsSearch, checkGrounding } from './search.mjs';
 import { decorateBubbles, detectMood, wantsSticker, wantsGif } from './sticker.mjs';
+import { renderToolSpec, parseToolCalls, stripToolCalls } from './prompt-tools.mjs';
 import { ToolKit } from './tools.mjs';
 import { DshClient } from './dsh.mjs';
 import path from 'node:path';
@@ -952,8 +953,29 @@ export class ChatEngine {
 
       try {
         // ===== 带工具的对话循环 =====
-        // 只有工具启用且 LLM 客户端支持工具调用时才走这条路
-        if (this.tools && typeof this.llm.streamWithTools === 'function') {
+        /**
+         * 工具怎么用，取决于服务商支不支持 function calling。
+         *
+         *   · 支持 → 原生 tools 字段（最准，模型直接返回结构化调用）
+         *   · 不支持 → 文字协议：提示词里教它写 {{tool:名字 {...}}}，
+         *     我们解析后执行，再把结果喂回去（能力基本不丢）
+         *
+         * 上一版在不支持时直接降级成纯聊天 —— 用户换个 Key 就发现
+         * 发图、收藏、搜索、改设置全没了。那不算「能用」。
+         */
+        const nativeTools =
+          this.tools &&
+          typeof this.llm.streamWithTools === 'function' &&
+          this.llm.toolsSupported !== false;
+
+        if (this.tools && !nativeTools) {
+          const r = await this.#runWithPromptTools(sessionId, messages, onDelta, {
+            allowTools: this.owner?.can(isOwner, 'tools', ownerCheck) !== false,
+            isOwner,
+          });
+          raw = r.text;
+          reason = r.reason;
+        } else if (nativeTools) {
           const r = await this.#runWithTools(sessionId, messages, onDelta, {
             // 工具权限：同时看「是否主人」和「识别级别」
             allowTools: this.owner?.can(isOwner, 'tools', ownerCheck) !== false,
@@ -963,6 +985,23 @@ export class ChatEngine {
           reason = r.reason;
           if (r.reason === 'tool_error') {
             return { bubbles: [], text: '', reason: 'llm_error', error: r.error };
+          }
+
+          /**
+           * 这一轮里被判定「服务商不支持工具」→ 立刻用文字协议重跑。
+           *
+           * 不重跑就会出现最难解释的情况：降级本身成功了（拿到回复），
+           * 但那条回复里写着 {{tool:...}} —— 没人解析，用户看到的是一串
+           * 奇怪的花括号，而该发的图也没发出去。
+           */
+          if (this.llm && this.llm.toolsSupported === false) {
+            this.log.info?.('[tool] 服务商不支持原生工具，改用文字协议重跑');
+            const r2 = await this.#runWithPromptTools(sessionId, messages, onDelta, {
+              allowTools: this.owner?.can(isOwner, 'tools', ownerCheck) !== false,
+              isOwner,
+            });
+            raw = r2.text;
+            reason = r2.reason;
           }
         } else {
           for await (const chunk of this.llm.stream(messages, {
@@ -1234,6 +1273,99 @@ export class ChatEngine {
    * @param {Function} [onDelta] 流式回调
    * @returns {Promise<{text:string, reason:string}>}
    */
+  /**
+   * 工具循环（文字协议版）——给不支持 function calling 的模型用。
+   *
+   * 流程：提示词里教它怎么写 {{tool:名字 {...}}} → 拿到回复 → 解析标记 →
+   * 真去执行 → 把结果当成「系统告诉你的结果」塞回去 → 让它接着说。
+   * 最多 3 轮，防止模型反复要工具停不下来。
+   */
+  async #runWithPromptTools(sessionId, messages, onDelta, opts = {}) {
+    const MAX_ROUNDS = 3;
+    const allowTools = opts.allowTools !== false;
+    const callerIsOwner = opts.isOwner !== false;
+
+    const defs = allowTools ? this.tools.definitions() : [];
+    const spec = renderToolSpec(defs);
+
+    // 把「可以做的事」附在最后一条 system 上（没有就新建一条）
+    let msgs = [...messages];
+    if (spec) {
+      const si = msgs.findIndex((m) => m.role === 'system');
+      if (si >= 0) {
+        msgs[si] = { ...msgs[si], content: String(msgs[si].content || '') + spec };
+      } else {
+        msgs.unshift({ role: 'system', content: spec.trim() });
+      }
+    }
+
+    let accumulated = '';
+    let ranAny = false;
+
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      let text = '';
+      for await (const chunk of this.llm.stream(msgs, {
+        onUsage: (u) => this.recordUsage(u, round === 0 ? 'chat' : 'tool-round'),
+      })) {
+        text += chunk;
+        // 流式回调里先不吐工具标记，等整段解析完再说
+        const visible = stripToolCalls(text);
+        if (onDelta && visible) onDelta('');
+      }
+
+      const calls = allowTools ? parseToolCalls(text) : [];
+      if (!calls.length) {
+        const clean = stripToolCalls(text);
+        if (onDelta && clean) {
+          const step = Math.max(1, Math.ceil(clean.length / 20));
+          for (let i = 0; i < clean.length; i += step) onDelta(clean.slice(i, i + step));
+        }
+        return { text: clean || accumulated, reason: 'ok' };
+      }
+
+      this.log.info?.(
+        `[tool] 文字协议：模型要求 ${calls.length} 个操作（${calls.map((c) => c.name).join(', ')}）`,
+      );
+
+      // 回填：模型说的话（去掉标记）+ 执行结果
+      const said = stripToolCalls(text);
+      msgs.push({ role: 'assistant', content: said || '（我调用了一个操作）' });
+
+      for (const c of calls) {
+        let result;
+        if (c.parseError) {
+          result = `（这个操作没执行：${c.parseError}，参数要写成合法 JSON）`;
+        } else if (this.tools.isToolOff?.(c.name)) {
+          result = `（${c.name} 这个功能被主人关掉了）`;
+        } else {
+          this.log.info?.(`[tool] 执行 ${c.name}(${JSON.stringify(c.args).slice(0, 60)})`);
+          this.tools.adminSaveConfig = this.saveConfigHook || null;
+          this.tools.adminCleanMedia = this.cleanMediaHook || null;
+          try {
+            result = String(
+              await this.tools.run(c.name, c.args, { search: this.search, isOwner: callerIsOwner }),
+            ).slice(0, 2000);
+          } catch (e) {
+            result = `（执行失败：${e.message}）`;
+          }
+          ranAny = true;
+        }
+        msgs.push({ role: 'user', content: `【操作结果】${c.name}：${result}` });
+      }
+
+      accumulated = said || accumulated;
+      // 已经是最后一轮：让模型直接给结论，别再要工具
+      if (round === MAX_ROUNDS - 1) {
+        msgs.push({ role: 'user', content: '（别再调用操作了，直接说你刚才做完的结果。）' });
+      }
+    }
+
+    return {
+      text: accumulated || (ranAny ? '好了。' : ''),
+      reason: 'ok',
+    };
+  }
+
   async #runWithTools(sessionId, messages, onDelta, opts = {}) {
     const MAX_ROUNDS = 5;
     const allowTools = opts.allowTools !== false;

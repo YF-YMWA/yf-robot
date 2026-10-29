@@ -159,6 +159,16 @@ export class LlmClient {
    * @param {object} [opts]
    * @returns {Promise<{text:string, toolCalls:Array|null, finishReason:string}>}
    */
+  /**
+   * 所有服务商都不支持 function calling 吗？
+   *
+   * 引擎用它决定走哪条路：原生 tools 字段，还是文字协议（{{tool:...}}）。
+   * 只要有一个服务商没被判定为「不支持」，就先试原生 —— 失败会自动降级。
+   */
+  get toolsSupported() {
+    return this.providers.some((p) => p.supportsTools !== false);
+  }
+
   async streamWithTools(messages, tools, opts = {}) {
     let lastErr = null;
 

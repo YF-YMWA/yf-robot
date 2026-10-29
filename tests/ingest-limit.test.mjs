@@ -52,8 +52,22 @@ test('素材上传：1MB 级 base64 不会被连接掐断', async (t) => {
     signal: AbortSignal.timeout(20000),
   });
 
-  // 不要求一定入库（1x1 会被质量规则挡），但**绝不能是连接被掐**
+  // 不管入没入库，测试都不该往真实素材库里塞东西
+  // （以前这里塞进了一张 1×1 的 614KB 假图，后来还被真的发出去过）
+
   assert.ok(r.status === 200, `期望 200，实际 ${r.status}（连接被掐说明请求体上限太小）`);
   const j = await r.json();
   assert.equal(typeof j, 'object');
+
+  // 如果能入库，就把测试自己造的那份删掉 —— 测试不该污染用户素材库
+  if (j.ok && j.name) {
+    try {
+      await fetch(BASE + '/api/admin/media/delete-batch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-local-token': token() },
+        body: JSON.stringify({ kind: 'stickers', names: [j.name] }),
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch {}
+  }
 });
