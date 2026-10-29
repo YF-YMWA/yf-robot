@@ -82,7 +82,7 @@ results.push(
   ),
 );
 
-// 2. 智谱 GLM-4V-Flash（whale-girl 用的，免费）
+// 2. 智谱 GLM-4V-Flash（有免费额度）
 const zhipuKey = process.env.ZHIPU_API_KEY || '';
 if (zhipuKey) {
   results.push(
