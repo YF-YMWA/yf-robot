@@ -317,6 +317,7 @@
     <a data-page="model">模型与功能</a>
     <a data-page="memory">记忆</a>
     <a data-page="active">主动功能</a>
+    <a data-page="bridge">接入状态</a>
     <a data-page="learn">联网学习</a>
     <a data-page="tools">工具</a>
     <a data-page="plugins">插件</a>
@@ -376,7 +377,7 @@
         只有「主人」才能让她读写文件、改设置、用工具。<br>
         在微信里给她发一句话，然后到「身份」页从「最近说话的人」里挑自己 —— 不用手抄 wxid。
       </div>
-      <button onclick="goPage('identity')">去设主人</button>
+      <button onclick="goPage('owner')">去设主人</button>
     </div>
 
     <div class="card">
@@ -402,7 +403,8 @@
         · 逻辑库：告诉她「以后遇到 XX 就这样回」，会记进经验
       </div>
       <div style="margin-top:8px">
-        <button onclick="goPage('data')">去资料页</button>
+        <button onclick="goPage('kb')">去知识库</button>
+        <button class="ghost" onclick="goPage('stickers')">去素材库</button>
         <button class="ghost" onclick="goPage('learn')">去联网学习</button>
       </div>
     </div>
@@ -414,7 +416,7 @@
       </div>
       <div id="guideLogs" class="hint">正在读取路径…</div>
       <div style="margin-top:12px">
-        <button onclick="goPage('run')">去运行页</button>
+        <button onclick="goPage('logs')">去看日志</button>
         <button class="ghost" onclick="runRepair()">一键修复</button>
       </div>
     </div>
@@ -3137,10 +3139,71 @@ function jj(p) {
   return String(p || '').replace(/\\+$/, '');
 }
 
-/** 侧边栏跳页（指南里用） */
+/**
+ * 侧边栏跳页（指南里用）。
+ *
+ * 以前目标不存在就静默什么都不做 —— 用户点了以为坏了。
+ * 现在找不到就退到总览，并给一句提示，方便发现「入口漏了」。
+ */
 function goPage(name) {
   const a = document.querySelector('a[data-page="' + name + '"]');
-  if (a) a.click();
+  if (a) {
+    a.click();
+    return true;
+  }
+  // 分组（身份/资料/运行）：切到分组下的第一个标签
+  if (typeof PAGE_GROUPS === 'object' && PAGE_GROUPS[name]) {
+    const first = PAGE_GROUPS[name].tabs?.[0]?.[0];
+    if (first) {
+      // 复用侧边栏的点击逻辑：它知道怎么渲染 tabbar
+      const nav = document.querySelector('a[data-page="' + name + '"]');
+      if (nav) nav.click();
+      // 再点第一个标签
+      setTimeout(() => {
+        const tab = document.querySelector('#tabBar .tab, #tabBar [data-tab="' + first + '"]');
+        if (tab) tab.click();
+      }, 0);
+      // 第一个标签对应的页面也直接显示（防止 tabbar 还没渲染好）
+      const firstPage = document.getElementById('page-' + first);
+      if (firstPage) {
+        document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
+        firstPage.classList.add('active');
+      }
+      return true;
+    }
+  }
+
+  // 子页：找到它所属的分组，先切分组再选标签
+  if (typeof PAGE_GROUPS === 'object') {
+    for (const [gid, g] of Object.entries(PAGE_GROUPS)) {
+      if (!(g.tabs || []).some((t) => t[0] === name)) continue;
+      const nav = document.querySelector('a[data-page="' + gid + '"]');
+      if (nav) nav.click();
+      setTimeout(() => {
+        const tabs = document.querySelectorAll('#tabBar .tab');
+        const idx = g.tabs.findIndex((t) => t[0] === name);
+        if (tabs[idx]) tabs[idx].click();
+      }, 0);
+      const target = document.getElementById('page-' + name);
+      if (target) {
+        document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
+        target.classList.add('active');
+      }
+      return true;
+    }
+  }
+
+  const page = document.getElementById('page-' + name);
+  if (page) {
+    // 页面在、导航没有：直接切过去（也提醒我们补入口）
+    document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
+    page.classList.add('active');
+    document.querySelectorAll('nav a').forEach((x) => x.classList.remove('active'));
+    toast('这个页面还没有侧边栏入口，已直接打开：' + name);
+    return true;
+  }
+  toast('找不到页面：' + name, 'err');
+  return false;
 }
 
 /** 定时任务：列表 / 新增 / 删除 */

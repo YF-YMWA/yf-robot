@@ -5451,7 +5451,18 @@ print('%016x' % bits)
      * 加字段不用再改这里 —— 之前每加一项都要在读写两处各写一遍，漏一处就静默失效。
      * Key 相关的仍然走下面的守卫逻辑（要归档、要掩码、要防覆盖）。
      */
+    /**
+     * schema 只处理它声明过的段落；llm/vision/voice 这些由下面的手工分支处理。
+     * 从 ignored 里滤掉这些段落的提示，否则用户会看到「llm（没有这个段落）」
+     * 以为自己没保存成功（实际是保存了的）。
+     */
+    const MANUAL_SECTIONS = ['llm', 'vision', 'voice', 'search', 'imagegen', 'care', 'learning', 'share'];
     const schemaResult = applySchemaPatch(current, patch);
+    if (Array.isArray(schemaResult.ignored)) {
+      schemaResult.ignored = schemaResult.ignored.filter(
+        (m) => !MANUAL_SECTIONS.some((x) => String(m).startsWith(x)),
+      );
+    }
 
     /**
      * 安全地处理 Key 更新。
