@@ -1777,27 +1777,55 @@ export class ChatEngine {
       }
     };
 
-    const drawn = scan('generated', 5);
-    const stickers = scan('stickers', 5);
-    const received = scan('images', 5);
+    /**
+     * 她画的图按角色卡存（data/<卡片>/generated），老版本在 data/generated。
+     * 以前只扫老目录 —— 角色卡的图她根本看不见，于是「只能看自己找的图」。
+     */
+    const card = this.scope || this.config.card || 'default';
+    const scopedDrawn = scan(path.join('..', '..', card, 'generated'), 6);
+    const legacyDrawn = scan('generated', 6);
+    const drawn = [...new Set([...scopedDrawn, ...legacyDrawn])].slice(0, 6);
+    const stickers = scan('stickers', 6);
+    const received = scan('images', 6);
+
+    /** 数量：目录里到底有多少（不只样本） */
+    const countOf = (sub) => {
+      try {
+        const dir = path.join(root, 'data', sub);
+        if (!fsMod.existsSync(dir)) return 0;
+        return fsMod.readdirSync(dir).filter((n) => IMG_RE.test(n)).length;
+      } catch {
+        return 0;
+      }
+    };
+    const total = {
+      drawn: countOf(card + '/generated') + countOf('generated'),
+      stickers: countOf('stickers'),
+      received: countOf('images'),
+    };
 
     if (!drawn.length && !stickers.length && !received.length) return '';
 
     const lines = ['【你的素材库】'];
 
     if (drawn.length) {
-      lines.push(`你画的图（最新 5 张）：${drawn.join('、')}`);
+      lines.push(`你画的图：共 ${total.drawn} 张（${drawn.join('、')}…）`);
     }
     if (received.length) {
-      lines.push(`收到的图（最新 5 张）：${received.join('、')}`);
+      lines.push(`收到的图：共 ${total.received} 张（${received.join('、')}…）`);
     }
     if (stickers.length) {
-      lines.push(`表情包（最新 5 个）：${stickers.join('、')}`);
+      lines.push(
+        `表情包：共 ${total.stickers} 个，例如 ${stickers.join('、')}` +
+          '（只是样本 —— 库里还有更多；想按情绪挑就调 list_stickers，它支持按标签找）',
+      );
     }
 
     lines.push(
       '⚠ 发表情包/图片**必须调用 send_image**。系统只转发工具真正选中的那张图——',
       '你在文字里说「发给你了」但没有调用工具的话，对方什么都收不到。',
+      '对方要图时先想清楚是哪一类（表情包 / 收到过的 / 你自己画的）；',
+      '不确定库里有什么就调 list_stickers 看一眼，别直接说「我没有」。',
       '所以：想发图 → 先调工具 → 再说话。不要只动嘴。',
       '',
       '三类目录（generated/stickers/images）的图都能发，用 send_image(name="文件名") 即可，不用管它在哪。',
