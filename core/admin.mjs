@@ -1264,6 +1264,25 @@ export class AdminApi {
        * 但界面上看不到「这个功能到底拿哪把 Key、发哪个模型名」，
        * 只能靠猜。这个接口把它们一次列清楚，并且带上游返回的原文。
        */
+      // ===== 定时任务 =====
+      if (method === 'GET' && pathname === '/api/admin/schedules') {
+        const sch = this.engine?.scheduler;
+        return { code: 200, body: { ok: true, list: sch ? sch.list() : [] } };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/schedules') {
+        const sch = this.engine?.scheduler;
+        if (!sch) return { code: 200, body: { ok: false, error: '调度器没启用' } };
+        const r = sch.add(body || {});
+        return { code: 200, body: r };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/schedules/remove') {
+        const sch = this.engine?.scheduler;
+        if (!sch) return { code: 200, body: { ok: false, error: '调度器没启用' } };
+        return { code: 200, body: sch.remove(String(body?.id || '')) };
+      }
+
       if (method === 'GET' && pathname === '/api/admin/models') {
         const c = this.config || {};
         const mask = (k) => (k ? String(k).slice(0, 4) + '****' + String(k).slice(-4) : '');

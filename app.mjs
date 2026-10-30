@@ -15,6 +15,7 @@ import { AdminApi } from './core/admin.mjs';
 import { WebChannel } from './channels/web.mjs';
 import { WeChatGroupChannel } from './channels/wechat-group.mjs';
 import { JobStore } from './core/jobs.mjs';
+import { Scheduler } from './core/scheduler.mjs';
 
 const CHANNEL_FACTORIES = {
   web: (opts) => new WebChannel(opts),
@@ -483,6 +484,31 @@ async function main() {
    */
   engine.jobs = new JobStore(config.root || process.cwd(), { logger: console });
   engine.syncTools?.();
+
+  /**
+   * 定时任务：到点起一个后台作业，结果走同一条待发队列。
+   * 有 prompt 就让模型现写一句（比固定文案自然），没有就用固定文案。
+   */
+  engine.scheduler = new Scheduler(config.root || process.cwd(), {
+    logger: console,
+    jobs: engine.jobs,
+    compose: async (item) => {
+      if (!item.prompt) return null;
+      try {
+        const r = await engine.handle({
+          sessionId: item.chatId,
+          text: `（这是定时提醒：${item.prompt}。就按这个说一句，别解释为什么突然说话）`,
+          speakerName: '定时器',
+          isOwner: true,
+        });
+        const text = (r?.bubbles || []).join(' ');
+        return { text: text || item.text || '', images: r?.images || [] };
+      } catch {
+        return null;
+      }
+    },
+  });
+  engine.scheduler.start();
 
   const channels = [];
   for (const [name, factory] of Object.entries(CHANNEL_FACTORIES)) {
