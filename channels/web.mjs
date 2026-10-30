@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkCareDue, composeCare } from '../core/care.mjs';
 import { ensureToken, checkToken } from '../core/token.mjs';
+import { ApprovalStore, isApproveText, isDenyText } from '../core/approvals.mjs';
 import { MediaLibrary } from '../core/media-ingest.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -237,7 +238,99 @@ export class WebChannel {
     return this._mediaLib;
   }
 
+  /** 待审批的操作（危险动作先问主人） */
+  #approvals = null;
+
+  /** 这一轮要问主人的审批（回复时拼成一句话） */
+  #pendingAsks = [];
+
+  #approvalStore() {
+    if (!this.#approvals) {
+      this.#approvals = new ApprovalStore(this.config.root || process.cwd());
+    }
+    return this.#approvals;
+  }
+
+  /**
+   * 引擎在工具层遇到危险操作时调这里：登记一条，返回「已挂起」。
+   * 真正执行发生在主人回「允许」之后（见 #tryResolveApproval）。
+   */
+  #askApproval({ tool, args, reason, sessionId }) {
+    const chatId = String(sessionId || '').replace(/^private:/, '').replace(/^grp:/, '');
+    const req = this.#approvalStore().add({ chatId, tool, args, reason });
+    this.log.info?.(`[approval] ${req.id} 等待批准：${tool}（${reason}）`);
+    // 记下来，回复时要在气泡里问一句（否则主人不知道回什么）
+    this.#pendingAsks = this.#pendingAsks || [];
+    this.#pendingAsks.push({ id: req.id, tool, reason });
+    return { pending: true, id: req.id };
+  }
+
+  /** 取出这轮要问的审批，并清空（每条只问一次） */
+  #drainApprovalAsk() {
+    const list = this.#pendingAsks || [];
+    this.#pendingAsks = [];
+    if (!list.length) return '';
+    const why = [...new Set(list.map((x) => x.reason))].join('、');
+    return `（${why}。要我做吗？回「允许」或「拒绝」）`;
+  }
+
+  /**
+   * 主人回「允许」「拒绝」时走这里。
+   *
+   * 之所以在这里拦：审批动作是「一句话」，
+   * 不该走完整对话（模型可能理解成别的意思，或者抢着说别的）。
+   *
+   * @returns {Promise<string[]>|null} 处理了就返回要发的气泡，没处理返回 null
+   */
+  async #tryResolveApproval(text, chatId, isOwner) {
+    const store = this.#approvalStore();
+    const pending = store.latest(chatId);
+    if (!pending) return null;
+
+    const approve = isApproveText(text);
+    const deny = isDenyText(text);
+    if (!approve && !deny) return null;
+
+    if (!isOwner) {
+      return ['（这事得主人说了算）'];
+    }
+
+    if (deny) {
+      store.resolve(pending.id, 'denied');
+      this.log.info?.(`[approval] ${pending.id} 被拒绝`);
+      return ['行，那我不动。'];
+    }
+
+    store.resolve(pending.id, 'approved');
+    this.log.info?.(`[approval] ${pending.id} 已批准，开始执行 ${pending.tool}`);
+
+    // 真的执行
+    try {
+      const out = String(
+        await this.engine.tools.run(pending.tool, pending.args, {
+          search: this.engine.search,
+          isOwner: true,
+          // 已经批准过了，不要再挂起一次
+          askApproval: async () => ({ approved: true }),
+        }),
+      );
+      const ok = !/权限|不执行|失败|拒绝/.test(out);
+      return [ok ? '好，办完了' : '试了，没成：' + out.slice(0, 60)];
+    } catch (e) {
+      return ['办砸了：' + e.message.slice(0, 60)];
+    }
+  }
+
   async start() {
+    /**
+     * 把审批回调暴露给引擎。
+     *
+     * 引擎层不知道「消息要发到哪个会话」，所以它只调一个全局函数，
+     * 由通道（这里）决定登记到哪个 chat。单进程单通道，用全局够用；
+     * 将来多通道时改成按通道注入即可。
+     */
+    globalThis.__yfApprovalHook = (req) => this.#askApproval(req);
+
     const { port } = this.config.server;
     let host = this.config.server.host;
 
@@ -1007,6 +1100,22 @@ export class WebChannel {
 
       // 群聊走策略，私聊直接回
       if (isGroup) {
+        /**
+         * 审批回复优先处理。
+         *
+         * 主人回「允许 / 拒绝」是特指上一条挂起的操作，不能交给模型理解 ——
+         * 它可能理解成别的意思，或者抢着聊别的。
+         */
+        const resolvedG = await this.#tryResolveApproval(text, chatId, ownerCheck.isOwner);
+        if (resolvedG) {
+          return json(res, 200, {
+            action: 'reply',
+            reply: resolvedG.join(''),
+            bubbles: resolvedG,
+            images: [],
+          });
+        }
+
         const result = await this.engine.handle({
           sessionId: `group:${chatId}`,
           text,
@@ -1014,6 +1123,10 @@ export class WebChannel {
           isOwner: ownerCheck.isOwner,
           ownerCheck,
         });
+
+        // 这轮如果有危险操作被挂起，明确问一句
+        const askG = this.#drainApprovalAsk();
+        if (askG) result.bubbles = [...(result.bubbles || []), askG];
 
         if (!result.bubbles?.length) {
           return json(res, 200, { action: 'ignore', reason: result.reason || 'no_reply' });
@@ -1038,6 +1151,17 @@ export class WebChannel {
         });
       }
 
+      // 私聊：审批回复优先（同群聊，别让模型去理解「允许」）
+      const resolvedP = await this.#tryResolveApproval(text, chatId, ownerCheck.isOwner);
+      if (resolvedP) {
+        return json(res, 200, {
+          action: 'reply',
+          reply: resolvedP.join(''),
+          bubbles: resolvedP,
+          images: [],
+        });
+      }
+
       const result = await this.engine.handle({
         sessionId: `private:${chatId}`,
         text,
@@ -1045,6 +1169,10 @@ export class WebChannel {
         isOwner: ownerCheck.isOwner,
         ownerCheck,
       });
+
+      // 这轮如果有危险操作被挂起，明确问一句
+      const askP = this.#drainApprovalAsk();
+      if (askP) result.bubbles = [...(result.bubbles || []), askP];
 
       if (!result.bubbles?.length) {
         // 只有图没有文字时也要发出去

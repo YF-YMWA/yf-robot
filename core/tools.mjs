@@ -513,6 +513,35 @@ export class ToolKit {
    * @param {object} [ctx] 额外上下文（如搜索客户端）
    * @returns {Promise<string>} 结果文本
    */
+  /**
+   * 这个操作要不要先问主人？
+   *
+   * @returns {string} 需要审批时返回一句理由；空字符串表示直接做
+   */
+  needsApproval(name, args = {}) {
+    // 开关：tools.approval 默认开（关掉就回到「按档位直接执行」）
+    if (this.config?.tools?.approval === false) return '';
+
+    const NEED = {
+      write_file: '要往磁盘写文件',
+      run_command: '要执行命令',
+      admin_config: '要改设置',
+      admin_media: '要动素材库',
+      save_sticker: '要把图存进素材库',
+    };
+    const reason = NEED[name];
+    if (!reason) return '';
+
+    // 读操作、空操作别烦人
+    if (name === 'run_command') {
+      const cmd = String(args.command || '').toLowerCase();
+      const READONLY = ['ffprobe', 'ffmpeg -version', 'node -v', 'python -v'];
+      if (READONLY.some((x) => cmd.includes(x))) return '';
+    }
+
+    return reason;
+  }
+
   /** 当前权限档位：read-only / workspace / full */
   #permissionMode() {
     const raw = String(this.config?.tools?.permission || 'workspace').toLowerCase();
@@ -603,8 +632,29 @@ export class ToolKit {
       // 权限闸门：不满足当前档位就直接拒绝（返回给模型一句人话，它自己会圆）
       const deny = this.#checkPermission(name, args);
       if (deny) {
-        this.log.info?.( `[tool] ${name} 被权限挡住（${this.#permissionMode()}）`);
+        this.log.info?.(`[tool] ${name} 被权限挡住（${this.#permissionMode()}）`);
         return deny;
+      }
+
+      /**
+       * 审批闸门：档位允许，但这一个操作要不要人点头。
+       *
+       * 档位是「事先定死」的，真正危险的是「这一次」——
+       * 她突然要写文件、跑命令。这里登记一条待审批，
+       * 由通道去问主人；主人回「允许」才真的执行。
+       */
+      const need = this.needsApproval(name, args);
+      if (need && ctx?.askApproval) {
+        const req = await ctx.askApproval({ tool: name, args, reason: need });
+        if (req && req.pending) {
+          this.log.info?.(`[tool] ${name} 已挂起等主人批准（${req.id}）`);
+          return `（${need}。我已经问主人了，等他回「允许」再做）`;
+        }
+        if (req && req.approved === true) {
+          // 刚批准过，直接往下走
+        } else if (req && req.approved === false) {
+          return '（主人没同意，这次不做了）';
+        }
       }
 
       switch (name) {

@@ -1360,7 +1360,16 @@ export class ChatEngine {
           this.tools.adminCleanMedia = this.cleanMediaHook || null;
           try {
             result = String(
-              await this.tools.run(c.name, c.args, { search: this.search, isOwner: callerIsOwner }),
+              await this.tools.run(c.name, c.args, {
+                search: this.search,
+                isOwner: callerIsOwner,
+                // 文字协议这条路径也要走审批，否则降级后就绕过去了
+                askApproval: async (req) => {
+                  if (!callerIsOwner) return { approved: false };
+                  if (!this.approvalHook) return { pending: false };
+                  return await this.approvalHook({ ...req, sessionId });
+                },
+              }),
             ).slice(0, 2000);
           } catch (e) {
             result = `（执行失败：${e.message}）`;
@@ -1457,6 +1466,15 @@ export class ChatEngine {
         const result = await this.tools.run(fn.name, args, {
           search: this.search,
           isOwner: callerIsOwner,
+          /**
+           * 审批回调：危险操作先挂起、去问主人。
+           * 只有主人能批准；别人想做就直接拒（不给挂起的机会）。
+           */
+          askApproval: async (req) => {
+            if (!callerIsOwner) return { approved: false };
+            if (!this.approvalHook) return { pending: false };
+            return await this.approvalHook({ ...req, sessionId });
+          },
         });
 
         msgs.push({

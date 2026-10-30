@@ -471,6 +471,12 @@ async function main() {
   engine.saveConfigHook = (patch) => admin.saveConfigFromTool(patch);
   engine.cleanMediaHook = (opts) => admin.cleanMediaFromTool(opts);
 
+  /**
+   * 审批回调：危险操作（写文件、跑命令、改设置）先挂起，等主人回「允许」。
+   * 真正登记待审批的逻辑在 web 通道里（只有它知道消息该发到哪个会话）。
+   */
+  engine.approvalHook = (req) => globalThis.__yfApprovalHook?.(req) || { pending: false };
+
   const channels = [];
   for (const [name, factory] of Object.entries(CHANNEL_FACTORIES)) {
     const chCfg = config.channels[name];
