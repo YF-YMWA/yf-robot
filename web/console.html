@@ -342,8 +342,15 @@
         这一套要好几把 Key，但<b>只有第一把是必须的</b>。<br>
         每把 Key 负责一件事，填错不会炸，只是那个功能用不了。
       </div>
-      <div class="row"><label>必须 · 对话</label><div class="ctl">
-        <span class="hint">DeepSeek（api.deepseek.com）→ 这是她「会说话」的本体</span>
+      <div class="row"><label>必须有 · 对话</label><div class="ctl">
+        <span class="hint">
+          这是她「会说话」的本体，<b>必须有一把</b>，但<b>不限于 DeepSeek</b>：<br>
+          · DeepSeek（api.deepseek.com）—— 默认，便宜、中文顺，推荐新手先用这个<br>
+          · 智谱 GLM（open.bigmodel.cn）—— 和看图/画图同一把 Key，省事<br>
+          · Kimi（api.moonshot.cn）、通义（dashscope）—— 都能用<br>
+          · 本地 Ollama —— 不花钱，但要自己跑个模型<br>
+          只要是「OpenAI 兼容」的接口都能接：填对「接口地址 + 模型名」就行。
+        </span>
       </div></div>
       <div class="row"><label>可选 · 看图</label><div class="ctl">
         <span class="hint">智谱 bigmodel.cn，模型 glm-4v-flash（免费额度够用）→ 看图、给表情包打标签</span>
@@ -671,9 +678,11 @@
           <option value="zhipu">智谱 GLM</option>
           <option value="moonshot">Kimi</option>
           <option value="openai">OpenAI</option>
+          <option value="dashscope">通义千问</option>
+          <option value="ollama">本地 Ollama</option>
           <option value="custom">自定义</option>
         </select>
-        <span class="hint">选预设会自动填地址和模型名</span>
+        <span class="hint">选预设会自动填地址和模型名；换服务商记得两样一起改</span>
       </div></div>
 
       <div class="row"><label>接口地址</label><div class="ctl">
@@ -2469,6 +2478,11 @@ const PRESETS = {
     zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
     moonshot: { baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
     openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+    dashscope: {
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      model: 'qwen-flash',
+    },
+    ollama: { baseUrl: 'http://localhost:11434/v1', model: 'qwen2.5' },
   },
   vision: {
     'zhipu-flash': { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4v-flash' },
