@@ -54,6 +54,10 @@ export const SECTION_SCHEMA = {
       maxFileSize: F('number', 524288, { min: 1024, max: 50 * 1024 * 1024, label: '单文件上限' }),
       cmdTimeout: F('number', 30000, { min: 1000, max: 600000, label: '命令超时(ms)' }),
       off: F('array', [], { label: '被关掉的工具' }),
+      /** 危险操作（写文件/跑命令/改设置）先微信里问主人 */
+      approval: F('boolean', true, { label: '危险操作要审批' }),
+      /** 画图走后台（先回话，画好再补发） */
+      backgroundDraw: F('boolean', true, { label: '画图后台执行' }),
     },
     nested: {
       dsh: {

@@ -799,6 +799,62 @@
   <div class="page" id="page-active">
     <h1>主动功能</h1>
 
+    <!-- 定时任务 -->
+    <div class="card">
+      <h2>定时任务 <span class="chip" id="scheduleChip">0 条</span>
+        <span class="sp"></span>
+        <button class="ghost sm" onclick="loadSchedules()">刷新</button>
+      </h2>
+      <div class="hint" style="margin-bottom:12px">
+        到点自己说话：每天早安、每隔几小时看看群里、或者指定某时刻提醒一次。<br>
+        内容可以让模型现写（填「让她说什么」），也可以固定一句。
+      </div>
+
+      <div class="row"><label>类型</label><div class="ctl">
+        <select id="schKind" onchange="schKindChanged()" style="max-width:160px">
+          <option value="daily">每天</option>
+          <option value="every">每隔一段时间</option>
+          <option value="once">指定时刻（一次）</option>
+        </select>
+      </div></div>
+
+      <div class="row" id="schAtRow"><label>时间</label><div class="ctl">
+        <input type="time" id="schAt" value="08:00" style="max-width:120px">
+        <span class="hint">每天这个点</span>
+      </div></div>
+
+      <div class="row" id="schEveryRow" style="display:none"><label>间隔</label><div class="ctl">
+        <input type="number" id="schEvery" min="1" max="1440" value="120" style="max-width:90px">
+        <span class="hint">分钟一次</span>
+      </div></div>
+
+      <div class="row" id="schOnceRow" style="display:none"><label>多久后</label><div class="ctl">
+        <input type="number" id="schMinutes" min="1" max="10080" value="30" style="max-width:90px">
+        <span class="hint">分钟后触发一次</span>
+      </div></div>
+
+      <div class="row"><label>发给谁</label><div class="ctl">
+        <input type="text" id="schChat" placeholder="wxid_xxx 或 群 id" style="max-width:320px">
+        <span class="hint">留空 = 发给主人</span>
+      </div></div>
+
+      <div class="row"><label>让她说什么</label><div class="ctl">
+        <input type="text" id="schPrompt" placeholder="例如：早上跟她打个招呼" style="max-width:320px">
+        <span class="hint">填了就让模型现写；留空则用下面的固定文字</span>
+      </div></div>
+
+      <div class="row"><label>固定文字</label><div class="ctl">
+        <input type="text" id="schText" placeholder="例如：该喝水了" style="max-width:320px">
+      </div></div>
+
+      <div style="display:flex;gap:10px;margin-top:14px;align-items:center">
+        <button onclick="addSchedule()">添加</button>
+        <span class="hint" id="schHint"></span>
+      </div>
+
+      <div id="scheduleList" style="margin-top:14px"></div>
+    </div>
+
     <!-- 主动搭话 -->
     <div class="card">
       <h2>主动搭话 <span class="chip" id="careChip"></span></h2>
@@ -2927,6 +2983,108 @@ function startConsolePing() {
 
   window.addEventListener('pagehide', bye);
   window.addEventListener('beforeunload', bye);
+}
+
+/** 定时任务：列表 / 新增 / 删除 */
+async function loadSchedules() {
+  const box = document.getElementById('scheduleList');
+  const chip = document.getElementById('scheduleChip');
+  if (!box) return;
+  try {
+    const j = await api('schedules');
+    const list = j.list || [];
+    if (chip) chip.textContent = list.length + ' 条';
+    if (!list.length) {
+      box.innerHTML = '<div class="hint">还没有定时任务。</div>';
+      return;
+    }
+    const KIND = { daily: '每天', every: '每隔', once: '一次性' };
+    box.innerHTML = list
+      .map((x) => {
+        const when =
+          x.kind === 'daily'
+            ? '每天 ' + x.at
+            : x.kind === 'every'
+              ? '每 ' + x.everyMinutes + ' 分钟'
+              : new Date(x.timestamp).toLocaleString('zh-CN');
+        const what = x.prompt ? '现写：' + x.prompt : x.text || '（空）';
+        const state = x.enabled ? '' : ' <span class="hint">（已停用）</span>';
+        return (
+          '<div class="row" style="align-items:center;gap:10px">' +
+          '<span class="hint" style="min-width:70px">' + (KIND[x.kind] || x.kind) + '</span>' +
+          '<span style="min-width:150px">' + when + state + '</span>' +
+          '<span class="hint" style="flex:1">' + what + '</span>' +
+          '<button class="ghost sm" onclick="removeSchedule(\'' + x.id + '\')">删除</button>' +
+          '</div>'
+        );
+      })
+      .join('');
+  } catch (e) {
+    box.innerHTML = '<div class="hint" style="color:var(--warn)">读取失败：' + e.message + '</div>';
+  }
+}
+
+function schKindChanged() {
+  const k = document.getElementById('schKind')?.value;
+  const show = (id, on) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = on ? '' : 'none';
+  };
+  show('schAtRow', k === 'daily');
+  show('schEveryRow', k === 'every');
+  show('schOnceRow', k === 'once');
+}
+
+async function addSchedule() {
+  const hint = document.getElementById('schHint');
+  const kind = document.getElementById('schKind').value;
+  const prompt = (document.getElementById('schPrompt').value || '').trim();
+  const text = (document.getElementById('schText').value || '').trim();
+
+  if (!prompt && !text) {
+    hint.textContent = '「让她说什么」和「固定文字」至少填一个';
+    return;
+  }
+
+  const body = {
+    kind,
+    chatId:
+      (document.getElementById('schChat').value || '').trim() ||
+      (Array.isArray(ownerWxids) && ownerWxids[0]) ||
+      '',
+    prompt,
+    text,
+  };
+  if (!body.chatId) {
+    hint.textContent = '要指定发给谁（或先在身份页设置主人）';
+    return;
+  }
+  if (kind === 'daily') body.at = document.getElementById('schAt').value || '08:00';
+  if (kind === 'every') body.everyMinutes = Number(document.getElementById('schEvery').value) || 60;
+  if (kind === 'once') {
+    body.timestamp = Date.now() + (Number(document.getElementById('schMinutes').value) || 30) * 60000;
+  }
+
+  hint.textContent = '正在保存…';
+  try {
+    const r = await api('schedules', { method: 'POST', body });
+    if (!r.ok) throw new Error(r.error || '保存失败');
+    hint.textContent = '已添加';
+    setTimeout(() => (hint.textContent = ''), 2000);
+    loadSchedules();
+  } catch (e) {
+    hint.textContent = '失败：' + e.message;
+  }
+}
+
+async function removeSchedule(id) {
+  if (!confirm('删掉这条定时任务？')) return;
+  try {
+    await api('schedules/remove', { method: 'POST', body: { id } });
+    loadSchedules();
+  } catch (e) {
+    toast('删除失败：' + e.message, 'err');
+  }
 }
 
 async function loadActive() {
