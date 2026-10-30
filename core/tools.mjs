@@ -513,12 +513,98 @@ export class ToolKit {
    * @param {object} [ctx] 额外上下文（如搜索客户端）
    * @returns {Promise<string>} 结果文本
    */
+  /** 当前权限档位：read-only / workspace / full */
+  #permissionMode() {
+    const raw = String(this.config?.tools?.permission || 'workspace').toLowerCase();
+    if (raw === 'read-only' || raw === 'readonly' || raw === 'read') return 'read-only';
+    if (raw === 'full' || raw === 'all') return 'full';
+    return 'workspace';
+  }
+
+  /**
+   * 检查这次调用是否被允许。
+   *
+   * @returns {string} 拒绝原因；空字符串表示放行
+   */
+  #checkPermission(name, args = {}) {
+    const mode = this.#permissionMode();
+
+    /** 只读工具：任何档位都放行 */
+    const READ_ONLY = new Set([
+      'list_files',
+      'read_file',
+      'search_web',
+      'read_url',
+      'list_stickers',
+      'recall_logic',
+    ]);
+
+    if (READ_ONLY.has(name)) return '';
+
+    /** 会产生副作用的（写文件、发消息、画图、执行命令） */
+    const WRITE = new Set([
+      'write_file',
+      'run_command',
+      'save_sticker',
+      'send_image',
+      'draw_image',
+      'learn_from_web',
+      'admin_config',
+      'admin_media',
+    ]);
+
+    /** 只有 full 档才给的管理动作 */
+    const ADMIN = new Set(['admin_config', 'admin_media']);
+
+    if (mode === 'read-only' && WRITE.has(name)) {
+      return `（现在是「只读」模式，不能${name}。要让主人把权限调高才行）`;
+    }
+    if (mode !== 'full' && ADMIN.has(name)) {
+      return `（${name} 需要「完全」权限；现在是${mode}）`;
+    }
+
+    /**
+     * 命令破坏性检查：档位允许也不等于什么都能跑。
+     * 这些模式一旦出现，说明它想删东西/改系统，直接挡。
+     */
+    if (name === 'run_command') {
+      const cmd = String(args.command || '');
+      const joined = [cmd, ...(Array.isArray(args.args) ? args.args.map(String) : [])].join(' ');
+      const DANGER = [
+        /rmtree/i,
+        // node / 通用删除（rmSync、unlink、rmdir）也算破坏性操作
+        /rmSync|rmdirSync|unlinkSync|unlink|removeSync/i,
+        /os\.remove/i,
+        /shutil\.rmtree/i,
+        /\brm\s+-rf?\b/i,
+        /\bdel\s+\/[fqs]/i,
+        /\brd\s+\/s/i,
+        /format\s+[a-z]:/i,
+        /shutdown|reboot|poweroff/i,
+        />\s*\/dev\/sd/i,
+      ];
+      const hit = DANGER.find((re) => re.test(joined));
+      if (hit) {
+        return '（这条命令像在删东西或改系统，我不执行）';
+      }
+    }
+
+    return '';
+  }
+
   async run(name, args, ctx = {}) {
     try {
       // 关掉的工具即使被硬调也不执行（模型偶尔会照着历史记录瞎调）
       if (this.isToolOff(name)) {
         this.log.info?.(`[tool] ${name} 已被关闭，拒绝执行`);
         return `（${name} 这个功能被主人关掉了）`;
+      }
+
+      // 权限闸门：不满足当前档位就直接拒绝（返回给模型一句人话，它自己会圆）
+      const deny = this.#checkPermission(name, args);
+      if (deny) {
+        this.log.info?.( `[tool] ${name} 被权限挡住（${this.#permissionMode()}）`);
+        return deny;
       }
 
       switch (name) {

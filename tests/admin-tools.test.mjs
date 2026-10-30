@@ -16,7 +16,7 @@ function makeKit(overrides = {}) {
     root: process.cwd(),
     wechat: { voiceChance: 0.2, stickerChance: 0.5 },
     reply: { maxBubbles: 3, maxChars: 500 },
-    tools: { enabled: true, off: [] },
+    tools: { enabled: true, off: [], permission: 'full' },
     care: { enabled: true },
     ...overrides,
   };

@@ -730,6 +730,15 @@
         <div class="switch" id="swTools" onclick="toggleSw('swTools')"></div>
         <span class="hint">读写工作目录、跑白名单命令</span>
       </div></div>
+      <div class="row"><label>权限档位</label><div class="ctl">
+        <select id="toolsPermission" onchange="savePermission(true)" style="max-width:210px"
+                title="改完自动保存">
+          <option value="read-only">只读（只能看，不能改）</option>
+          <option value="workspace">工作区（能写文件，默认）</option>
+          <option value="full">完全（额外允许改设置、清素材）</option>
+        </select>
+        <span class="hint">就算「完全」也不许删文件、改系统的命令</span>
+      </div></div>
       <div class="row"><label>调用 DSH</label><div class="ctl">
         <div class="switch" id="swDsh" onclick="toggleSw('swDsh')"></div>
         <span class="hint">复杂任务交给 DSH</span>
@@ -2423,6 +2432,8 @@ async function loadModel() {
     setSw('swSearch', c.search.enabled);
     setSw('swEmoji', c.reply.emoji?.enabled !== false);
     setSw('swTools', c.tools?.enabled);
+    const _permSel = document.getElementById('toolsPermission');
+    if (_permSel) _permSel.value = c.tools?.permission || 'workspace';
     setSw('swDsh', c.tools?.dsh?.enabled);
 
     // 各能力
@@ -3333,6 +3344,26 @@ async function saveTtsVoice(quiet) {
  * 合成模型名写死在代码里 —— 换了别的 Key（或者别家的 TTS）就无法对应，
  * 报错信息只会说模型不存在，用户根本不知道是哪里不对。
  */
+/**
+ * 保存工具权限档位。
+ *
+ * 参照智能体框架的做法：默认「工作区」够用，
+ * 陌生人的一句话不该能让她删文件或改设置。
+ */
+async function savePermission(quiet) {
+  const v = document.getElementById('toolsPermission')?.value;
+  if (!v) return;
+  try {
+    const r = await api('config', { method: 'POST', body: { tools: { permission: v } } });
+    if (r && r.ok === false) throw new Error(r.error || '保存失败');
+    const LABEL = { 'read-only': '只读', workspace: '工作区', full: '完全' };
+    if (!quiet) toast('权限已设为：' + (LABEL[v] || v));
+    else toast('权限已设为：' + (LABEL[v] || v));
+  } catch (e) {
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
 async function saveTtsModel(quiet) {
   const v = $('ttsModel')?.value.trim();
   if (!v) return;

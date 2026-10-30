@@ -41,6 +41,15 @@ export const SECTION_SCHEMA = {
     label: '工具能力',
     fields: {
       enabled: F('boolean', true, { label: '启用工具' }),
+      /**
+       * 权限档位（参照智能体框架的通行做法）：
+       *   read-only 只能读；workspace 能写沙箱内的文件；full 额外放开管理类工具
+       * 默认 workspace —— 聊天场景够用，又不会让陌生人的一句话删掉真实文件。
+       */
+      permission: F('string', 'workspace', {
+        enum: ['read-only', 'workspace', 'full'],
+        label: '权限档位',
+      }),
       sandbox: F('string', '', { label: '工作目录' }),
       maxFileSize: F('number', 524288, { min: 1024, max: 50 * 1024 * 1024, label: '单文件上限' }),
       cmdTimeout: F('number', 30000, { min: 1000, max: 600000, label: '命令超时(ms)' }),
