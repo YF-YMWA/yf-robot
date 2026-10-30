@@ -437,6 +437,7 @@ export class ChatEngine {
    * 面板能随时改「工具能力」和「调用 DSH」，所以不能只在构造时判断一次。
    */
   syncTools() {
+    if (this.tools) this.tools.jobs = this.jobs;
     const want = this.config?.tools?.enabled !== false && Boolean(this.config?.tools?.enabled);
 
     if (!want) {

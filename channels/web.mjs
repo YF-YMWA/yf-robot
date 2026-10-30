@@ -1001,6 +1001,29 @@ export class WebChannel {
           data: converted.buf.length <= 512 * 1024 ? converted.buf.toString('base64') : '',
         });
       }
+      /**
+       * 后台作业的完成通知（适配器轮询这里）。
+       *
+       * 画图要十几秒，同步等会像卡死；做完的图放这里，
+       * 适配器下一轮轮询取走并发送 —— 不需要它常驻连接。
+       */
+      if (req.method === 'GET' && url.pathname === '/api/outbox') {
+        const expect = this.config.gateway?.wechat?.inboundToken || '';
+        const got = req.headers['x-adapter-token'] || '';
+        if (expect && got !== expect) {
+          return json(res, 403, { error: '适配器令牌不对' });
+        }
+        const chat = url.searchParams.get('chat') || '';
+        const jobs = this.engine?.jobs;
+        if (!jobs) return json(res, 200, { ok: true, list: [], running: 0 });
+        const list = jobs.takeOutbox(chat);
+        return json(res, 200, {
+          ok: true,
+          list: list.map((x) => ({ id: x.id, chatId: x.chatId, text: x.text, images: x.images })),
+          running: jobs.running(chat).length,
+        });
+      }
+
       // 主动搭话：问该不该发
       if (req.method === 'GET' && url.pathname === '/api/care/due') {
         const last = Number(url.searchParams.get('last') || 0);

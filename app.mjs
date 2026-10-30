@@ -14,6 +14,7 @@ import { ChatEngine } from './core/engine.mjs';
 import { AdminApi } from './core/admin.mjs';
 import { WebChannel } from './channels/web.mjs';
 import { WeChatGroupChannel } from './channels/wechat-group.mjs';
+import { JobStore } from './core/jobs.mjs';
 
 const CHANNEL_FACTORIES = {
   web: (opts) => new WebChannel(opts),
@@ -476,6 +477,12 @@ async function main() {
    * 真正登记待审批的逻辑在 web 通道里（只有它知道消息该发到哪个会话）。
    */
   engine.approvalHook = (req) => globalThis.__yfApprovalHook?.(req) || { pending: false };
+
+  /**
+   * 后台作业：画图这类长任务先应答、做完再补一条。
+   */
+  engine.jobs = new JobStore(config.root || process.cwd(), { logger: console });
+  engine.syncTools?.();
 
   const channels = [];
   for (const [name, factory] of Object.entries(CHANNEL_FACTORIES)) {

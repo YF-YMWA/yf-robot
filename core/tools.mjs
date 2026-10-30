@@ -690,8 +690,43 @@ export class ToolKit {
         }
         case 'list_stickers':
           return this.#listStickers(args);
-        case 'draw_image':
+        case 'draw_image': {
+          /**
+           * 画图放后台：它要 8~12 秒，同步等会让用户以为卡死了。
+           * 后台跑完把结果放进待发队列，适配器下一轮轮询就会发出去。
+           */
+          if (this.jobs && this.config?.tools?.backgroundDraw !== false) {
+            const chatId = String(ctx?.chatId || ctx?.sessionId || '');
+            const prompt = String(args.prompt || '').trim();
+            if (prompt) {
+              const job = this.jobs.start({
+                chatId,
+                kind: '画图',
+                logger: this.log,
+                run: async () => {
+                  const names = await this.#drawImage({ ...args, __returnNames: true });
+                  const list = Array.isArray(names) ? names : [];
+                  return {
+                    text: list.length ? '画好了，给你' : '画是画了，但没存下来',
+                    images: list,
+                  };
+                },
+              });
+              /**
+               * 说清「还没画完」。
+               *
+               * 实测：只写「画着呢」时，模型会自己加一句「画好了，趁热看」——
+               * 而图这时还在后台，用户等半天什么都没有。
+               * 明确禁止说「画好了」，并把事实交给它。
+               */
+              return (
+                '（还没画完，大约十来秒。图会由系统直接发过去，不用你再做什么。' +
+                '这一轮只能回「画着呢」「稍等」这类话——不要说「画好了」，因为图还没发出去）'
+              );
+            }
+          }
           return await this.#drawImage(args);
+        }
         case 'send_image':
           return this.#sendImage(args);
         case 'recall_logic': {
@@ -1078,6 +1113,9 @@ export class ToolKit {
 
       // 记下来，engine 会把它们塞进回复的 images 字段，桥接据此发出去
       this.lastDrawn = images.map((i) => i.name);
+
+      // 后台作业只要文件名，不要这段给人看的文案
+      if (args.__returnNames) return this.lastDrawn;
 
       const lines = images.map((img) => {
         const kb = (img.size / 1024).toFixed(0);
