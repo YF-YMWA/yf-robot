@@ -1290,6 +1290,29 @@ export class AdminApi {
        * 他不知道这个 plugins 在哪个盘。这里直接把真实路径回给他，
        * 面板上点一下就能复制。
        */
+      /**
+       * 本程序相关的进程（看残留、清残留）。
+       *
+       * 起因：任务管理器里「终端」堆了 162 个窗口 —— 反复启停留下的。
+       * 这里只认命令行里含本程序目录的进程，绝不误杀别的 node/python。
+       */
+      if (method === 'GET' && pathname === '/api/admin/processes') {
+        const { scan, ownRoots } = await import('./proc-clean.mjs');
+        const list = scan(ownRoots(this.root));
+        return { code: 200, body: { ok: true, list, count: list.length } };
+      }
+
+      if (method === 'POST' && pathname === '/api/admin/processes/kill') {
+        const { killPids, ownRoots, scan } = await import('./proc-clean.mjs');
+        const roots = ownRoots(this.root);
+        const ids = Array.isArray(body?.pids)
+          ? body.pids
+          : scan(roots).map((p) => p.pid);
+        const r = killPids(ids, roots);
+        this.log.info?.(`[proc] 清理进程：成功 ${r.killed.length}，失败 ${r.failed.length}`);
+        return { code: 200, body: { ok: true, ...r } };
+      }
+
       if (method === 'GET' && pathname === '/api/admin/paths') {
         const root = this.root;
         const card = scopeName(this.config.card || 'default');

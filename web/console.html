@@ -1281,6 +1281,24 @@
   </div>
 
   <div class="page" id="page-tools">
+
+    <!-- 残留进程 -->
+    <div class="card">
+      <h2>残留进程 <span class="chip" id="procChip">—</span>
+        <span class="sp"></span>
+        <button class="ghost sm" onclick="loadProcesses()">刷新</button>
+      </h2>
+      <div class="hint" style="margin-bottom:10px">
+        反复启停会留下后台进程（任务管理器里「终端」堆很多窗口就是这个）。
+        这里只列出<b>命令行里含本程序目录</b>的进程，不会动别的程序。<br>
+        清理只结束多出来的那些 —— 当前正在跑的服务不会自杀。
+      </div>
+      <div id="procList" class="hint">点「刷新」看看。</div>
+      <div style="margin-top:12px">
+        <button onclick="killProcesses()" style="color:var(--err)">清理全部残留</button>
+        <span class="hint" id="procHint"></span>
+      </div>
+    </div>
     <h1>工具</h1>
 
     <div class="card">
@@ -2215,6 +2233,7 @@ function loadPageData(page) {
     loadAdapters();
   }
   if (page === 'guide') loadPaths();
+  if (page === 'tools') loadProcesses();
   if (page === 'active') loadActive();
   if (page === 'stickers') {
     loadMediaAll();
@@ -3207,6 +3226,49 @@ function goPage(name) {
 }
 
 /** 定时任务：列表 / 新增 / 删除 */
+/** 残留进程：列出 / 清理 */
+async function loadProcesses() {
+  const box = document.getElementById('procList');
+  const chip = document.getElementById('procChip');
+  if (!box) return;
+  try {
+    const j = await api('processes');
+    const list = j.list || [];
+    if (chip) chip.textContent = list.length + ' 个';
+    if (!list.length) {
+      box.innerHTML = '<div class="hint" style="color:var(--ok)">✓ 没有残留，很干净</div>';
+      return;
+    }
+    box.innerHTML = list
+      .map(
+        (p) =>
+          '<div class="row" style="align-items:center;gap:8px">' +
+          '<span class="hint" style="min-width:60px">' + p.pid + '</span>' +
+          '<span style="min-width:80px">' + (p.name || '?') + '</span>' +
+          '<span class="hint" style="flex:1;word-break:break-all">' + (p.cmd || '') + '</span>' +
+          '</div>',
+      )
+      .join('');
+  } catch (e) {
+    box.innerHTML = '<div class="hint" style="color:var(--warn)">读取失败：' + e.message + '</div>';
+  }
+}
+
+async function killProcesses() {
+  const hint = document.getElementById('procHint');
+  if (!confirm('结束这些残留进程？正在跑的服务会保留。')) return;
+  hint.textContent = '清理中…';
+  try {
+    const r = await api('processes/kill', { method: 'POST', body: {} });
+    hint.textContent = '清掉 ' + ((r.killed || []).length) + ' 个' +
+      ((r.failed || []).length ? '，' + r.failed.length + ' 个没成功' : '');
+    setTimeout(() => (hint.textContent = ''), 3000);
+    loadProcesses();
+  } catch (e) {
+    hint.textContent = '失败：' + e.message;
+  }
+}
+
 async function loadSchedules() {
   const box = document.getElementById('scheduleList');
   const chip = document.getElementById('scheduleChip');
