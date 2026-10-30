@@ -422,6 +422,23 @@
     </div>
 
     <div class="card">
+      <h2>遇到「任务管理器里一堆终端窗口」</h2>
+      <div class="hint">
+        <b>残留进程是什么</b>：反复启动/关闭服务或适配器，每次都会起一个控制台进程；
+        旧的那些如果没退出，就会一直堆着（几十上百个）。<br>
+        它不影响聊天，但占内存、看着吓人。<br><br>
+        <b>怎么处理</b>：<br>
+        · 自动：默认每次启动会清掉「超过 10 分钟、且不是正在用的」那些 ——
+          正在跑的适配器和当前服务永远不碰<br>
+        · 手动：到「工具」页看「残留进程」，列表里有就点「清理全部残留」<br>
+        · 关掉自动：工具页把「启动时自动清理」关掉
+      </div>
+      <div style="margin-top:12px">
+        <button onclick="goPage('tools')">去工具页看看</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>插件怎么放</h2>
       <div class="hint">
         插件是一个文件夹，里面有 <code>index.mjs</code> 和 <code>plugin.json</code>：<br>
@@ -1293,6 +1310,11 @@
         这里只列出<b>命令行里含本程序目录</b>的进程，不会动别的程序。<br>
         清理只结束多出来的那些 —— 当前正在跑的服务不会自杀。
       </div>
+      <div class="row"><label>启动时自动清理</label><div class="ctl">
+        <div class="switch" id="swAutoClean" onclick="toggleSw('swAutoClean'); saveAutoClean()"></div>
+        <span class="hint">每次启动自动清掉上次遗留的（只清超过 10 分钟的，正在跑的适配器不碰）</span>
+      </div></div>
+
       <div id="procList" class="hint">点「刷新」看看。</div>
       <div style="margin-top:12px">
         <button onclick="killProcesses()" style="color:var(--err)">清理全部残留</button>
@@ -3226,6 +3248,18 @@ function goPage(name) {
 }
 
 /** 定时任务：列表 / 新增 / 删除 */
+/** 保存「启动时自动清理残留进程」 */
+async function saveAutoClean() {
+  const on = document.getElementById('swAutoClean')?.classList.contains('on');
+  try {
+    const r = await api('config', { method: 'POST', body: { tools: { autoCleanProcesses: Boolean(on) } } });
+    if (r && r.ok === false) throw new Error(r.error || '保存失败');
+    toast(on ? '以后每次启动都会自动清理' : '关掉了自动清理');
+  } catch (e) {
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
 /** 残留进程：列出 / 清理 */
 async function loadProcesses() {
   const box = document.getElementById('procList');

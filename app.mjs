@@ -579,6 +579,29 @@ async function main() {
    * 看起来就是谁都不认识。有自动快照至少能退回上一次启动时的状态。
    * 放在这里而不是最前面：等服务和数据都加载完再打快照。
    */
+  /**
+   * 启动时清一次残留进程。
+   *
+   * 反复启停会攒下上百个后台进程（任务管理器里「终端」一堆窗口）。
+   * 规则写在 core/proc-autoclean.mjs：只清我们自己的、只清超过 10 分钟的、
+   * 正在跑的适配器和当前服务永远不碰。
+   * 想关掉：config.json 里 tools.autoCleanProcesses = false。
+   */
+  if (config.tools?.autoCleanProcesses !== false) {
+    try {
+      const { autoCleanOnStart } = await import('./core/proc-autoclean.mjs');
+      const r = autoCleanOnStart(config.root || process.cwd(), {
+        minAgeMinutes: config.tools?.autoCleanMinutes ?? 10,
+        log: (m) => console.log(m),
+      });
+      if (r.killed.length) {
+        console.log(`  （清掉 ${r.killed.length} 个上次遗留的后台进程）`);
+      }
+    } catch (e) {
+      console.warn('自动清理残留进程失败（不影响使用）：' + e.message);
+    }
+  }
+
   try {
     const { exportBundle, pruneSnapshots } = await import('./core/memory-backup.mjs');
     const root0 = config.root || process.cwd();

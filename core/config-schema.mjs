@@ -58,6 +58,9 @@ export const SECTION_SCHEMA = {
       approval: F('boolean', true, { label: '危险操作要审批' }),
       /** 画图走后台（先回话，画好再补发） */
       backgroundDraw: F('boolean', true, { label: '画图后台执行' }),
+      /** 启动时清理上次遗留的后台进程 */
+      autoCleanProcesses: F('boolean', true, { label: '自动清理残留进程' }),
+      autoCleanMinutes: F('number', 10, { min: 1, max: 1440, label: '只清超过 N 分钟的' }),
     },
     nested: {
       dsh: {
