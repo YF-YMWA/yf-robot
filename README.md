@@ -45,7 +45,7 @@ node app.mjs
 
 | 用途 | 服务 | 必须？ |
 |---|---|---|
-| 对话 | [DeepSeek](https://platform.deepseek.com/) | **必须** |
+| 对话 | [DeepSeek](https://platform.deepseek.com/)（默认；任何 OpenAI 兼容接口都行） | **必须** |
 | 看图 / 知识库向量 | [智谱 GLM-4V](https://open.bigmodel.cn/) | 可选，有免费额度 |
 | 画图 | [智谱 CogView](https://open.bigmodel.cn/) | 可选 |
 | 联网搜索 | [博查](https://open.bochaai.com/) | 可选 |
@@ -77,6 +77,12 @@ node app.mjs
 | **可插拔接入** | 任何平台写成适配器即可接入，核心不含平台代码 |
 | **Key 保护** | 原子写盘、守卫、50 份归档，一键修复能从备份恢复 |
 | **维护** | 一键修复（查 Key / 目录 / 配置）+ 一键更新（只覆盖代码） |
+| **权限分级** | 只读 / 工作区 / 完全 三档；危险命令即使「完全」也拒绝 |
+| **操作审批** | 写文件、跑命令、改设置前在微信里问一句「要我做吗」，回「允许」才执行 |
+| **后台作业** | 画图这类慢任务先回「画着呢」，画完自动补发，不卡对话 |
+| **定时任务** | 每天 / 每隔 N 分钟 / 指定时刻；内容可让模型现写 |
+| **读网页** | 给个链接就能读正文（去脚本去标签），不是只看标题 |
+| **上手指南** | 控制台内置五步引导，直接显示「东西该放哪个目录」的真实路径 |
 
 ---
 
@@ -129,7 +135,7 @@ node app.mjs
 |---|---|
 | [CHANGELOG.md](CHANGELOG.md) | 每个版本改了什么 |
 | [docs/BUGS.md](docs/BUGS.md) | 修过的真实故障（现象/根因/修复/回归测试） |
-| [docs/llm-inspired.md](docs/llm-inspired.md) | 借鉴大模型原理做的优化（上下文预算/前缀缓存/指令层级…） |
+| [docs/llm-inspired.md](docs/llm-inspired.md) | 按大模型原理做的工程优化（上下文预算/前缀缓存/指令层级…） |
 | [docs/conventions.md](docs/conventions.md) | 开发约定（每项功能都要有面板入口…） |
 | [docs/adapter-protocol.md](docs/adapter-protocol.md) | 适配器 HTTP 协议 |
 | [docs/plugin-api.md](docs/plugin-api.md) | 插件开发 |
@@ -137,7 +143,7 @@ node app.mjs
 | [docs/content-model.md](docs/content-model.md) | 三种库各管什么、为什么不合并 |
 | [docs/data-scoping.md](docs/data-scoping.md) | 按角色卡隔离的目录结构 |
 | [docs/multi-adapter.md](docs/multi-adapter.md) | 多适配器：放哪、怎么选、要不要 UAC |
-| [docs/architecture-review.md](docs/architecture-review.md) | 向 AstrBot / NoneBot / Koishi 学了什么、不学什么 |
+| [docs/architecture-review.md](docs/architecture-review.md) | 主流框架怎么组织、我们学什么不学什么 |
 
 ---
 
