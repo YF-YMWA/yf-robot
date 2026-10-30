@@ -210,7 +210,21 @@ export class VoiceClient {
       asr_options: { enable_itn: this.cfg.enableItn !== false },
     };
 
-    const json = await this.#post(url, body, signal);
+    let json;
+    try {
+      json = await this.#post(url, body, signal);
+    } catch (e) {
+      /**
+       * 兼容模式不认这个模型时，DashScope 会报
+       * 「An incorrect modal `audio` was entered…」。
+       * 这种情况换原生多媒体接口再试一次。
+       */
+      if (/modal|audio|InvalidParameter|not supported/i.test(String(e.message || ''))) {
+        this.log?.warn?.('[voice] 兼容模式不认，改用原生音频接口');
+        return await this.#callNativeAudio(dataUrl, signal);
+      }
+      throw e;
+    }
 
     // DashScope 兼容模式：标准 choices
     const content = json?.choices?.[0]?.message?.content;
@@ -221,6 +235,50 @@ export class VoiceClient {
     if (typeof native === 'string' && native.trim()) return native;
 
     throw new VoiceError(`语音识别返回空结果: ${JSON.stringify(json).slice(0, 200)}`);
+  }
+
+  /**
+   * DashScope 原生多媒体接口（qwen3-asr-flash 等）。
+   *
+   * 请求体：
+   *   { model, input: { messages: [ { role:'user', content: [ { audio: "data:audio/wav;base64,..." } ] } ] } }
+   * 注意这里是键名 audio，不是兼容模式的 input_audio —— 弄错就会报
+   * 「An incorrect modal `audio` was entered」。
+   */
+  async #callNativeAudio(dataUrl, signal) {
+    const origin = (() => {
+      try {
+        return new URL(this.cfg.baseUrl).origin;
+      } catch {
+        return 'https://dashscope.aliyuncs.com';
+      }
+    })();
+
+    const url = origin + '/api/v1/services/aigc/multimodal-generation/generation';
+    const body = {
+      model: this.cfg.model,
+      input: {
+        messages: [
+          { role: 'user', content: [{ audio: dataUrl }] },
+        ],
+      },
+      parameters: this.cfg.enableItn === false ? {} : { asr_options: { enable_itn: true } },
+    };
+
+    const json = await this.#post(url, body, signal);
+
+    // 原生结构：output.choices[0].message.content[0].text 或 output.text
+    const c0 = json?.output?.choices?.[0]?.message?.content;
+    if (Array.isArray(c0)) {
+      const t = c0.map((x) => x?.text || '').join('').trim();
+      if (t) return t;
+    }
+    const alt = json?.output?.text || json?.output?.output?.sentence?.text;
+    if (typeof alt === 'string' && alt.trim()) return alt;
+
+    throw new VoiceError(
+      '语音识别返回空结果（原生接口）：' + JSON.stringify(json).slice(0, 200),
+    );
   }
 
   /** 传统 /audio/transcriptions（whisper 等）。 */

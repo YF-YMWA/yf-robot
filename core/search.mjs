@@ -219,7 +219,21 @@ export class SearchClient {
 
       if (!res.ok) {
         const detail = await res.text().catch(() => '');
-        throw new SearchError(`搜索接口返回 ${res.status}: ${detail.slice(0, 150)}`);
+        /**
+         * 把常见失败翻译成「人该做什么」。
+         * 用户截图里看到的是：
+         *   搜索接口返回 403: {"code":403,"message":"You do not have enough money or package quota"}
+         * 这句话对普通用户等于没说 —— 他不知道自己该去充值。
+         */
+        const low =
+          res.status === 403 || /quota|money|balance|余额|额度|insufficient/i.test(detail)
+            ? '（这个搜索服务的额度用完了，去它官网充值，或在「模型与功能」里换个服务商）'
+            : res.status === 401 || /unauthorized|invalid.*key/i.test(detail)
+              ? '（Key 不对或已失效，去「模型与功能」重新填一次）'
+              : '';
+        throw new SearchError(
+          `搜索接口返回 ${res.status}: ${detail.slice(0, 150)}${low}`,
+        );
       }
       return await res.json();
     } catch (e) {
