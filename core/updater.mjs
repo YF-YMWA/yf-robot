@@ -98,6 +98,54 @@ function writeInside(root, rel, data) {
  * @param {Function} [opts.log]
  * @returns {Promise<{ok:boolean, steps:string[], error?:string}>}
  */
+/**
+ * 拉 URL 的二进制内容；证书类错误时降级重试一次。
+ *
+ * @param {string} url
+ * @param {object} [opts] { headers, timeoutMs, log }
+ * @returns {Promise<{ok:boolean, status:number, buf:Buffer, note?:string}>}
+ */
+async function fetchLoose(url, opts = {}) {
+  const timeoutMs = opts.timeoutMs || 120000;
+  const headers = opts.headers || {};
+
+  try {
+    const r = await fetch(url, {
+      headers,
+      redirect: 'follow',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const buf = Buffer.from(await r.arrayBuffer());
+    return { ok: r.ok, status: r.status, buf };
+  } catch (e) {
+    const certIssue = /certificate|CERT|SSL|TLS|self.signed|unable to verify/i.test(String(e.message));
+    if (!certIssue) throw e;
+
+    opts.log?.('[update] 证书校验失败，改用不校验证书的方式重试（本地代理/杀软的常见现象）');
+    const https = await import('node:https');
+    return await new Promise((resolve, reject) => {
+      const req = https.get(
+        url,
+        { headers, rejectUnauthorized: false, timeout: timeoutMs },
+        (res) => {
+          const chunks = [];
+          res.on('data', (c) => chunks.push(c));
+          res.on('end', () => {
+            resolve({
+              ok: res.statusCode >= 200 && res.statusCode < 300,
+              status: res.statusCode,
+              buf: Buffer.concat(chunks),
+              note: '未校验证书',
+            });
+          });
+        },
+      );
+      req.on('timeout', () => req.destroy(new Error('超时')));
+      req.on('error', reject);
+    });
+  }
+}
+
 export async function applyUpdate({
   root,
   repo,
@@ -161,12 +209,14 @@ export async function applyUpdate({
   const url = 'https://github.com/' + repo + '/archive/refs/tags/v' + latest + '.zip';
   let buf;
   try {
-    const r = await fetch(url, {
+    const r = await fetchLoose(url, {
       headers: { 'user-agent': 'YF-Robot' },
-      signal: AbortSignal.timeout(120000),
+      timeoutMs: 120000,
+      log: (m) => log(m),
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
-    buf = Buffer.from(await r.arrayBuffer());
+    buf = r.buf;
+    if (r.note) steps.push(r.note);
     steps.push('已下载 v' + latest + '（' + Math.round(buf.length / 1024) + ' KB）');
   } catch (e) {
     return { ok: false, steps, error: '下载失败：' + e.message + '（可以手动去 ' + url + '）' };
@@ -228,12 +278,13 @@ export async function applyUpdate({
         }
 
         const aurl = 'https://github.com/' + adapterRepo + '/archive/refs/' + ref + '.zip';
-        const ar = await fetch(aurl, {
+        const ar = await fetchLoose(aurl, {
           headers: { 'user-agent': 'YF-Robot' },
-          signal: AbortSignal.timeout(120000),
+          timeoutMs: 120000,
+          log: (m) => log(m),
         });
         if (!ar.ok) throw new Error('HTTP ' + ar.status);
-        const abuf = Buffer.from(await ar.arrayBuffer());
+        const abuf = ar.buf;
 
         const aall = unzipAll(abuf);
         const { files: afiles } = stripRootDir(aall);
