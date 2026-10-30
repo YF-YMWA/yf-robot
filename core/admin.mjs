@@ -958,6 +958,28 @@ export class AdminApi {
 
         try {
           const { latest, versions } = await this.#latestTag(repo);
+
+          /**
+           * git 副本要额外告诉用户「怎么更新」。
+           * 面板不会覆盖 git 副本（怕冲掉本地提交），
+           * 只给一句「请自己 pull」等于没说 —— 得给出能照抄的命令。
+           */
+          let git = null;
+          try {
+            const { gitUpdateHint } = await import('./git-hint.mjs');
+            const h = gitUpdateHint(this.root, latest);
+            if (h.isGit) {
+              git = {
+                branch: h.branch,
+                dirty: h.dirty,
+                behind: h.behind,
+                hasGit: h.hasGit,
+                text: h.text,
+                commands: h.commands,
+              };
+            }
+          } catch {}
+
           return {
             code: 200,
             body: {
@@ -967,6 +989,7 @@ export class AdminApi {
               versions: versions.slice(0, 5),
               hasUpdate: this.#cmpVersion(latest, local) > 0,
               url: 'https://github.com/' + repo + '/releases',
+              git,
             },
           };
         } catch (e) {

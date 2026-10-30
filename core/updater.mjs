@@ -161,15 +161,18 @@ export async function applyUpdate({
     return { ok: false, steps, error: '已经是最新版（' + local + '），不需要更新' };
   }
 
-  // git 工作副本：不动，让用户自己 pull（本地可能有提交）
+  // git 工作副本：不动它（怕冲掉你的提交），但要说清怎么更新
   if (fs.existsSync(path.join(root, '.git'))) {
+    const { gitUpdateHint } = await import('./git-hint.mjs');
+    const hint = gitUpdateHint(root, latest);
     return {
       ok: false,
-      steps,
-      error:
-        '这是 git 工作副本，里面有你的提交。请自己在目录里执行 git pull（或 git checkout v' +
-        latest +
-        '），别用面板覆盖。',
+      steps: [...steps, ...hint.commands.map((c) => (c.startsWith('#') ? c : '  $ ' + c))],
+      error: hint.text || '这是 git 工作副本，面板不覆盖它。',
+      hint,
+      // 面板把 commands 渲染成代码块，用户直接复制
+      commands: hint.commands,
+      git: { branch: hint.branch, dirty: hint.dirty, behind: hint.behind, hasGit: hint.hasGit },
     };
   }
 

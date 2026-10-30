@@ -4339,6 +4339,15 @@ async function checkUpdate() {
     const wrap = $('updateAdapterWrap');
     if (wrap) wrap.style.display = j.hasUpdate ? 'inline-flex' : 'none';
 
+    if (j.git) {
+      box.innerHTML = renderGitHint(j.git);
+      const b0 = $('updateBtn');
+      if (b0) b0.style.display = 'none'; // git 副本不给「一键更新」
+      const w0 = $('updateAdapterWrap');
+      if (w0) w0.style.display = 'none';
+      return;
+    }
+
     box.innerHTML = j.hasUpdate
       ? '<div style="color:var(--warn)">发现新版本 v' +
         escapeHtml(j.latest) +
@@ -4382,7 +4391,8 @@ async function applyUpdate() {
     } else {
       box.innerHTML =
         '<div style="color:var(--warn)">' + escapeHtml(j.error || '更新失败') + '</div>' +
-        steps.map((x) => '<div class="hint">· ' + escapeHtml(x) + '</div>').join('');
+        steps.map((x) => '<div class="hint">· ' + escapeHtml(x) + '</div>').join('') +
+        renderGitHint(j.git || (j.commands ? { hasGit: true, commands: j.commands, text: '' } : null));
     }
   } catch (e) {
     box.innerHTML = '<div class="hint" style="color:var(--err)">更新失败：' + escapeHtml(e.message) + '</div>';
@@ -4391,6 +4401,42 @@ async function applyUpdate() {
   }
 }
 
+
+/**
+ * 显示「git 副本怎么更新」。
+ *
+ * 面板不覆盖 git 副本（怕冲掉本地提交），所以必须给出能照抄的命令，
+ * 否则用户只看到一句「请自己 git pull」，不知道下一步该做什么。
+ */
+function renderGitHint(git) {
+  if (!git) return '';
+  if (!git.hasGit) {
+    return '<div class="hint" style="color:var(--warn)">' + escapeHtml(git.text || '') + '</div>';
+  }
+  const lines = (git.commands || []).filter((c) => !c.startsWith('#'));
+  const id = 'gitcmd-' + Math.random().toString(36).slice(2, 8);
+  return (
+    '<div class="hint" style="margin-top:8px">' + escapeHtml(git.text || '').replace(/\n/g, '<br>') + '</div>' +
+    '<pre id="' + id + '" style="background:var(--bg2,#111);padding:10px;border-radius:6px;' +
+    'font-size:12px;white-space:pre-wrap;word-break:break-all;margin-top:8px">' +
+    escapeHtml(lines.join('\n')) + '</pre>' +
+    '<div style="margin-top:6px"><button class="ghost sm" onclick="copyGitCmd(\'' + id + '\')">复制命令</button></div>'
+  );
+}
+
+function copyGitCmd(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const text = el.textContent || '';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => toast('命令已复制，去程序目录粘贴执行'),
+      () => toast('复制失败，请手动选中', 'err'),
+    );
+  } else {
+    toast('请手动选中上面的命令复制');
+  }
+}
 
 // ===== 适配器（多适配器：选择 + 单独启停）=====
 
