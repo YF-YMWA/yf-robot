@@ -1283,6 +1283,65 @@ export class AdminApi {
         return { code: 200, body: sch.remove(String(body?.id || '')) };
       }
 
+      /**
+       * 关键目录的绝对路径。
+       *
+       * 用户反馈「不清楚具体位置插入插件」——面板上写「plugins/」太抽象，
+       * 他不知道这个 plugins 在哪个盘。这里直接把真实路径回给他，
+       * 面板上点一下就能复制。
+       */
+      if (method === 'GET' && pathname === '/api/admin/paths') {
+        const root = this.root;
+        const card = scopeName(this.config.card || 'default');
+        const dir = (p) => {
+          try {
+            return { path: p, exists: fs.existsSync(p) };
+          } catch {
+            return { path: p, exists: false };
+          }
+        };
+        return {
+          code: 200,
+          body: {
+            ok: true,
+            root,
+            list: [
+              { key: 'root', label: '程序根目录', ...dir(root) },
+              { key: 'config', label: '配置文件', ...dir(path.join(root, 'config.json')) },
+              { key: 'data', label: '数据目录（记忆/会话/素材）', ...dir(path.join(root, 'data')) },
+              { key: 'card', label: '当前角色卡数据', ...dir(path.join(root, 'data', card)) },
+              { key: 'stickers', label: '表情包', ...dir(path.join(root, 'data', 'stickers')) },
+              { key: 'images', label: '收到的图', ...dir(path.join(root, 'data', 'images')) },
+              { key: 'generated', label: '她画的图', ...dir(path.join(root, 'data', card, 'generated')) },
+              { key: 'plugins', label: '插件放这里', ...dir(path.join(root, 'plugins')) },
+              {
+                key: 'adapters',
+                label: '适配器放这里',
+                ...(() => {
+                  /**
+                   * 两种部署形态都要说清：
+                   *   包内：<root>/adapters/<名字>/
+                   *   开发：<root>/../yf-robot-wechat-adapter/
+                   * 面板上只写「adapters/」用户找不到 —— 直接给真实路径。
+                   */
+                  const own = path.join(root, 'adapters');
+                  if (fs.existsSync(own)) return { path: own, exists: true, note: '包内形态' };
+                  const sibling = path.join(root, '..', 'yf-robot-wechat-adapter');
+                  if (fs.existsSync(sibling)) {
+                    return { path: sibling, exists: true, note: '开发形态（隔壁仓库）' };
+                  }
+                  return { path: own, exists: false, note: '把适配器文件夹放到这里' };
+                })(),
+              },
+              { key: 'kb', label: '知识库文档', ...dir(path.join(root, 'data', card, 'kb')) },
+              { key: 'logs', label: '日志', ...dir(path.join(root, 'data')) },
+              { key: 'workspace', label: '她能读写的工作目录', ...dir(path.join(root, 'agent-workspace')) },
+            ],
+            card,
+          },
+        };
+      }
+
       if (method === 'GET' && pathname === '/api/admin/models') {
         const c = this.config || {};
         const mask = (k) => (k ? String(k).slice(0, 4) + '****' + String(k).slice(-4) : '');

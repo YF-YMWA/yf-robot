@@ -311,6 +311,7 @@
 <aside>
   <div class="brand">YF-Robot · 控制台<small id="brandSub">加载中…</small></div>
   <nav>
+    <a data-page="guide">上手指南</a>
     <a data-page="overview" class="active">总览</a>
     <a data-page="chat">对话调试</a>
     <a data-page="model">模型与功能</a>
@@ -328,6 +329,101 @@
 
 <main>
     <div class="tabbar" id="tabBar" style="display:none"></div>
+  <!-- 上手指南 -->
+  <div class="page" id="page-guide">
+    <h1>上手指南</h1>
+    <div class="hint" style="margin-bottom:14px">
+      第一次用？照下面五步走。每一格都能点「复制」把路径拷走。
+    </div>
+
+    <div class="card">
+      <h2>第 1 步：填模型 Key</h2>
+      <div class="hint" style="margin-bottom:10px">
+        这一套要好几把 Key，但<b>只有第一把是必须的</b>。<br>
+        每把 Key 负责一件事，填错不会炸，只是那个功能用不了。
+      </div>
+      <div class="row"><label>必须 · 对话</label><div class="ctl">
+        <span class="hint">DeepSeek（api.deepseek.com）→ 这是她「会说话」的本体</span>
+      </div></div>
+      <div class="row"><label>可选 · 看图</label><div class="ctl">
+        <span class="hint">智谱 bigmodel.cn，模型 glm-4v-flash（免费额度够用）→ 看图、给表情包打标签</span>
+      </div></div>
+      <div class="row"><label>可选 · 画图</label><div class="ctl">
+        <span class="hint">智谱 cogview-3-flash（免费）→ 能自己画图；Key 留空则复用看图那把</span>
+      </div></div>
+      <div class="row"><label>可选 · 语音</label><div class="ctl">
+        <span class="hint">阿里云百炼 → 语音转文字（qwen3-asr-flash）+ 合成（qwen3-tts-flash）</span>
+      </div></div>
+      <div class="row"><label>可选 · 搜索</label><div class="ctl">
+        <span class="hint">博查 / Tavily → 能查实时信息；额度用完会在「模型与功能」页报 403</span>
+      </div></div>
+      <div style="margin-top:12px">
+        <button onclick="goPage('model')">去填 Key</button>
+        <span class="hint">填完点「保存」，右侧会显示 ✓ 已配置</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>第 2 步：设好主人</h2>
+      <div class="hint" style="margin-bottom:10px">
+        只有「主人」才能让她读写文件、改设置、用工具。<br>
+        在微信里给她发一句话，然后到「身份」页从「最近说话的人」里挑自己 —— 不用手抄 wxid。
+      </div>
+      <button onclick="goPage('identity')">去设主人</button>
+    </div>
+
+    <div class="card">
+      <h2>第 3 步：接微信（可选）</h2>
+      <div class="hint" style="margin-bottom:10px">
+        不接微信也能用（网页聊天 / 控制台调试）。要接就两步：<br>
+        ① 把微信适配器放到下面这个目录里（一个文件夹一个适配器）<br>
+        ② 到「接入状态」页点启动，会弹管理员确认，点是
+      </div>
+      <div id="guidePaths" class="hint">正在读取路径…</div>
+      <div style="margin-top:12px">
+        <button onclick="goPage('bridge')">去接入状态</button>
+        <button class="ghost" onclick="loadPaths()">刷新路径</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>第 4 步：灌点内容（可选）</h2>
+      <div class="hint" style="margin-bottom:10px">
+        让她「有自己的东西」：<br>
+        · 表情包：微信里你发给她，她自动收；也能直接传文件到表情包目录<br>
+        · 知识库：把 pdf/txt/md 放进知识库目录，聊天会从里面找答案<br>
+        · 逻辑库：告诉她「以后遇到 XX 就这样回」，会记进经验
+      </div>
+      <div style="margin-top:8px">
+        <button onclick="goPage('data')">去资料页</button>
+        <button class="ghost" onclick="goPage('learn')">去联网学习</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>第 5 步：出问题了看哪里</h2>
+      <div class="hint" style="margin-bottom:10px">
+        先看「运行」页的状态灯；再看日志目录里这几个文件：
+      </div>
+      <div id="guideLogs" class="hint">正在读取路径…</div>
+      <div style="margin-top:12px">
+        <button onclick="goPage('run')">去运行页</button>
+        <button class="ghost" onclick="runRepair()">一键修复</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>插件怎么放</h2>
+      <div class="hint">
+        插件是一个文件夹，里面有 <code>index.mjs</code> 和 <code>plugin.json</code>：<br>
+        <code>plugins/我的插件/plugin.json</code> —— 声明名字、版本<br>
+        <code>plugins/我的插件/index.mjs</code> —— 导出 <code>setup(ctx)</code><br>
+        放好后到「插件」页点「刷新」，列表里会出现它。<br>
+        具体写法见 <code>docs/plugin-api.md</code>。
+      </div>
+    </div>
+  </div>
+
   <div class="page active" id="page-overview">
     <h1>总览</h1>
     <div class="card">
@@ -2107,6 +2203,7 @@ function loadPageData(page) {
     // 进这一页刷新适配器列表（多适配器：状态、启停按钮都靠它）
     loadAdapters();
   }
+  if (page === 'guide') loadPaths();
   if (page === 'active') loadActive();
   if (page === 'stickers') {
     loadMediaAll();
@@ -2989,6 +3086,47 @@ function startConsolePing() {
 
   window.addEventListener('pagehide', bye);
   window.addEventListener('beforeunload', bye);
+}
+
+/** 上手指南：把「东西该放哪」显示成真实路径 */
+async function loadPaths() {
+  const box = document.getElementById('guidePaths');
+  const logs = document.getElementById('guideLogs');
+  try {
+    const j = await api('paths');
+    const list = j.list || [];
+    const pick = (k) => (list.find((x) => x.key === k) || {}).path || '';
+    const findOne = (k) => list.find((x) => x.key === k) || {};
+    const adapterNote = findOne('adapters').note || '';
+
+    if (box) {
+      box.innerHTML =
+        '<div style="margin-bottom:6px">适配器目录：</div>' +
+        '<code style="word-break:break-all">' + (pick('adapters') || '') + '</code>' +
+        (adapterNote ? '<div class="hint">' + adapterNote + '</div>' : '') +
+        '<div class="hint" style="margin-top:6px">程序根目录：' + (pick('root') || '') + '</div>' +
+        '<div class="hint">数据目录：' + (pick('data') || '') + '</div>';
+    }
+    if (logs) {
+      logs.innerHTML =
+        '<div>主日志：<code style="word-break:break-all">' + (jj(pick('logs')) + '\\app.out.log') + '</code></div>' +
+        '<div style="margin-top:6px">错误日志：<code style="word-break:break-all">' + (jj(pick('logs')) + '\\app.err.log') + '</code></div>' +
+        '<div style="margin-top:6px">退出记录：<code style="word-break:break-all">' + (jj(pick('logs')) + '\\exit.log') + '</code></div>';
+    }
+  } catch (e) {
+    if (box) box.textContent = '读取失败：' + e.message;
+  }
+}
+
+/** 浏览器里反斜杠要小心，这里统一成一个 */
+function jj(p) {
+  return String(p || '').replace(/\\+$/, '');
+}
+
+/** 侧边栏跳页（指南里用） */
+function goPage(name) {
+  const a = document.querySelector('a[data-page="' + name + '"]');
+  if (a) a.click();
 }
 
 /** 定时任务：列表 / 新增 / 删除 */
