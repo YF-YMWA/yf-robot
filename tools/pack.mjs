@@ -77,6 +77,10 @@ const INCLUDE = [
   '工具菜单.bat',
   '桌面控制台.bat',
   '桌面聊天.bat',
+  // 这三个是后加的入口，之前漏了 —— 用户找不到备份/恢复/开机自启
+  '备份记忆.bat',
+  '恢复记忆.bat',
+  '开机自启.bat',
 ];
 
 /** 不复制的内容。 */
@@ -131,6 +135,13 @@ const TOOLS_ALLOW = new Set([
   'autostart.mjs', // 开机自启
   'pack.mjs', // 重新打包
   'check-all.mjs', // 自检
+  'check-console-js.mjs', // 面板语法
+  'check-console-fns.mjs', // 面板函数
+  'check-console-pages.mjs', // 面板页面
+  'check-console-nav.mjs', // 面板导航（按钮点了有没有反应）
+  'check-panel.mjs', // 面板接口自检
+  'check-config-save.mjs', // 配置读写
+  'memory-tool.mjs', // 备份/恢复记忆.bat 用
   'build-sticker-index.mjs', // 重建表情包描述索引
   'to_gbk.ps1', // 编码转换小工具
 ]);

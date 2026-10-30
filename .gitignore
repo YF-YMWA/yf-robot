@@ -73,6 +73,7 @@ tools/full_*.mjs
 !tools/check-console-js.mjs
 !tools/check-console-fns.mjs
 !tools/check-console-pages.mjs
+!tools/check-console-nav.mjs
 !tools/check-adapter-start.mjs
 !tools/check-adapter-log.mjs
 !tools/publish-release.mjs
