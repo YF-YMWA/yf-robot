@@ -748,6 +748,10 @@
     <!-- 回复风格 -->
     <div class="card">
       <h2>回复风格</h2>
+      <div class="row"><label>引用回复</label><div class="ctl">
+        <div class="switch" id="swQuoteReply" onclick="toggleSw('swQuoteReply'); saveQuoteReply()"></div>
+        <span class="hint">回复时引用对方那条消息 —— 更清楚在回谁，代价是每条多走一次界面操作（会慢约 1 秒）</span>
+      </div></div>
       <div class="row"><label>单条字数</label><div class="ctl">
         <input type="number" id="replyMaxChars" min="50" max="2000" style="max-width:120px">
         <span class="hint">超出会拆成多条</span>
@@ -2488,6 +2492,8 @@ async function loadModel() {
     setSw('swSearch', c.search.enabled);
     setSw('swEmoji', c.reply.emoji?.enabled !== false);
     setSw('swTools', c.tools?.enabled);
+    const _quoteSw = document.getElementById('swQuoteReply');
+    if (_quoteSw) setSw('swQuoteReply', c.wechat?.quoteReply !== false);
     const _permSel = document.getElementById('toolsPermission');
     if (_permSel) _permSel.value = c.tools?.permission || 'workspace';
     setSw('swDsh', c.tools?.dsh?.enabled);
@@ -3508,6 +3514,18 @@ async function saveTtsVoice(quiet) {
  * 参照智能体框架的做法：默认「工作区」够用，
  * 陌生人的一句话不该能让她删文件或改设置。
  */
+/** 保存「引用回复」开关 */
+async function saveQuoteReply() {
+  const on = document.getElementById('swQuoteReply')?.classList.contains('on');
+  try {
+    const r = await api('config', { method: 'POST', body: { wechat: { quoteReply: Boolean(on) } } });
+    if (r && r.ok === false) throw new Error(r.error || '保存失败');
+    toast(on ? '以后回复会引用对方那条' : '关掉引用了');
+  } catch (e) {
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
 async function savePermission(quiet) {
   const v = document.getElementById('toolsPermission')?.value;
   if (!v) return;

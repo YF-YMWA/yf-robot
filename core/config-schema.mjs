@@ -99,6 +99,8 @@ export const SECTION_SCHEMA = {
     label: '微信',
     fields: {
       stickerChance: F('number', 0, { min: 0, max: 1, label: '表情包概率' }),
+      /** 回复时引用对方那条消息（更清楚在回谁，代价是每条多走一次 UI） */
+      quoteReply: F('boolean', true, { label: '引用回复' }),
       voiceChance: F('number', 0, { min: 0, max: 1, label: '语音概率' }),
       mediaCollect: F('boolean', true, { label: '收藏素材' }),
       collectOnlyFrom: F('array', [], { label: '只收这些' }),

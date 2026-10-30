@@ -751,6 +751,8 @@ export class WebChannel {
            * 之前这里没返回 —— 适配器一直用启动时的默认值，
            * 于是出现「面板把语音概率调成 0，窗口里还在合成语音」。
            */
+          // 引用回复：适配器据此决定要不要引用对方那条消息
+          quoteReply: c.wechat?.quoteReply !== false,
           voiceChance: c.wechat?.voiceChance ?? 0,
           stickerChance: c.wechat?.stickerChance ?? 0,
 
