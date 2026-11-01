@@ -321,6 +321,7 @@
     <a data-page="learn">联网学习</a>
     <a data-page="tools">工具</a>
     <a data-page="plugins">插件</a>
+    <a data-page="cards">角色卡</a>
       <a data-page="data" data-group="data">资料</a>
     <a data-page="identity" data-group="identity">身份</a>
     <a data-page="run" data-group="run">运行</a>
@@ -2139,6 +2140,21 @@
     </div>
   </div>
 
+  <div class="page" id="page-cards">
+    <h1>角色卡</h1>
+    <div class="hint" style="margin-bottom:12px">
+      每张卡一块，各自的语言风格、逻辑库、知识库、记忆都分开存（<code>data\&lt;卡片&gt;\</code>）。<br>
+      公共库（<code>data\_public\</code>）所有卡共用，单独列在最上面。
+    </div>
+
+    <div class="card">
+      <h2>公共库 <span class="chip" id="cardsPubChip">—</span></h2>
+      <div class="hint" id="cardsPub">读取中…</div>
+    </div>
+
+    <div id="cardsList"></div>
+  </div>
+
   <div class="page" id="page-bridge">
     <h1>接入状态</h1>
     <div class="card">
@@ -2285,6 +2301,7 @@ function loadPageData(page) {
     loadAdapters();
   }
   if (page === 'guide') loadPaths();
+  if (page === 'cards') loadCards();
   if (page === 'model') setTimeout(() => { try { loadVoiceGuide(); } catch (e) {} }, 300);
   if (page === 'tools') loadProcesses();
   if (page === 'active') loadActive();
@@ -4819,6 +4836,61 @@ const LOGIC_SOURCE = {
 };
 
 /** 读配置 + 规则，一次填满整页 */
+async function loadCards() {
+  const box = $('cardsList');
+  const pub = $('cardsPub');
+  const chip = $('cardsPubChip');
+  if (!box) return;
+  try {
+    const j = await api('cards/overview');
+    const p = j.public || {};
+    if (chip) chip.textContent = '所有卡共用';
+    if (pub) {
+      pub.innerHTML =
+        '逻辑库 <b>' + (p.logic || 0) + '</b> 条 ｜ 知识库 <b>' + (p.kb || 0) + '</b> 份' +
+        '<div class="hint" style="margin-top:4px">要改公共内容：放进 data\\_public\\（logic.json / kb\\）</div>';
+    }
+    const list = j.list || [];
+    if (!list.length) {
+      box.innerHTML = '<div class="card"><div class="hint">还没有角色卡。</div></div>';
+      return;
+    }
+    box.innerHTML = list
+      .map(
+        (c) =>
+          '<div class="card">' +
+          '<h2>' + escapeHtml(c.id) +
+          (c.isCurrent ? ' <span class="chip">当前</span>' : '') + '</h2>' +
+          '<div class="hint" style="margin-bottom:8px">' +
+          '逻辑库 <b>' + c.logic + '</b> 条 ｜ 知识库 <b>' + c.kb + '</b> 份 ｜ 记忆 <b>' + c.memory + '</b> 份 ｜ 会话 <b>' + c.sessions + '</b> 个' +
+          '</div>' +
+          (c.isCurrent
+            ? '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+              '<button class="ghost sm" onclick="goPage(\'logic\')">看它的逻辑库</button>' +
+              '<button class="ghost sm" onclick="goPage(\'kb\')">看它的知识库</button>' +
+              '<button class="ghost sm" onclick="goPage(\'memory\')">看它的记忆</button>' +
+              '</div>'
+            : '<button class="ghost sm" onclick="switchToCard(\'' + c.id + '\')">切到这张卡</button>') +
+          '</div>',
+      )
+      .join('');
+  } catch (e) {
+    box.innerHTML = '<div class="card"><div class="hint">读取失败：' + e.message + '</div></div>';
+  }
+}
+
+/** 切到某张卡（写配置并提示重启适配器） */
+async function switchToCard(id) {
+  try {
+    const r = await api('config', { method: 'POST', body: { card: id } });
+    if (r && r.ok === false) throw new Error(r.error || '保存失败');
+    toast('已切到卡片「' + id + '」，刷新页面生效');
+    setTimeout(() => loadCards(), 500);
+  } catch (e) {
+    toast('切换失败：' + e.message, 'err');
+  }
+}
+
 async function loadLogic() {
   const listEl = $('logicList');
   const hint = $('logicHint');

@@ -28,6 +28,8 @@ export class MemoryStore {
    */
   constructor(opts = {}) {
     this.dir = opts.dir || path.join(process.cwd(), 'data', 'memory');
+    // 从 dir 反推项目根（<root>/data/<卡片>/memory），公共记忆要用
+    this.root = opts.root || path.resolve(this.dir, '..', '..', '..');
     this.maxFacts = opts.maxFacts || 50;
     this.maxSummaries = opts.maxSummaries || 10;
     this.cache = new Map();
@@ -127,6 +129,22 @@ export class MemoryStore {
   /** 拼成提示词片段。 */
   render(id) {
     const mem = this.load(id);
+
+    // 公共事实：data/_public/memory.json（所有角色卡共用）
+    // 只放「主人是谁」这类事实；相处细节留在本卡，避免串味
+    try {
+      const root = this.root || this.config?.root;
+      if (root) {
+        const fp = path.join(root, 'data', '_public', 'memory.json');
+        const pub = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        const pf = (pub && pub.facts) || {};
+        const keys = Object.keys(pf);
+        if (keys.length) {
+          const lines = keys.map((k) => `- ${k}：${pf[k]}`);
+          parts.push(`【关于主人的公共记忆】（所有角色卡共用）\n${lines.join('\n')}`);
+        }
+      }
+    } catch {}
     const parts = [];
 
     // 事实

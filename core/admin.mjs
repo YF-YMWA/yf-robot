@@ -1239,6 +1239,61 @@ export class AdminApi {
       }
 
       // 人物卡列表
+      /**
+       * 所有角色卡的资源概览（面板按卡分页用）。
+       */
+      if (method === 'GET' && pathname === '/api/admin/cards/overview') {
+        const root = this.root;
+        const dataDir = path.join(root, 'data');
+        const cur = scopeName(this.config.card || 'default');
+
+        const countJson = (dir) => {
+          try {
+            return fs.readdirSync(dir).filter((n) => n.endsWith('.json')).length;
+          } catch {
+            return 0;
+          }
+        };
+        const countRules = (file) => {
+          try {
+            const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+            return Array.isArray(j?.rules) ? j.rules.length : 0;
+          } catch {
+            return 0;
+          }
+        };
+
+        let list = [];
+        try {
+          list = fs
+            .readdirSync(dataDir, { withFileTypes: true })
+            .filter((d) => d.isDirectory() && !d.name.startsWith('_'))
+            .filter((d) => !['backups','images','stickers','generated','media-cache','tmp','key-archive','memory','plugin-data','sessions','voice','test-media','stickers-trash','approvals','jobs','schedules'].includes(d.name))
+            .filter((d) => !d.name.startsWith('app-profile'))
+            .map((d) => {
+              const dir = path.join(dataDir, d.name);
+              return {
+                id: d.name,
+                isCurrent: d.name === cur,
+                logic: countRules(path.join(dir, 'logic.json')),
+                kb: countJson(path.join(dir, 'kb')),
+                memory: countJson(path.join(dir, 'memory')),
+                sessions: countJson(path.join(dir, 'sessions')),
+              };
+            });
+        } catch {
+          list = [];
+        }
+
+        // 公共层
+        const pub = {
+          logic: countRules(path.join(dataDir, '_public', 'logic.json')),
+          kb: countJson(path.join(dataDir, '_public', 'kb')),
+        };
+
+        return { code: 200, body: { ok: true, current: cur, public: pub, list } };
+      }
+
       if (method === 'GET' && pathname === '/api/admin/cards') {
         return { code: 200, body: { cards: listCards(this.root), current: this.config.card || null } };
       }
