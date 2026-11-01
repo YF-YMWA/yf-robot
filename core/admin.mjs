@@ -10,7 +10,7 @@
  *
  * 所有写操作都要校验，避免控制台把配置改坏。
  */
-import { resolveWordsDir, scopeName, generatedDir } from './scoped-paths.mjs';
+import { resolveWordsDir, scopeName, generatedDir, wordsDir as scopedWordsDir } from './scoped-paths.mjs';
 import {
   applyPatch as applySchemaPatch,
   toPublic as toSchemaPublic,
@@ -1953,8 +1953,16 @@ export class AdminApi {
   // ===== 词库管理 =====
 
   /** 词库目录（按角色卡解析：卡内有就用自己的，否则用公共的）。 */
-  #wordsDir() {
-    return resolveWordsDir(this.root, scopeName(this.config.card || 'default'));
+  /**
+   * 词库目录。
+   *
+   * @param {boolean} [forWrite] 写入必须传 true —— 强制本卡目录，
+   *   绝不回退到公共 resources（否则新卡学到的词会污染所有卡）。
+   */
+  #wordsDir(forWrite = false) {
+    const card = scopeName(this.config.card || 'default');
+    if (forWrite) return scopedWordsDir(this.root, card);
+    return resolveWordsDir(this.root, card);
   }
 
   /** 列出词库文件。 */
@@ -2005,7 +2013,7 @@ export class AdminApi {
     if (!name) return { ok: false, error: '缺少词库名' };
     if (!/^[\w-]{1,40}$/.test(name)) return { ok: false, error: '词库名不合法' };
 
-    const file = path.join(this.#wordsDir(), name + '.txt');
+    const file = path.join(this.#wordsDir(true), name + '.txt');
     if (!fs.existsSync(file)) return { ok: false, error: `词库不存在: ${name}` };
 
     const content = fs.readFileSync(file, 'utf8');
@@ -2050,7 +2058,18 @@ export class AdminApi {
     if (word.length > 30) return { ok: false, error: '词条太长（上限 30 字）' };
     if (explain.length > 100) return { ok: false, error: '解释太长（上限 100 字）' };
 
-    const file = path.join(this.#wordsDir(), bank + '.txt');
+    const file = path.join(this.#wordsDir(true), bank + '.txt');
+
+    // 本卡还没有这个词库 → 从公共词库复制一份（用户要求：公共词库可导入各卡）
+    if (!fs.existsSync(file)) {
+      const shared = path.join(this.root, 'resources', bank + '.txt');
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        if (fs.existsSync(shared)) fs.copyFileSync(shared, file);
+        else fs.writeFileSync(file, '', 'utf8');
+        this.log.info?.(`[words] 从公共词库复制 ${bank} 到本卡`);
+      } catch {}
+    }
     if (!fs.existsSync(file)) return { ok: false, error: `词库 ${bank} 不存在` };
 
     const content = fs.readFileSync(file, 'utf8');
@@ -2090,7 +2109,7 @@ export class AdminApi {
     if (!/^[\w-]{1,40}$/.test(bank)) return { ok: false, error: '词库名不合法' };
     if (!word) return { ok: false, error: '词条不能为空' };
 
-    const file = path.join(this.#wordsDir(), bank + '.txt');
+    const file = path.join(this.#wordsDir(true), bank + '.txt');
     if (!fs.existsSync(file)) return { ok: false, error: `词库 ${bank} 不存在` };
 
     const lines = fs.readFileSync(file, 'utf8').split('\n');
@@ -2188,13 +2207,13 @@ export class AdminApi {
       return { ok: false, error: '词库名只能用英文、数字、下划线、短横线' };
     }
 
-    const file = path.join(this.#wordsDir(), name + '.txt');
+    const file = path.join(this.#wordsDir(true), name + '.txt');
     if (fs.existsSync(file)) return { ok: false, error: `词库 ${name} 已存在` };
 
     const title = String(body.title || name).slice(0, 40);
     const content = `# ${title}\n# 格式：词条｜一句话解释\n\n`;
 
-    fs.mkdirSync(this.#wordsDir(), { recursive: true });
+    fs.mkdirSync(this.#wordsDir(true), { recursive: true });
     fs.writeFileSync(file, content, 'utf8');
     clearWordCache();
 
@@ -2212,7 +2231,7 @@ export class AdminApi {
       return { ok: false, error: '内置词库不能删除（可以关闭）' };
     }
 
-    const file = path.join(this.#wordsDir(), name + '.txt');
+    const file = path.join(this.#wordsDir(true), name + '.txt');
     if (!fs.existsSync(file)) return { ok: false, error: `词库 ${name} 不存在` };
 
     try {
@@ -4787,7 +4806,7 @@ print('%016x' % bits)
       return { ok: false, error: '词库名不合法' };
     }
 
-    const bankFile = path.join(this.#wordsDir(), bankName + '.txt');
+    const bankFile = path.join(this.#wordsDir(true), bankName + '.txt');
     if (!fs.existsSync(bankFile)) {
       return { ok: false, error: `词库 ${bankName} 不存在` };
     }
