@@ -2655,6 +2655,10 @@ async function loadModel() {
     setSw('swTools', c.tools?.enabled);
     const _quoteSw = document.getElementById('swQuoteReply');
     if (_quoteSw) setSw('swQuoteReply', c.wechat?.quoteReply !== false);
+
+    // 启动时自动清理残留进程（同理：漏了回填，开关永远显示关）
+    const _acSw = document.getElementById('swAutoClean');
+    if (_acSw) setSw('swAutoClean', c.tools?.autoCleanProcesses !== false);
     const _permSel = document.getElementById('toolsPermission');
     if (_permSel) _permSel.value = c.tools?.permission || 'workspace';
     setSw('swDsh', c.tools?.dsh?.enabled);
@@ -2702,6 +2706,10 @@ async function loadModel() {
      */
     const vc = c.wechat?.voiceChance ?? 0;
     if ($('voiceChance')) $('voiceChance').value = Math.round(vc * 100);
+
+    // 语音发送方式：从配置回填（漏了这行，下拉框永远停在「当音频文件发」）
+    const _vmSel = $('selVoiceMode');
+    if (_vmSel) _vmSel.value = c.wechat?.voiceMode === 'ptt' ? 'ptt' : 'file';
     loadTtsSettings();
   } catch (e) { toast('配置加载失败: ' + e.message, 'err'); }
 }
