@@ -127,8 +127,10 @@ export class LogicLibrary {
      */
     this.publicRules = [];
     try {
-      const pub = path.join(this.root || '.', 'data', '_public', 'logic.json');
-      const pj = JSON.parse(fs.readFileSync(pub, 'utf8'));
+      // 只有明确给了 root 才读公共库；否则（单测临时目录）会误读项目里的真实公共库
+      const pub = this.root ? path.join(this.root, 'data', '_public', 'logic.json') : '';
+      const pj = pub ? JSON.parse(fs.readFileSync(pub, 'utf8')) : null;
+      if (!pj) throw new Error('no public');
       this.publicRules = (Array.isArray(pj?.rules) ? pj.rules : []).map((r) => ({
         ...r,
         scope: 'public',
