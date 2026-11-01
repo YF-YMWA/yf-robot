@@ -4870,12 +4870,30 @@ async function loadCards() {
               '<button class="ghost sm" onclick="goPage(\'kb\')">看它的知识库</button>' +
               '<button class="ghost sm" onclick="goPage(\'memory\')">看它的记忆</button>' +
               '</div>'
-            : '<button class="ghost sm" onclick="switchToCard(\'' + c.id + '\')">切到这张卡</button>') +
+            : '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+              '<button class="ghost sm" onclick="switchToCard(\'' + c.id + '\')">切到这张卡</button>' +
+              '<button class="ghost sm" onclick="viewCardMemory(\'' + c.id + '\')">看它的记忆</button>' +
+              '</div>') +
           '</div>',
       )
       .join('');
   } catch (e) {
     box.innerHTML = '<div class="card"><div class="hint">读取失败：' + e.message + '</div></div>';
+  }
+}
+
+/** 看某张卡自己的记忆：先切到它，再跳到记忆页 */
+async function viewCardMemory(id) {
+  try {
+    const r = await api('config', { method: 'POST', body: { card: id } });
+    if (r && r.ok === false) throw new Error(r.error || '保存失败');
+    toast('已切到「' + id + '」，正在打开它的记忆…');
+    setTimeout(() => {
+      loadCards();
+      goPage('memory');
+    }, 400);
+  } catch (e) {
+    toast('切换失败：' + e.message, 'err');
   }
 }
 

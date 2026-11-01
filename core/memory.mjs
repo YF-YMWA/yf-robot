@@ -130,22 +130,28 @@ export class MemoryStore {
   render(id) {
     const mem = this.load(id);
 
+    const parts = [];
+
     // 公共事实：data/_public/memory.json（所有角色卡共用）
     // 只放「主人是谁」这类事实；相处细节留在本卡，避免串味
     try {
-      const root = this.root || this.config?.root;
+      const root = this.root;
       if (root) {
         const fp = path.join(root, 'data', '_public', 'memory.json');
-        const pub = JSON.parse(fs.readFileSync(fp, 'utf8'));
-        const pf = (pub && pub.facts) || {};
-        const keys = Object.keys(pf);
-        if (keys.length) {
-          const lines = keys.map((k) => `- ${k}：${pf[k]}`);
-          parts.push(`【关于主人的公共记忆】（所有角色卡共用）\n${lines.join('\n')}`);
+        if (fs.existsSync(fp)) {
+          const pub = JSON.parse(fs.readFileSync(fp, 'utf8'));
+          const pf = (pub && pub.facts) || {};
+          const keys = Object.keys(pf);
+          if (keys.length) {
+            const lines = keys.map((k) => `- ${k}：${pf[k]}`);
+            parts.push(`【关于主人的公共记忆】（所有角色卡共用）\n${lines.join('\n')}`);
+          }
         }
       }
-    } catch {}
-    const parts = [];
+    } catch (e) {
+      // 不能空 catch：上次 TDZ 错误被吞掉，公共记忆静默失效
+      if (typeof this.log === 'function') this.log('[memory] 公共记忆读取失败：' + e.message);
+    }
 
     // 事实
     const factKeys = Object.keys(mem.facts);
