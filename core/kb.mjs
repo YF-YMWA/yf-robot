@@ -255,6 +255,11 @@ export class KnowledgeBase {
     this.log = log;
     // 按角色卡隔离：换卡就换一整套文档
     this.dir = kbDir(root, card);
+    /**
+     * 公共知识库：data/_public/kb，所有角色卡共享。
+     * 和逻辑库一样分两层：本卡的知识 + 公共知识（都能检索，公共只读）。
+     */
+    this.publicDir = path.join(root, 'data', '_public', 'kb');
     this.docs = new Map(); // id → { id, name, chunks: [{text, vec}], addedAt }
     this.loaded = false;
   }

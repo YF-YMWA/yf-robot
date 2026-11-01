@@ -102,6 +102,7 @@ export class LogicLibrary {
    */
   constructor({ root, config = {}, log = () => {}, embed = null, card = '' }) {
     // 按角色卡隔离
+    this.root = root;
     this.file = logicFile(root, card);
     this.config = config;
     this.log = log;

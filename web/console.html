@@ -439,6 +439,23 @@
     </div>
 
     <div class="card">
+      <h2>公共库和本卡库</h2>
+      <div class="hint">
+        逻辑库和知识库都分两层，面板上每条会标出属于哪一层：<br><br>
+        <b>公共（蓝标）</b>：放在 <code>data\_public\</code>，<b>所有角色卡共用</b>。<br>
+        适合放：怎么称呼主人、基本礼貌、通用禁忌、全卡共享的资料。<br><br>
+        <b>本卡</b>：放在 <code>data\&lt;卡片名&gt;\</code>，<b>只有这张卡看得到</b>。<br>
+        适合放：这个角色的口癖、经历、专属设定。<br><br>
+        ⚠ 在面板里新增/修改，<b>只会写进当前角色卡</b>（不会影响别的卡）。<br>
+        想让所有卡都生效，把文件夹进公共目录，或复制一份过去。
+      </div>
+      <div style="margin-top:12px">
+        <button onclick="goPage('logic')">去逻辑库</button>
+        <button class="ghost" onclick="goPage('kb')">去知识库</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>插件怎么放</h2>
       <div class="hint">
         插件是一个文件夹，里面有 <code>index.mjs</code> 和 <code>plugin.json</code>：<br>
@@ -4818,7 +4835,10 @@ async function loadLogic() {
 
     _logicRules = data.rules || [];
     const st = data.stats || {};
-    $('logicStats').textContent = `共 ${st.total || 0} 条（上限 ${st.cap || 500}）`;
+    const _pub = _logicRules.filter((r) => r.scope === 'public').length;
+    const _card = _logicRules.length - _pub;
+    $('logicStats').textContent =
+      `共 ${st.total || 0} 条（上限 ${st.cap || 500}）｜ 公共 ${_pub} 条 · 本卡 ${_card} 条`;
 
     if (!_logicRules.length) {
       hint.style.display = '';
