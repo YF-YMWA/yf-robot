@@ -511,6 +511,24 @@ async function main() {
   engine.syncTools?.();
 
   /**
+   * 工具初始化之后同步一次能力表。
+   *
+   * 以前放在 engine.logic() 里，那时 this.tools 可能还是 null（拿不到定义），
+   * 于是只生成一条「能力：undefined」。
+   */
+  try {
+    const { syncCapabilities } = await import('./core/capability-sync.mjs');
+    const defs = engine.tools?.definitions?.() || [];
+    if (defs.length) {
+      syncCapabilities(engine.logic(), defs, { log: (m) => console.log(m) });
+    } else {
+      console.warn('[capability] 工具定义为空，跳过能力同步');
+    }
+  } catch (e) {
+    console.warn('[capability] 能力同步失败：' + e.message);
+  }
+
+  /**
    * 定时任务：到点起一个后台作业，结果走同一条待发队列。
    * 有 prompt 就让模型现写一句（比固定文案自然），没有就用固定文案。
    */

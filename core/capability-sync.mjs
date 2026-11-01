@@ -53,7 +53,10 @@ export function syncCapabilities(logic, tools, opts = {}) {
   const alive = new Set();
 
   for (const t of tools) {
-    const title = `能力：${t.name}`;
+    // 名字取不到就跳过：以前会生成「能力：undefined」这种脏数据
+    const _nm = t?.name || t?.function?.name || t?.id || t?.tool || (typeof t === 'string' ? t : '');
+    if (!_nm) continue;
+    const title = `能力：${_nm}`;
     alive.add(title);
     const rule =
       `你有能力「${t.name}」：${describe(t)}。` +
