@@ -884,15 +884,44 @@ export class AdminApi {
       }
 
       if (method === 'POST' && pathname === '/api/admin/logic/add') {
-        const lib = this.engine.logic();
-        const r = lib.add({
+        /**
+         * scope=public 写公共库（所有卡共用），否则写本卡。
+         */
+        const saveScope = body?.scope === 'public' ? 'public' : 'card';
+        const item = {
           title: body?.title,
           rule: body?.rule,
-          tags: Array.isArray(body?.tags) ? body.tags : String(body?.tags || '').split(/[,，\s]+/).filter(Boolean),
+          tags: Array.isArray(body?.tags)
+            ? body.tags
+            : String(body?.tags || '').split(/[,，\s]+/).filter(Boolean),
           source: 'manual',
           status: body?.status === 'pending' ? 'pending' : 'active',
-        });
-        return { code: 200, body: r };
+        };
+
+        if (saveScope === 'public') {
+          const fs = await import('node:fs');
+          const path = await import('node:path');
+          const fp = path.join(this.root, 'data', '_public', 'logic.json');
+          let cur = { rules: [] };
+          try {
+            cur = JSON.parse(fs.readFileSync(fp, 'utf8'));
+          } catch {}
+          cur.rules = Array.isArray(cur.rules) ? cur.rules : [];
+          cur.rules.push({
+            id: 'pub_' + Date.now().toString(36),
+            ...item,
+            scope: 'public',
+            createdAt: Date.now(),
+          });
+          fs.mkdirSync(path.dirname(fp), { recursive: true });
+          fs.writeFileSync(fp, JSON.stringify(cur, null, 2), 'utf8');
+          const lib0 = this.engine.logic();
+          lib0.loaded = false;
+          return { code: 200, body: { ok: true, scope: 'public' } };
+        }
+
+        const r = this.engine.logic().add(item);
+        return { code: 200, body: { ...r, scope: 'card' } };
       }
 
       if (method === 'POST' && pathname === '/api/admin/logic/update') {

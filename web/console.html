@@ -1445,6 +1445,10 @@
       <h2>新增一条<span class="sp"></span><span class="hint" id="logicStats"></span></h2>
       <div class="row"><label>一句话概括</label><div class="ctl">
         <input type="text" id="logicTitle" placeholder="比如「被骂先别软」" style="max-width:300px">
+        <select id="logicScope" style="max-width:150px" title="这条写给谁">
+          <option value="card">只写本卡</option>
+          <option value="public">写公共（所有卡共用）</option>
+        </select>
       </div></div>
       <div class="row"><label>具体怎么做</label><div class="ctl">
         <textarea id="logicRule" rows="3" placeholder="比如「对方骂人的时候先短句顶回去，不要急着道歉讲道理」" style="width:100%"></textarea>
@@ -5052,7 +5056,8 @@ async function addLogicRule() {
 
   hint.textContent = '保存中…';
   try {
-    const j = await api('logic/add', { method: 'POST', body: { title, rule, tags } });
+    const scopeSel = $('logicScope')?.value === 'public' ? 'public' : 'card';
+    const j = await api('logic/add', { method: 'POST', body: { scope: scopeSel, title, rule, tags } });
     if (!j.ok) throw new Error(j.error || '保存失败');
     $('logicTitle').value = '';
     $('logicRule').value = '';

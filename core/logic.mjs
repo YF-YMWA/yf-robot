@@ -176,6 +176,7 @@ export class LogicLibrary {
   }
 
   list({ status = '', tag = '' } = {}) {
+    this.loaded = false; // 公共库可能刚被改过，强制重新合并
     this.load();
     return this.rules.filter((r) => {
       if (status && r.status !== status) return false;
