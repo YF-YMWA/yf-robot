@@ -46,7 +46,27 @@
 
 ---
 
-## 3. 出错要能查
+## 3. 新增配置项要过四关
+
+漏一处的后果都是**静默失效**——面板保存后不变，日志也不报错。
+
+| 关卡 | 位置 | 漏了会怎样 |
+|---|---|---|
+| ① 声明 | `core/config-schema.mjs` 的 `SECTION_SCHEMA` | `applyPatch` 直接丢弃，改配置毫无反应 |
+| ② 默认值 | `core/config.mjs` | 新装用户拿到 undefined，行为不确定 |
+| ③ 读接口 | `#publicConfig`（手写段落时要补） | 面板显示默认值，用户以为没保存 |
+| ④ 保存分支 | `#saveConfig`（手写段落时要补） | 保存被丢弃 |
+
+真实事故（两次）：`tools.approval` 没进 schema；`wechat.voiceMode` 读接口漏返回 —— 都是「保存后不变」。
+
+**现在 ③ 已经自动兜底**：`#publicConfig` 用 schema 当基准补齐缺失字段
+（密钥类不补），所以新字段只要 ① ② 做了，读接口自动就有。
+
+自检：`runtime
+ode.exe toolscheck-config-coverage.mjs`
+（服务在跑时会实时比对，报出读接口漏了哪些字段）。
+
+## 4. 出错要能查
 
 - 新功能的关键失败点必须有日志，日志要能指出「哪个功能、什么原因」
 - 不要写「失败」两个字就完事（参照 `docs/BUGS.md` 里「无返回」那一条的教训）

@@ -141,6 +141,7 @@ const TOOLS_ALLOW = new Set([
   'check-console-nav.mjs', // 面板导航（按钮点了有没有反应）
   'check-panel.mjs', // 面板接口自检
   'check-config-save.mjs', // 配置读写
+  'check-config-coverage.mjs', // 配置字段覆盖（schema vs 读接口）
   'memory-tool.mjs', // 备份/恢复记忆.bat 用
   'build-sticker-index.mjs', // 重建表情包描述索引
   'to_gbk.ps1', // 编码转换小工具

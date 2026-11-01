@@ -11,7 +11,11 @@
  * 所有写操作都要校验，避免控制台把配置改坏。
  */
 import { resolveWordsDir, scopeName, generatedDir } from './scoped-paths.mjs';
-import { applyPatch as applySchemaPatch, toPublic as toSchemaPublic } from './config-schema.mjs';
+import {
+  applyPatch as applySchemaPatch,
+  toPublic as toSchemaPublic,
+  SECTION_SCHEMA,
+} from './config-schema.mjs';
 import { suitableAsSticker } from './media-suit.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -3206,6 +3210,9 @@ print('%016x' % bits)
           ((this.config.wechat?.collectOnlyFrom || []).length ? 'custom' : 'all'),
         stickerChance: this.config.wechat?.stickerChance ?? 0.3,
         voiceChance: this.config.wechat?.voiceChance ?? 0,
+        // 语音发送方式：文件 / 真语音条（漏了这两行，面板保存后会显示回 file）
+        voiceMode: this.config.wechat?.voiceMode === 'ptt' ? 'ptt' : 'file',
+        voiceOutDevice: Number(this.config.wechat?.voiceOutDevice ?? -1),
       },
     };
   }
@@ -5384,6 +5391,8 @@ print('%016x' % bits)
       wechat: {
         stickerChance: c.wechat?.stickerChance ?? 0,
         voiceChance: c.wechat?.voiceChance ?? 0,
+        voiceMode: c.wechat?.voiceMode === 'ptt' ? 'ptt' : 'file',
+        voiceOutDevice: Number(c.wechat?.voiceOutDevice ?? -1),
         mediaCollect: c.wechat?.mediaCollect !== false,
         /**
          * 收藏白名单。
@@ -5458,6 +5467,67 @@ print('%016x' % bits)
       if (!(section in out)) out[section] = value;
     }
 
+    // schema 补齐：手写段落漏的字段自动带上（见上面的说明）
+    return this.#fillFromSchema(out, this.config);
+  }
+
+  /**
+   * schema 补齐：手写段落里漏掉的字段，从配置里补上。
+   *
+   * 真实事故两次：tools.approval（schema 没声明）、wechat.voiceMode（读接口漏了），
+   * 表现都是「面板保存后不变」。这里不再逐个手写，用 schema 当基准兜底。
+   * 密钥类不补（本来就不该回显）。
+   */
+  #fillFromSchema(out, config) {
+    const SECRET = /apikey|token|secret|password/i;
+    const put = (dotted, value) => {
+      const parts = dotted.split('.');
+      let cur = out;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const k = parts[i];
+        if (!cur[k] || typeof cur[k] !== 'object') cur[k] = {};
+        cur = cur[k];
+      }
+      cur[parts[parts.length - 1]] = value;
+    };
+    const has = (dotted) => {
+      let cur = out;
+      for (const p of dotted.split('.')) {
+        if (!cur || typeof cur !== 'object') return false;
+        cur = cur[p];
+      }
+      return cur !== undefined;
+    };
+    const read = (dotted) => {
+      let cur = config;
+      for (const p of dotted.split('.')) {
+        if (!cur || typeof cur !== 'object') return undefined;
+        cur = cur[p];
+      }
+      return cur;
+    };
+
+    try {
+      for (const [section, def] of Object.entries(SECTION_SCHEMA)) {
+        for (const key of Object.keys(def.fields || {})) {
+          const dotted = section + '.' + key;
+          if (SECRET.test(key) || has(dotted)) continue;
+          // 配置里没写就用 schema 的默认值 —— 面板要看到「默认是多少」
+          const v = read(dotted) !== undefined ? read(dotted) : def.fields[key].default;
+          if (v !== undefined) put(dotted, v);
+        }
+        for (const [nested, ndef] of Object.entries(def.nested || {})) {
+          for (const key of Object.keys(ndef.fields || {})) {
+            const dotted = section + '.' + nested + '.' + key;
+            if (SECRET.test(key) || has(dotted)) continue;
+            const v = read(dotted) !== undefined ? read(dotted) : ndef.fields[key].default;
+            if (v !== undefined) put(dotted, v);
+          }
+        }
+      }
+    } catch {
+      /* 补不齐不影响主流程 */
+    }
     return out;
   }
 
