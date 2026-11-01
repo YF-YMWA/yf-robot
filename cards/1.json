@@ -1,0 +1,16 @@
+{
+  "spec": "chara_card_v2",
+  "spec_version": "2.0",
+  "data": {
+    "name": "1",
+    "speaker": "",
+    "description": "",
+    "personality": "",
+    "scenario": "",
+    "first_mes": "",
+    "mes_example": "",
+    "system_prompt": "",
+    "creator_notes": "",
+    "tags": []
+  }
+}

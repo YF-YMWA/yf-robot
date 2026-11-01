@@ -140,8 +140,29 @@ export class LogicLibrary {
       this.publicRules = [];
     }
 
-    // 合并：公共在前（更基础），本卡在后（更具体，检索时更容易命中）
-    this.rules = [...this.publicRules, ...this.rules];
+    /**
+     * 内置经验（builtin）和能力表（capability）对所有角色卡都一样，
+     * 统一按「公共」处理并按标题去重 ——
+     * 否则每张卡里都各存一份，切卡后条数不变，看着像没分开。
+     */
+    const isSharedRule = (r) => r.source === 'builtin' || r.source === 'capability';
+
+    for (const r of this.rules) {
+      if (isSharedRule(r) && !this.publicRules.some((p) => p.title === r.title)) {
+        this.publicRules.push({ ...r, scope: 'public' });
+      }
+    }
+
+    // 合并：公共在前（更基础），本卡在后（更具体）；同标题只留一条
+    const seen = new Set();
+    const merged = [];
+    for (const r of [...this.publicRules, ...this.rules.filter((x) => !isSharedRule(x))]) {
+      const key = String(r.title || r.id || '');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(r);
+    }
+    this.rules = merged;
     return this;
   }
 
