@@ -139,6 +139,7 @@ const TOOLS_ALLOW = new Set([
   'check-console-fns.mjs', // 面板函数
   'check-console-pages.mjs', // 面板页面
   'check-console-nav.mjs', // 面板导航（按钮点了有没有反应）
+  'check-console-dup.mjs', // 面板重复函数名（会覆盖掉整页）
   'check-console-fill.mjs', // 面板控件回填（保存后刷新不变）
   'check-panel.mjs', // 面板接口自检
   'check-config-save.mjs', // 配置读写

@@ -81,7 +81,17 @@ ode.exe toolscheck-console-fill.mjs`
 
 真实事故：`selVoiceMode`、`swAutoClean` 都漏过回填。
 
-## 5. 出错要能查
+## 5. 面板函数名不许重复
+
+同名函数会互相覆盖，症状是**「某个页面突然没了」**。
+
+真实事故：新增「各卡数据」页时写了 `loadCards()`，和原版角色卡列表的
+`loadCards()` 重名 —— 后者被覆盖，用户打开「身份 → 角色卡」看不到卡。
+
+自检：`runtime
+ode.exe toolscheck-console-dup.mjs`
+
+## 6. 出错要能查
 
 - 新功能的关键失败点必须有日志，日志要能指出「哪个功能、什么原因」
 - 不要写「失败」两个字就完事（参照 `docs/BUGS.md` 里「无返回」那一条的教训）
