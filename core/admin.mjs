@@ -1320,6 +1320,25 @@ export class AdminApi {
           kb: countJson(path.join(dataDir, '_public', 'kb')),
         };
 
+        // 并上角色列表：新建的卡还没有数据目录，也要显示出来
+        try {
+          const known = listCards(this.root) || [];
+          const have = new Set(list.map((x) => x.id));
+          for (const c of known) {
+            const id = String(c.id || c.name || '');
+            if (!id || have.has(id)) continue;
+            list.push({
+              id,
+              isCurrent: id === cur,
+              logic: 0,
+              kb: 0,
+              memory: 0,
+              sessions: 0,
+              empty: true,
+            });
+          }
+        } catch {}
+
         return { code: 200, body: { ok: true, current: cur, public: pub, list } };
       }
 

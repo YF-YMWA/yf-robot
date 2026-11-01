@@ -4889,7 +4889,7 @@ async function loadCardStats() {
 /** 看某张卡自己的记忆：先切到它，再跳到记忆页 */
 async function viewCardMemory(id) {
   try {
-    const r = await api('config', { method: 'POST', body: { card: id } });
+    const r = await api('card', { method: 'POST', body: { id } });
     if (r && r.ok === false) throw new Error(r.error || '保存失败');
     toast('已切到「' + id + '」，正在打开它的记忆…');
     setTimeout(() => {
@@ -4904,7 +4904,7 @@ async function viewCardMemory(id) {
 /** 切到某张卡（写配置并提示重启适配器） */
 async function switchToCard(id) {
   try {
-    const r = await api('config', { method: 'POST', body: { card: id } });
+    const r = await api('card', { method: 'POST', body: { id } });
     if (r && r.ok === false) throw new Error(r.error || '保存失败');
     toast('已切到卡片「' + id + '」，刷新页面生效');
     setTimeout(() => loadCardStats(), 500);
