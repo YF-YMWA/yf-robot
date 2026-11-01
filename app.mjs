@@ -490,8 +490,17 @@ async function main() {
    */
   try {
     const { seedBuiltinRules } = await import('./core/logic-seed.mjs');
-    const logic = typeof engine.logic === 'function' ? engine.logic() : null;
+    const logic0 = typeof engine.logic === 'function' ? engine.logic() : null;
+    const logic = logic0;
     if (logic) {
+      // 能力说明从实际工具表生成：以后加插件/加工具自动出现，不用手写人格约束
+      try {
+        const { syncCapabilities } = await import('./core/capability-sync.mjs');
+        const specs = engine.tools?.spec?.() || [];
+        syncCapabilities(logic, specs, { log: (m) => console.log(m) });
+      } catch (e) {
+        console.warn('能力表同步失败：' + e.message);
+      }
       seedBuiltinRules(logic, { log: (m) => console.log(m) });
     }
   } catch (e) {

@@ -414,6 +414,27 @@ export class ChatEngine {
         },
       });
       this._logic.load();
+
+      // 每张卡第一次用到逻辑库时，把当前工具表写成「能力经验」
+      // （换卡 / 新装 / 加插件都不用手写人格约束）
+      try {
+        const raw = this.tools;
+        const specs =
+          (raw?.spec?.() || raw?.definitions?.() || raw?.allDefinitions?.() || []) || [];
+        const list = Array.isArray(specs) ? specs : [];
+        if (list.length) {
+          import('./capability-sync.mjs')
+            .then(({ syncCapabilities }) =>
+              syncCapabilities(this._logic, list, { log: (m) => this.log.info?.(m) }),
+            )
+            .catch((e) => this.log.warn?.('[capability] 同步失败：' + e.message));
+        } else {
+          this.log.warn?.('[capability] 没拿到工具表，跳过');
+        }
+      } catch (e) {
+        this.log.warn?.('[capability] 读取工具表异常：' + e.message);
+      }
+
     }
     return this._logic;
   }
