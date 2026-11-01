@@ -1340,6 +1340,91 @@ export class AdminApi {
         return { code: 200, body: { ok: true, ...r } };
       }
 
+      /**
+       * 语音条设置状态 + 引导。
+       *
+       * 用户踩过的坑：
+       *   · 微信 4.x 没有「语音与视频」设置，麦克风跟 Windows 默认输入走
+       *   · VB-CABLE 不用管理员装会报 LOADDRV: Access denied
+       *   · 设备序号会随插拔耳机重排 → 改成按名字匹配
+       * 这里把这些检查一遍，直接告诉用户「还差哪一步」。
+       */
+      if (method === 'GET' && pathname === '/api/admin/voice-status') {
+        const c = this.config;
+        const mode = c.wechat?.voiceMode === 'ptt' ? 'ptt' : 'file';
+        const device = c.wechat?.voiceOutDevice ?? -1;
+
+        // 本机声卡（Windows）：看 CABLE 装没装
+        let devices = [];
+        try {
+          // reg query 比 WMI/PnP 可靠：虚拟声卡不一定出现在 Win32_SoundDevice 里
+          const out = execFileSync(
+            'reg.exe',
+            [
+              'query',
+              'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MMDevices\\Audio\\Render',
+              '/s',
+              '/f',
+              'CABLE',
+            ],
+            { encoding: 'utf8', timeout: 8000, windowsHide: true },
+          );
+          devices = String(out || '')
+            .split(/\r?\n/)
+            .map((x) => x.trim())
+            .filter((x) => /CABLE/i.test(x));
+        } catch {
+          devices = [];
+        }
+        // 检测不可靠（reg/WMI 都可能读不到虚拟声卡）→ 用配置判断；检测不到就标未知，不误报未安装
+        const hasCable = /cable/i.test(String(device)) ? true : (devices.length > 0 ? true : null);
+
+        const steps = [];
+        steps.push({
+          done: mode === 'ptt',
+          text: '发送方式设为「发真语音条」',
+          how: '本页「怎么发」下拉选「发真语音条」',
+        });
+        steps.push({
+          done: hasCable === true ? true : null,
+          text: '安装虚拟声卡 VB-CABLE',
+          how: '下载 VBCABLE_Driver_Pack43.zip → 右键 VBCABLE_Setup_x64.exe「以管理员身份运行」→ Install Driver（不用管理员会报 LOADDRV: Access denied）',
+        });
+        steps.push({
+          done: String(device).toLowerCase().includes('cable') || Number(device) === 0,
+          text: '播放设备指向 CABLE Input',
+          how: '本页可直接设置（写名字更稳，插拔耳机不会失效）',
+        });
+        steps.push({
+          done: null,
+          text: '把 Windows 默认输入设为 CABLE Output',
+          how: '设置 → 系统 → 声音 → 输入 → 选「CABLE Output (VB-Audio Virtual Cable)」→ 设为默认。微信 4.x 没有应用内麦克风设置，跟系统默认走',
+        });
+        steps.push({
+          done: null,
+          text: '微信里让聊天窗口保持打开（不要最小化）',
+          how: '最小化时点击和按键都落空，语音发不出去',
+        });
+
+        const ready = steps.every((x) => x.done !== false);
+
+        return {
+          code: 200,
+          body: {
+            ok: true,
+            mode,
+            device,
+            hasCable,
+            devices,
+            ready,
+            steps,
+            note: ready
+              ? '配置看起来齐了。实测判据：日志出现「[语音] 已按住 Alt」，且微信里是语音条（不是 .amr 文件）'
+              : '还有没完成的步骤，按下面的「怎么改」逐条过',
+          },
+        };
+      }
+
       if (method === 'GET' && pathname === '/api/admin/paths') {
         const root = this.root;
         const card = scopeName(this.config.card || 'default');

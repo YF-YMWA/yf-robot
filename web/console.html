@@ -819,6 +819,12 @@
           </select>
           <span class="hint">发语音条要让"合成的声音"进微信麦克风，见适配器 docs\VOICE.md</span>
         </div></div>
+
+        <div class="row"><label>语音设置</label><div class="ctl">
+          <button class="ghost sm" onclick="loadVoiceGuide()">检查配置</button>
+          <span class="hint" id="voiceGuideHint"></span>
+        </div></div>
+        <div id="voiceGuide" class="hint" style="margin:0 0 10px 92px"></div>
         <div class="row"><label>语音回复</label><div class="ctl">
           <input type="number" id="voiceChance" min="0" max="100" step="5" style="max-width:80px" placeholder="概率%"
                  onchange="saveVoiceChance(true)" title="改完自动保存">
@@ -2262,6 +2268,7 @@ function loadPageData(page) {
     loadAdapters();
   }
   if (page === 'guide') loadPaths();
+  if (page === 'model') setTimeout(() => { try { loadVoiceGuide(); } catch (e) {} }, 300);
   if (page === 'tools') loadProcesses();
   if (page === 'active') loadActive();
   if (page === 'stickers') {
@@ -3853,6 +3860,37 @@ async function saveQuoteReply() {
 }
 
 /** 语音发送方式：文件 / 真语音条 */
+/** 语音条配置检查：列出「还差哪一步」 */
+async function loadVoiceGuide() {
+  const box = document.getElementById('voiceGuide');
+  const hint = document.getElementById('voiceGuideHint');
+  if (!box) return;
+  hint.textContent = '检查中…';
+  try {
+    const j = await api('voice-status');
+    hint.textContent = j.ready ? '✓ 配置齐全' : '还差几步';
+    const rows = (j.steps || [])
+      .map((st) => {
+        const mark = st.done === true ? '✓' : st.done === false ? '✗' : '·';
+        const color = st.done === true ? 'var(--ok)' : st.done === false ? 'var(--warn)' : 'inherit';
+        return (
+          '<div style="margin:4px 0;color:' + color + '">' + mark + ' ' + escapeHtml(st.text) +
+          '<div class="hint" style="margin-left:14px">' + escapeHtml(st.how || '') + '</div></div>'
+        );
+      })
+      .join('');
+    box.innerHTML =
+      '<div style="margin-bottom:6px">当前：' + escapeHtml(j.mode === 'ptt' ? '发真语音条' : '当文件发') +
+      ' ｜ 播放设备：' + escapeHtml(String(j.device)) +
+      ' ｜ VB-CABLE：' + (j.hasCable ? '已安装' : '未安装') + '</div>' +
+      rows +
+      '<div style="margin-top:6px" class="hint">' + escapeHtml(j.note || '') + '</div>';
+  } catch (e) {
+    box.textContent = '检查失败：' + e.message;
+    hint.textContent = '';
+  }
+}
+
 async function saveVoiceMode() {
   const v = document.getElementById('selVoiceMode')?.value === 'ptt' ? 'ptt' : 'file';
   try {
