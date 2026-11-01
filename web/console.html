@@ -2306,6 +2306,15 @@ function loadPageData(page) {
   }
   if (page === 'guide') loadPaths();
   if (page === 'cards') loadCardStats();
+
+  // 切卡后刷新会带一个目标页：自动跳过去（否则刷新回默认页，用户还得再点）
+  try {
+    const wantPage = sessionStorage.getItem('yf.openPage');
+    if (wantPage) {
+      sessionStorage.removeItem('yf.openPage');
+      setTimeout(() => goPage(wantPage), 0);
+    }
+  } catch (e) {}
   if (page === 'model') setTimeout(() => { try { loadVoiceGuide(); } catch (e) {} }, 300);
   if (page === 'tools') loadProcesses();
   if (page === 'active') loadActive();
@@ -4893,8 +4902,8 @@ async function viewCardMemory(id) {
     if (r && r.ok === false) throw new Error(r.error || '保存失败');
     toast('已切到「' + id + '」，正在打开它的记忆…');
     setTimeout(() => {
-      loadCards();
-      goPage('memory');
+      sessionStorage.setItem('yf.openPage', 'memory');
+      location.reload();
     }, 400);
   } catch (e) {
     toast('切换失败：' + e.message, 'err');
@@ -4906,8 +4915,8 @@ async function switchToCard(id) {
   try {
     const r = await api('card', { method: 'POST', body: { id } });
     if (r && r.ok === false) throw new Error(r.error || '保存失败');
-    toast('已切到卡片「' + id + '」，刷新页面生效');
-    setTimeout(() => loadCardStats(), 500);
+    toast('已切到「' + id + '」，正在刷新…');
+    setTimeout(() => location.reload(), 400);
   } catch (e) {
     toast('切换失败：' + e.message, 'err');
   }
