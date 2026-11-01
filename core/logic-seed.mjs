@@ -60,6 +60,27 @@ export const BUILTIN_RULES = [
  * @param {{log?:Function}} [opts]
  * @returns {{added:number, skipped:number}}
  */
+
+/** 追加一条到公共库（data/_public/logic.json），同标题跳过 */
+function appendPublicRule(root, item, log = () => {}) {
+  try {
+    const fp = path.join(root, 'data', '_public', 'logic.json');
+    let cur = { rules: [] };
+    try {
+      cur = JSON.parse(fs.readFileSync(fp, 'utf8'));
+    } catch {}
+    cur.rules = Array.isArray(cur.rules) ? cur.rules : [];
+    if (cur.rules.some((r) => String(r.title || '') === String(item.title || ''))) return false;
+    cur.rules.push({ ...item, scope: 'public', createdAt: Date.now() });
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    fs.writeFileSync(fp, JSON.stringify(cur, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    log('[logic] 写公共库失败：' + e.message);
+    return false;
+  }
+}
+
 export function seedBuiltinRules(logic, opts = {}) {
   const log = opts.log || (() => {});
   let added = 0;
@@ -81,8 +102,12 @@ export function seedBuiltinRules(logic, opts = {}) {
       continue;
     }
     try {
-      const res = logic.add({ ...r, builtin: true, source: 'builtin' });
-      if (res?.ok) added++;
+      const ok = appendPublicRule(
+        opts.root || logic.root || process.cwd(),
+        { ...r, builtin: true, source: 'builtin' },
+        log,
+      );
+      if (ok) added++;
       else skipped++;
     } catch {
       skipped++;

@@ -33,6 +33,28 @@ function describe(tool) {
  * @param {{log?:Function}} [opts]
  * @returns {{added:number, updated:number, staled:number}}
  */
+function appendPublic(root, item, log) {
+  try {
+    const fp = path.join(root, 'data', '_public', 'logic.json');
+    let cur = { rules: [] };
+    try { cur = JSON.parse(fs.readFileSync(fp, 'utf8')); } catch {}
+    cur.rules = Array.isArray(cur.rules) ? cur.rules : [];
+    const idx = cur.rules.findIndex((r) => String(r.title || '') === String(item.title || ''));
+    if (idx >= 0) {
+      if (cur.rules[idx].rule !== item.rule) { cur.rules[idx] = { ...cur.rules[idx], rule: item.rule }; }
+      else return 'same';
+    } else {
+      cur.rules.push({ ...item, scope: 'public', createdAt: Date.now() });
+    }
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    fs.writeFileSync(fp, JSON.stringify(cur, null, 2), 'utf8');
+    return idx >= 0 ? 'updated' : 'added';
+  } catch (e) {
+    log?.('[capability] 写公共库失败：' + e.message);
+    return 'fail';
+  }
+}
+
 export function syncCapabilities(logic, tools, opts = {}) {
   const log = opts.log || (() => {});
   const res = { added: 0, updated: 0, staled: 0 };
@@ -59,17 +81,17 @@ export function syncCapabilities(logic, tools, opts = {}) {
     const title = `能力：${_nm}`;
     alive.add(title);
     const rule =
-      `你有能力「${t.name}」：${describe(t)}。` +
+      `你有能力「${_nm}」：${describe(t)}。` +
       `\n想用就直接调用它；不要回答「我做不到」「系统没给我这个权限」——` +
       `有没有这个能力以工具列表为准。` +
       `\n如果调用失败，按工具返回的原因说明（例如「微信没在前台」），不要说成「我没有这个能力」。`;
 
     const old = mine.get(title);
     try {
-      if (!old) {
-        const r = logic.add({ title, rule, source: MARK, builtin: true });
-        if (r?.ok) res.added++;
-      } else if (String(old.rule || '') !== rule) {
+      const root = opts.root || logic.root || process.cwd();
+      const act = appendPublic(root, { title, rule, source: MARK, builtin: true }, log);
+      if (act === 'added') res.added++;
+      if (act === 'updated') res.updated++; else if (String(old.rule || '') !== rule) {
         // 描述变了（插件升级）→ 更新正文
         if (typeof logic.update === 'function') {
           logic.update(old.id, { rule });
