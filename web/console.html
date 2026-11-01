@@ -4869,13 +4869,27 @@ function renderLogicList() {
   const pending = _logicRules.filter((r) => r.status === 'pending');
   const active = _logicRules.filter((r) => r.status !== 'pending');
 
+  // 分两段：公共（所有卡共用）/ 本卡（只有当前角色卡）
+  const pubRules = active.filter((r) => r.scope === 'public');
+  const cardRules = active.filter((r) => r.scope !== 'public');
+  const section = (title, sub, list) => {
+    if (!list.length) return '';
+    return (
+      '<div style="margin:14px 0 8px;border-left:3px solid ' +
+      (title.indexOf('公共') === 0 ? '#3b5bdb' : 'var(--line)') +
+      ';padding-left:8px">' +
+      '<b>' + title + '</b> <span class="hint">' + sub + '（' + list.length + ' 条）</span></div>' +
+      list.map(one).join('')
+    );
+  };
+
   const one = (r) => {
     const st = LOGIC_STATUS[r.status] || LOGIC_STATUS.active;
     return `
       <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span class="chip ${st.cls}">${st.text}</span>
-          <b>${escapeHtml(scopeMark(r) + r.title || '')}</b>
+          <b>${escapeHtml(r.title || '')}</b>
           <span class="hint">${LOGIC_SOURCE[r.source] || r.source || ''}${
             r.uses ? ` · 用过 ${r.uses} 次` : ''
           }${r.tags?.length ? ` · ${r.tags.map(escapeHtml).join(' / ')}` : ''}</span>
@@ -4904,7 +4918,10 @@ function renderLogicList() {
          <button class="ghost sm" onclick="approveAllLogic()">全部通过</button></div>` +
         pending.map(one).join('')
       : '') +
-    (active.length ? active.map(one).join('') : '');
+      (active.length
+        ? section('公共库', '所有角色卡共用', pubRules) +
+          section('本卡库', '只有当前角色卡看得到', cardRules)
+        : '');
 }
 
 async function saveLogicConfig() {
