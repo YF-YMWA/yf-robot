@@ -113,16 +113,38 @@ export class LogicLibrary {
   load() {
     if (this.loaded) return this;
     this.loaded = true;
+    // 本卡
     try {
       const j = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      this.rules = Array.isArray(j?.rules) ? j.rules : [];
+      this.rules = (Array.isArray(j?.rules) ? j.rules : []).map((r) => ({ ...r, scope: 'card' }));
     } catch {
       this.rules = [];
     }
+
+    /**
+     * 公共库：data/_public/logic.json，所有卡共用。
+     * 只读合并 —— 保存时仍然只写本卡，避免「一张卡改了所有人跟着变」。
+     */
+    this.publicRules = [];
+    try {
+      const pub = path.join(this.root || '.', 'data', '_public', 'logic.json');
+      const pj = JSON.parse(fs.readFileSync(pub, 'utf8'));
+      this.publicRules = (Array.isArray(pj?.rules) ? pj.rules : []).map((r) => ({
+        ...r,
+        scope: 'public',
+      }));
+    } catch {
+      this.publicRules = [];
+    }
+
+    // 合并：公共在前（更基础），本卡在后（更具体，检索时更容易命中）
+    this.rules = [...this.publicRules, ...this.rules];
     return this;
   }
 
   save() {
+    // 公共条目不属于本卡，写盘前过滤掉（否则会把公共库复制一份到每张卡）
+    this.rules = (this.rules || []).filter((r) => r.scope !== 'public');
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       const tmp = this.file + '.tmp';

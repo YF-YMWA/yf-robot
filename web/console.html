@@ -4835,6 +4835,15 @@ async function loadLogic() {
   }
 }
 
+
+/** 公共库 / 本卡 的标记（面板上要一眼看出这条属于哪一层） */
+function scopeMark(r) {
+  const pub = r.scope === 'public';
+  return '<span class="chip" style="margin-right:6px;' +
+    (pub ? 'background:#3b5bdb;color:#fff' : '') + '">' +
+    (pub ? '公共' : '本卡') + '</span>';
+}
+
 function renderLogicList() {
   const el = $('logicList');
   const pending = _logicRules.filter((r) => r.status === 'pending');
@@ -4846,7 +4855,7 @@ function renderLogicList() {
       <div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span class="chip ${st.cls}">${st.text}</span>
-          <b>${escapeHtml(r.title || '')}</b>
+          <b>${escapeHtml(scopeMark(r) + r.title || '')}</b>
           <span class="hint">${LOGIC_SOURCE[r.source] || r.source || ''}${
             r.uses ? ` · 用过 ${r.uses} 次` : ''
           }${r.tags?.length ? ` · ${r.tags.map(escapeHtml).join(' / ')}` : ''}</span>
