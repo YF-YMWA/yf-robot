@@ -482,6 +482,22 @@ async function main() {
   /**
    * 后台作业：画图这类长任务先应答、做完再补一条。
    */
+  /**
+   * 内置能力说明：新用户 / 换角色卡 / 清空逻辑库时自动补。
+   *
+   * 真实问题：问她「能发语音吗」，她答「系统没给我权限」——她其实能发。
+   * 逻辑库里没有任何一条告诉她这件事，所以启动时补一批（已有同标题的跳过）。
+   */
+  try {
+    const { seedBuiltinRules } = await import('./core/logic-seed.mjs');
+    const logic = typeof engine.logic === 'function' ? engine.logic() : null;
+    if (logic) {
+      seedBuiltinRules(logic, { log: (m) => console.log(m) });
+    }
+  } catch (e) {
+    console.warn('内置经验注入失败（不影响使用）：' + e.message);
+  }
+
   engine.jobs = new JobStore(config.root || process.cwd(), { logger: console });
   engine.syncTools?.();
 
