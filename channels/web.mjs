@@ -753,6 +753,9 @@ export class WebChannel {
            */
           // 引用回复：适配器据此决定要不要引用对方那条消息
           quoteReply: c.wechat?.quoteReply !== false,
+          // 语音怎么发：file 当文件发；ptt 按住 Alt 发真语音条
+          voiceMode: c.wechat?.voiceMode === 'ptt' ? 'ptt' : 'file',
+          voiceOutDevice: Number(c.wechat?.voiceOutDevice ?? -1),
           voiceChance: c.wechat?.voiceChance ?? 0,
           stickerChance: c.wechat?.stickerChance ?? 0,
 

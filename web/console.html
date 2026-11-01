@@ -812,6 +812,13 @@
       </div>
 
       <div class="feature">
+        <div class="row"><label>怎么发</label><div class="ctl">
+          <select id="selVoiceMode" onchange="saveVoiceMode()" style="max-width:260px">
+            <option value="file">当音频文件发（稳，对方看到文件）</option>
+            <option value="ptt">发真语音条（按住 Alt 录，需配虚拟声卡）</option>
+          </select>
+          <span class="hint">发语音条要让"合成的声音"进微信麦克风，见适配器 docs\VOICE.md</span>
+        </div></div>
         <div class="row"><label>语音回复</label><div class="ctl">
           <input type="number" id="voiceChance" min="0" max="100" step="5" style="max-width:80px" placeholder="概率%"
                  onchange="saveVoiceChance(true)" title="改完自动保存">
@@ -3832,6 +3839,18 @@ async function saveQuoteReply() {
     const r = await api('config', { method: 'POST', body: { wechat: { quoteReply: Boolean(on) } } });
     if (r && r.ok === false) throw new Error(r.error || '保存失败');
     toast(on ? '以后回复会引用对方那条' : '关掉引用了');
+  } catch (e) {
+    toast('保存失败：' + e.message, 'err');
+  }
+}
+
+/** 语音发送方式：文件 / 真语音条 */
+async function saveVoiceMode() {
+  const v = document.getElementById('selVoiceMode')?.value === 'ptt' ? 'ptt' : 'file';
+  try {
+    const r = await api('config', { method: 'POST', body: { wechat: { voiceMode: v } } });
+    if (r && r.ok === false) throw new Error(r.error || '保存失败');
+    toast(v === 'ptt' ? '以后发真语音条（失败会自动退回发文件）' : '以后语音当文件发');
   } catch (e) {
     toast('保存失败：' + e.message, 'err');
   }

@@ -104,6 +104,10 @@ export const SECTION_SCHEMA = {
       stickerChance: F('number', 0, { min: 0, max: 1, label: '表情包概率' }),
       /** 回复时引用对方那条消息（更清楚在回谁，代价是每条多走一次 UI） */
       quoteReply: F('boolean', true, { label: '引用回复' }),
+      /** 语音怎么发：file = 当文件发；ptt = 按住 Alt 发真语音条 */
+      voiceMode: F('string', 'file', { enum: ['file', 'ptt'], label: '语音发送方式' }),
+      /** 播到哪个播放设备（-1 = 系统默认） */
+      voiceOutDevice: F('number', -1, { min: -1, max: 32, label: '语音播放设备序号' }),
       voiceChance: F('number', 0, { min: 0, max: 1, label: '语音概率' }),
       mediaCollect: F('boolean', true, { label: '收藏素材' }),
       collectOnlyFrom: F('array', [], { label: '只收这些' }),
