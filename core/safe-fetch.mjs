@@ -80,15 +80,20 @@ export function assertFetchable(raw) {
   if (BLOCKED_HOSTS.has(host)) throw new SafeFetchError(`不允许访问 ${host}`);
 
   // 端口只放行 80/443，其他一律拒绝（防止探测内网服务）
-  if (u.port && u.port !== '80' && u.port !== '443') {
+  const ALLOW_LOCAL = process.env.YF_ALLOW_LOCAL_FETCH === '1';
+  const isLoopHost = host === '127.0.0.1' || host === 'localhost' || host === '::1' || host.startsWith('127.');
+  if (u.port && u.port !== '80' && u.port !== '443' && !(ALLOW_LOCAL && isLoopHost)) {
     throw new SafeFetchError(`不允许访问端口 ${u.port}`);
   }
 
   // 直接写成 IP 的，必须是公网 IP
   if (looksLikeIp(host) && isPrivateAddress(host)) {
-    throw new SafeFetchError(`不允许访问内网地址 ${host}`);
-  }
-
+      const allowLocal = process.env.YF_ALLOW_LOCAL_FETCH === '1';
+      const isLoopback = host === '127.0.0.1' || host === 'localhost' || host.startsWith('127.');
+      if (!(allowLocal && isLoopback)) {
+        throw new SafeFetchError(`不允许访问内网地址 ${host}`);
+      }
+    }
   return u;
 }
 

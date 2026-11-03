@@ -965,6 +965,7 @@ export class AdminApi {
         const r = await learner.learnFromUrl(url, {
           topic: String(body?.topic || '').trim(),
           mode: this.config.logic?.autoLearn?.mode === 'active' ? 'active' : 'pending',
+            scope: body?.scope === 'public' ? 'public' : 'card',
         });
         return { code: 200, body: r };
       }

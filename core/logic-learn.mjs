@@ -12,6 +12,8 @@
  *
  * 默认**关闭**。要开得在控制台里手动打开（logic.autoLearn.enabled）。
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { safeFetchText, htmlToPlainText } from './safe-fetch.mjs';
 import { rejectReason } from './logic.mjs';
 
@@ -90,7 +92,8 @@ function appendToPublic(root, item) {
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     fs.writeFileSync(fp, JSON.stringify(cur, null, 2), 'utf8');
     return true;
-  } catch {
+  } catch (e) {
+    console.error("[logic] 写公共库失败：" + e.message);
     return false;
   }
 }
@@ -235,7 +238,7 @@ export class LogicLearner {
 
       if (opts.scope === 'public') {
 
-        const okPub = appendToPublic(this.library?.root, {
+        const okPub = appendToPublic(this.config?.root || this.library?.root, {
 
           title: c.title, rule: c.rule, tags: c.tags,
 
