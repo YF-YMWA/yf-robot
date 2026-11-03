@@ -4875,7 +4875,7 @@ async function loadCardStats() {
           '<h2>' + escapeHtml(c.id) +
           (c.isCurrent ? ' <span class="chip">当前</span>' : '') + '</h2>' +
           '<div class="hint" style="margin-bottom:8px">' +
-          '逻辑库 <b>' + c.logic + '</b> 条 ｜ 知识库 <b>' + c.kb + '</b> 份 ｜ 记忆 <b>' + c.memory + '</b> 份 ｜ 会话 <b>' + c.sessions + '</b> 个' +
+          '逻辑库 <b>' + c.logic + '</b> 条 ｜ 知识库 <b>' + c.kb + '</b> 份 ｜ 词库 <b>' + (c.words||0) + '</b> 个 ｜ 记忆 <b>' + c.memory + '</b> 份 ｜ 会话 <b>' + c.sessions + '</b> 个' +
           '</div>' +
           (c.isCurrent
             ? '<div style="display:flex;gap:8px;flex-wrap:wrap">' +

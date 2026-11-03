@@ -305,6 +305,9 @@ export class AdminApi {
    * 由引擎在后台调用，不能抛错影响对话。
    */
   async #runAutoLearn(cfg = {}) {
+    if (this.lastCardSwitchAt && Date.now() - this.lastCardSwitchAt < 60000) {
+      return { ok: true, skipped: '刚切过角色卡，先不跑自动学习' };
+    }
     const mode = cfg.mode === 'media' ? 'media' : 'words';
 
     if (mode === 'media') {
@@ -1283,6 +1286,13 @@ export class AdminApi {
             return 0;
           }
         };
+        const countTxt = (dir) => {
+          try {
+            return fs.readdirSync(dir).filter((n) => n.endsWith('.txt')).length;
+          } catch {
+            return 0;
+          }
+        };
         const countRules = (file) => {
           try {
             const j = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -1305,6 +1315,7 @@ export class AdminApi {
                 id: d.name,
                 isCurrent: d.name === cur,
                 logic: countRules(path.join(dir, 'logic.json')),
+                words: countTxt(path.join(dir, 'words')),
                 kb: countJson(path.join(dir, 'kb')),
                 memory: countJson(path.join(dir, 'memory')),
                 sessions: countJson(path.join(dir, 'sessions')),
@@ -6499,6 +6510,8 @@ print('%016x' % bits)
 
     // 同步内存
     this.config.card = id;
+    // 记录切卡时间：后台学习在这之后 60 秒内跳过，避免写错卡
+    this.lastCardSwitchAt = Date.now();
 
     /**
      * 清掉逻辑库缓存：它构造时就绑定了卡片，

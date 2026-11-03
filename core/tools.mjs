@@ -763,6 +763,7 @@ export class ToolKit {
           const r = await this.learner.learnFromUrl(url, {
             topic: String(args.topic || '').trim(),
             mode: this.config?.logic?.autoLearn?.mode === 'pending' ? 'pending' : 'active',
+            scope: String(args.scope || 'card') === 'public' ? 'public' : 'card',
           });
           if (!r.ok) return `（学习失败：${r.error}）`;
           if (!r.added?.length) return '（这个页面没提炼出可用的经验）';

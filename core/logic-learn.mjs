@@ -74,6 +74,27 @@ export function parseRulesJson(raw) {
     .slice(0, MAX_PER_LEARN);
 }
 
+
+/** 写一条到公共逻辑库（同标题跳过）。学知识/学经验都能指定公共。 */
+function appendToPublic(root, item) {
+  if (!root) return false;
+  try {
+    const fp = path.join(root, 'data', '_public', 'logic.json');
+    let cur = { rules: [] };
+    try {
+      cur = JSON.parse(fs.readFileSync(fp, 'utf8'));
+    } catch {}
+    cur.rules = Array.isArray(cur.rules) ? cur.rules : [];
+    if (cur.rules.some((r) => String(r.title || '') === String(item.title || ''))) return false;
+    cur.rules.push({ ...item, scope: 'public', createdAt: Date.now() });
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    fs.writeFileSync(fp, JSON.stringify(cur, null, 2), 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class LogicLearner {
   /**
    * @param {object} opts
@@ -210,6 +231,27 @@ export class LogicLearner {
         skipped.push({ ...c, reason: bad });
         continue;
       }
+      // 学到哪：默认本卡；scope=public 写公共库（所有卡共用）
+
+      if (opts.scope === 'public') {
+
+        const okPub = appendToPublic(this.library?.root, {
+
+          title: c.title, rule: c.rule, tags: c.tags,
+
+          source: 'web', sourceUrl: page.finalUrl, status: mode,
+
+        });
+
+        if (okPub) added.push({ ...c, scope: 'public' });
+
+        else skipped.push({ ...c, reason: '公共库已有同名条目' });
+
+        continue;
+
+      }
+
+
       const r = this.library.add({
         title: c.title,
         rule: c.rule,
