@@ -111,6 +111,41 @@ export class LogicLearner {
    * @param {number} [opts.dailyCount] 今天已经学了几条（由调用方维护）
    * @returns {Promise<{ok:boolean, added?:Array, skipped?:Array, error?:string, url?:string}>}
    */
+  /**
+   * 把一个网页的正文收进知识库（当前角色卡的 kb）。
+   *
+   * 和「学经验」不同：这里不提炼做法，只把原文切块存进去，
+   * 以后检索到就当时参考。
+   */
+  async learnToKb(url, opts = {}) {
+    if (!this.enabled) return { ok: false, error: '联网学习没开（控制台里打开）' };
+    let page;
+    try {
+      page = await safeFetchText(url, { maxBytes: 512 * 1024, timeoutMs: 15000, log: this.log });
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+    const isHtml = /<html|<body|<div/i.test(page.text.slice(0, 500));
+    const text = isHtml ? htmlToPlainText(page.text) : page.text;
+    if (text.length < 200) return { ok: false, error: '页面正文太短，没东西可存' };
+
+    // 写成临时 md 再交给知识库切块/算向量
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const name = (opts.title || page.finalUrl || 'web').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40) + '.md';
+    const tmp = path.join(os.tmpdir(), 'yf-kb-' + Date.now() + '.md');
+    fs.writeFileSync(tmp, '# ' + (opts.title || page.finalUrl) + '\n\n' + text, 'utf8');
+    try {
+      const kb = this.kb ? this.kb() : null;
+      if (!kb) return { ok: false, error: '知识库没启用' };
+      const r = await kb.addFile(tmp);
+      return r.ok ? { ok: true, name, chunks: r.chunks, url: page.finalUrl } : r;
+    } finally {
+      try { fs.unlinkSync(tmp); } catch {}
+    }
+  }
+
   async learnFromUrl(url, opts = {}) {
     if (!this.enabled) {
       return { ok: false, error: '联网学习没开（控制台里打开）' };

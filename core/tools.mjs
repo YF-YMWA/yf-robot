@@ -310,6 +310,25 @@ export class ToolKit {
       },
     ];
 
+    // 学习知识：把网页正文收进知识库
+    defs.push({
+      type: 'function',
+      function: {
+        name: 'learn_knowledge',
+        description:
+          '把一个网页的正文收进知识库（切块保存，以后检索当参考）。' +
+          '和 learn_from_web 不同：那个提炼做法进逻辑库，这个存原文进知识库。',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: '网页地址' },
+            title: { type: 'string', description: '标题（可省，默认用网址）' },
+          },
+          required: ['url'],
+        },
+      },
+    });
+
     // DSH 工具（需要运行环境就绪才提供）
     if (this.dshEnabled) {
       defs.push({

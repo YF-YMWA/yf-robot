@@ -218,6 +218,8 @@ export class ChatEngine {
     // 工具层持有绘图客户端的引用，也要同步
     if (this.tools) {
       this.tools.imagegen = this.imagegen.enabled ? this.imagegen : null;
+      // 学习工具要能拿到 learner（学知识/学经验都靠它）
+      this.tools.learner = this.learner ? this.learner() : null;
     }
 
     this.log.info?.(
@@ -444,6 +446,7 @@ export class ChatEngine {
     if (!this._learner) {
       this._learner = new LogicLearner({
         library: this.logic(),
+        kb: () => this.#kb(), // 学知识用
         llm: this.llm,
         config: this.config,
         log: (m) => this.log.info?.(m),
