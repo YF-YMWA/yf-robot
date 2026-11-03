@@ -5300,6 +5300,8 @@ print('%016x' % bits)
         adapter: { name: '', version: '', root: info?.root || '', reportedAt: info?.at || 0 },
         error: hb ? `适配器心跳已停止（最后 ${Math.round((now - hb.at) / 1000)} 秒前）`
                    : '还没收到过适配器心跳（没有适配器在跑，或者它连不上这个服务）',
+          // 离线也要给 send 字段（null），否则面板/自检读到 undefined 会误判
+          send: null,
         hint: '启动你的适配器；不接平台也能用网页聊天',
       };
     }
