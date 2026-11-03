@@ -528,6 +528,8 @@ export class ChatEngine {
       logic: { search: (...a) => this.logic().search(...a) },
       learner: {
         learnFromUrl: (...a) => this.learner().learnFromUrl(...a),
+        // 学知识：存网页正文进知识库
+        learnToKb: (...a) => this.learner().learnToKb(...a),
       },
       /**
        * 管理能力（仅主人工具会用）。

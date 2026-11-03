@@ -770,6 +770,14 @@ export class ToolKit {
             `学到 ${r.added.length} 条：\n` + r.added.map((x) => `· ${x.title}：${x.rule}`).join('\n')
           );
         }
+        case 'learn_knowledge': {
+          if (!this.learner || !this.learner.learnToKb) return "（联网学习未启用）";
+          const url = String(args.url || "").trim();
+          if (!url) return "（要学哪个网址？）";
+          const r = await this.learner.learnToKb(url, { title: String(args.title || "").trim() });
+            if (!r.ok) return `（学知识失败：${r.error}）`;
+            return `已收进知识库：${r.name}（${r.chunks} 块）`;
+        }
         case 'ask_dsh':
           if (!this.dsh) return '（DSH 调用未启用）';
           {
