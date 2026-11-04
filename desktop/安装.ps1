@@ -33,6 +33,12 @@ $useExe = Test-Path $exe
 $launchTarget = if ($useExe) { $exe } else { 'wscript.exe' }
 $launchArgs = if ($useExe) { '' } else { '"' + $vbs + '"' }
 
+# 解压来的文件带 Mark-of-the-Web，exe 会被 SmartScreen 拦（发布者未知）。
+# 主动解除锁定，避免用户双击后只看到「Windows 已保护你的电脑」。
+foreach ($f in @($exe, $vbs, (Join-Path $Root 'desktop\YFRobotTray.ps1'))) {
+    try { if (Test-Path $f) { Unblock-File -Path $f -ErrorAction SilentlyContinue } } catch { }
+}
+
 if (-not $useExe -and -not (Test-Path $vbs)) {
     [System.Windows.Forms.MessageBox]::Show("找不到启动器：$exe / $vbs", 'YF-Robot 安装') | Out-Null
     exit 1

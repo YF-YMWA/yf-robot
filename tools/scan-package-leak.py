@@ -28,7 +28,9 @@ PATTERNS = [
     ('方舟/火山', re.compile(rb'(?i)ark-[a-z0-9-]{16,}')),
     ('wxid', re.compile(rb'wxid_[a-z0-9]{8,}')),
     ('本机路径', re.compile(rb'C:' + re.escape(chr(92).encode()) + rb'Users' + re.escape(chr(92).encode()) + rb'[A-Za-z0-9_.-]{2,}')),
-    ('下载/桌面', re.compile(rb'(?i)(Downloads|Desktop)' + re.escape(chr(92).encode()) + rb'[A-Za-z0-9_.-]{2,}')),
+    # 只认大写 Desktop/Downloads（Windows 用户目录是首字母大写）。
+    # 本项目自己的 desktop\ 目录是小写，写在小写路径里，不该被当成个人路径。
+    ('下载/桌面', re.compile(rb'(Downloads|Desktop)' + re.escape(chr(92).encode()) + rb'[A-Za-z0-9_.-]{2,}')),
     ('本地令牌', re.compile(rb'(?i)(x-local-token|__TOKEN__)\s*[:=]\s*["\']?[a-f0-9]{32,}')),
     ('私聊内容', re.compile(r'\[(收到|回复) 私聊'.encode())),
 ]

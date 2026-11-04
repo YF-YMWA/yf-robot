@@ -33,7 +33,21 @@ namespace YFRobot
             bool created;
             using (var mutex = new Mutex(true, "YF-Robot-Tray-Exe", out created))
             {
-                if (!created) return; // 已有实例，静默退出
+                if (!created)
+                {
+                    /**
+                     * 已经有实例在跑。以前这里直接 return，用户会觉得"双击没反应"
+                     * （尤其是第一个实例已经缩到托盘的时候）。
+                     * 现在通知它把窗口显示出来。
+                     */
+                    try
+                    {
+                        using (var ev = EventWaitHandle.OpenExisting("YF-Robot-Show"))
+                            ev.Set();
+                    }
+                    catch { }
+                    return;
+                }
 
                 Root = FindRoot();
                 if (Root == null)
@@ -58,7 +72,33 @@ namespace YFRobot
                     try
                     {
                         Program.Log("启动器窗口已打开");
-                        Application.Run(new MainForm(ctx));
+                        var form = new MainForm(ctx);
+
+                        // 第二次双击时，把已有窗口调出来（而不是再开一个进程）
+                        var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "YF-Robot-Show");
+                        var listener = new System.Threading.Thread(delegate()
+                        {
+                            while (true)
+                            {
+                                showEvent.WaitOne();
+                                try
+                                {
+                                    form.BeginInvoke(new Action(delegate()
+                                    {
+                                        form.Show();
+                                        if (form.WindowState == FormWindowState.Minimized)
+                                            form.WindowState = FormWindowState.Normal;
+                                        form.Activate();
+                                        form.BringToFront();
+                                    }));
+                                }
+                                catch { }
+                            }
+                        });
+                        listener.IsBackground = true;
+                        listener.Start();
+
+                        Application.Run(form);
                     }
                     catch (Exception ex)
                     {
