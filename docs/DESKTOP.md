@@ -73,18 +73,22 @@ YF-Robot 现在像正常软件一样用：**双击桌面图标启动，右下角
 
 ---
 
-## 为什么不是 exe
+## 启动器：exe（必要时回退 vbs）
 
-本来想编译一个 C# exe（`desktop/YFRobotTray.cs` 已写好），
-但本机安全软件会拦 `csc.exe` 写临时文件（`error CS1567: 拒绝访问`），
-所以改用 **PowerShell + WinForms 托盘**，由 `wscript` 以隐藏窗口拉起：
+主启动器是 `desktop\YF-Robot.exe`（约 14 KB，托盘程序，双击无黑窗口）。
+**exe 就在 `desktop\` 目录里**，和 `YF-Robot.vbs` 放在一起。
 
+重新编译（不需要装 .NET SDK，用 Windows 自带的 csc）：
+
+```bat
+runtime\node.exe tools\build-desktop.mjs
 ```
-YF-Robot.vbs  →  powershell -WindowStyle Hidden -File YFRobotTray.ps1
-```
 
-效果一样（有图标、有菜单、无黑窗口），而且不依赖任何编译器。
-安全软件放行 `csc.exe` 之后，`tools/build-desktop.mjs` 可以直接编出 exe。
+> 编译时会把 csc 的临时目录指到 `.tmp\ctmp`。
+> 用系统默认 TEMP 时，部分安全软件会拦 csc 写临时文件（报 CS1567 拒绝访问）。
+
+没有 exe 时，安装器会自动回退到 `desktop\YF-Robot.vbs`（PowerShell 版托盘），
+功能一致（图标变色、自动重启、日志），只是启动慢一点。两条路径都实测过。
 
 ---
 

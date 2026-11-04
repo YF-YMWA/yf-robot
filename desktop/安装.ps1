@@ -26,8 +26,15 @@ if (-not $Root) {
 }
 
 $vbs = Join-Path $Root 'desktop\YF-Robot.vbs'
-if (-not (Test-Path $vbs)) {
-    [System.Windows.Forms.MessageBox]::Show("找不到启动器：$vbs", 'YF-Robot 安装') | Out-Null
+$exe = Join-Path $Root 'desktop\YF-Robot.exe'
+
+# 优先用 exe（托盘程序）；没有 exe 就回退到 vbs（PowerShell 版托盘）
+$useExe = Test-Path $exe
+$launchTarget = if ($useExe) { $exe } else { 'wscript.exe' }
+$launchArgs = if ($useExe) { '' } else { '"' + $vbs + '"' }
+
+if (-not $useExe -and -not (Test-Path $vbs)) {
+    [System.Windows.Forms.MessageBox]::Show("找不到启动器：$exe / $vbs", 'YF-Robot 安装') | Out-Null
     exit 1
 }
 
@@ -36,14 +43,15 @@ try { $ver = (Get-Content (Join-Path $Root 'package.json') -Raw -Encoding UTF8 |
 
 $shell = New-Object -ComObject WScript.Shell
 $icon = Join-Path $Root 'desktop\YF-Robot.ico'
-$iconTarget = if (Test-Path $icon) { $icon } else { 'wscript.exe' }
+$iconTarget = if (Test-Path $icon) { $icon } elseif (Test-Path (Join-Path $Root 'desktop\YF-Robot.exe')) { Join-Path $Root 'desktop\YF-Robot.exe' } else { 'wscript.exe' }
 
 function New-Shortcut($path, $target, $arguments, $desc) {
     $sc = $shell.CreateShortcut($path)
     $sc.TargetPath = $target
     # 注意：参数名不能叫 $args —— 那是 PowerShell 的自动变量，写了也不生效，
     # 结果快捷方式参数为空，wscript 会在没有脚本时打开「脚本宿主设置」窗口。
-    if ($arguments) { $sc.Arguments = $arguments }
+    # 必须无条件赋值：CreateShortcut 会读入已有的 .lnk，不清空的话旧参数会残留
+    $sc.Arguments = if ($arguments) { $arguments } else { '' }
     $sc.WorkingDirectory = $Root
     $sc.Description = $desc
     if ($iconTarget -ne 'wscript.exe') { $sc.IconLocation = $iconTarget }
@@ -55,8 +63,8 @@ $desktop = [Environment]::GetFolderPath('Desktop')
 $startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'YF-Robot'
 
 New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
-New-Shortcut (Join-Path $desktop 'YF-Robot.lnk') 'wscript.exe' ('"' + $vbs + '"') 'YF-Robot 启动器'
-New-Shortcut (Join-Path $startMenu 'YF-Robot.lnk') 'wscript.exe' ('"' + $vbs + '"') 'YF-Robot 启动器'
+New-Shortcut (Join-Path $desktop 'YF-Robot.lnk') $launchTarget $launchArgs 'YF-Robot 启动器'
+New-Shortcut (Join-Path $startMenu 'YF-Robot.lnk') $launchTarget $launchArgs 'YF-Robot 启动器'
 New-Shortcut (Join-Path $startMenu '打开数据目录.lnk') 'explorer.exe' ('"' + (Join-Path $Root 'data') + '"') 'YF-Robot 数据目录'
 New-Shortcut (Join-Path $startMenu '卸载 YF-Robot.lnk') 'wscript.exe' ('"' + (Join-Path $Root 'desktop\卸载.vbs') + '"') '卸载 YF-Robot'
 
@@ -89,5 +97,5 @@ if (-not $silent) {
         "安装完成（版本 $ver）`n`n桌面和开始菜单都有图标了。`n右键托盘图标可以：打开控制台 / 重启服务 / 开机自启 / 退出。",
         'YF-Robot 安装', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
 } else {
-    Write-Host "安装完成（静默）：$Root"
+    Write-Host ("安装完成（静默）：$Root  启动器=" + $launchTarget)
 }

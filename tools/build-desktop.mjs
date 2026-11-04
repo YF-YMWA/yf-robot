@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 const ROOT = process.cwd();
 const SRC = path.join(ROOT, 'desktop', 'YFRobotTray.cs');
 // 先编译到临时目录再搬过来：某些安全软件会拦 csc 直接往项目目录写 exe
-const OUT = path.join(os.tmpdir(), 'YF-Robot-' + Date.now() + '.exe');
+const OUT = path.join(ROOT, '.tmp', 'ctmp', 'YF-Robot.exe');
 const FINAL = path.join(ROOT, 'desktop', 'YF-Robot.exe');
 
 /** 找 csc.exe：优先 64 位 .NET Framework 4 */
@@ -19,6 +19,9 @@ function findCsc() {
   for (const c of candidates) if (fs.existsSync(c)) return c;
   return null;
 }
+
+const TMPDIR = path.join(ROOT, '.tmp', 'ctmp');
+fs.mkdirSync(TMPDIR, { recursive: true });
 
 const csc = findCsc();
 if (!csc) {
@@ -43,11 +46,17 @@ const args = [
   '/reference:System.Windows.Forms.dll',
   '/reference:System.Drawing.dll',
   '/reference:System.Core.dll',
+  '/reference:System.Management.dll',
   SRC,
 ];
 
 try {
-  const out = execFileSync(csc, args, { encoding: 'utf8', timeout: 120000 });
+  const out = execFileSync(csc, args, {
+    encoding: 'utf8',
+    timeout: 120000,
+    // 临时目录指到项目内：csc 默认写系统 TEMP，某些安全软件会拦（CS1567）
+    env: { ...process.env, TMP: TMPDIR, TEMP: TMPDIR },
+  });
   if (out.trim()) console.log(out.trim());
 } catch (e) {
   console.error('  编译失败：');
