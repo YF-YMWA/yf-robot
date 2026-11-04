@@ -38,10 +38,12 @@ $shell = New-Object -ComObject WScript.Shell
 $icon = Join-Path $Root 'desktop\YF-Robot.ico'
 $iconTarget = if (Test-Path $icon) { $icon } else { 'wscript.exe' }
 
-function New-Shortcut($path, $target, $args, $desc) {
+function New-Shortcut($path, $target, $arguments, $desc) {
     $sc = $shell.CreateShortcut($path)
     $sc.TargetPath = $target
-    if ($args) { $sc.Arguments = $args }
+    # 注意：参数名不能叫 $args —— 那是 PowerShell 的自动变量，写了也不生效，
+    # 结果快捷方式参数为空，wscript 会在没有脚本时打开「脚本宿主设置」窗口。
+    if ($arguments) { $sc.Arguments = $arguments }
     $sc.WorkingDirectory = $Root
     $sc.Description = $desc
     if ($iconTarget -ne 'wscript.exe') { $sc.IconLocation = $iconTarget }
