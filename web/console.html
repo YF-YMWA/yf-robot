@@ -444,6 +444,9 @@
   /* 页面切换动画 */
   .page.active { animation: yfFade .22s ease; }
   @keyframes yfFade { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+  /* 嵌进启动器（?embed=1）时隐藏自带侧栏 */
+  body.yf-embed aside { display: none !important; }
+  body.yf-embed main { max-width: none; padding: 18px 22px 40px; }
 </style>
 </head>
 <body>
@@ -7695,6 +7698,10 @@ loadAll();
 setInterval(loadStatus, 10000);
 // 让服务知道这个页面还开着（「关网页即停服务」靠它判断）
 startConsolePing();
+</script>
+<script>
+  // 被启动器内嵌时隐藏页面自己的侧栏（外层已有导航）
+  try { if (location.search.indexOf('embed=1') >= 0) document.body.classList.add('yf-embed'); } catch (e) {}
 </script>
 </body>
 </html>

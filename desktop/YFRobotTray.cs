@@ -18,6 +18,8 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using Microsoft.Web.WebView2.WinForms;
+using Microsoft.Web.WebView2.Core;
 
 namespace YFRobot
 {
@@ -153,6 +155,7 @@ namespace YFRobot
         bool _exiting;
         readonly bool OpenOnStart;
 
+        public string BaseUrlOut { get { return BaseUrl(); } }
         public string VersionText { get { return _version; } }
         public int PortText { get { return _port; } }
         public bool ServiceUp { get { return IsServiceUp(); } }
@@ -753,7 +756,7 @@ namespace YFRobot
         static readonly Color Green = Color.FromArgb(52, 211, 153);
         static readonly Color Red = Color.FromArgb(251, 113, 133);
 
-        static readonly string[] Pages = { "概览", "插件", "市场", "设置" };
+        static readonly string[] Pages = { "控制台", "概览", "插件", "市场", "设置" };
 
         public MainForm(TrayContext ctx)
         {
@@ -782,7 +785,7 @@ namespace YFRobot
 
             _timer = new System.Windows.Forms.Timer();
             _timer.Interval = 3000;
-            _timer.Tick += delegate { if (_page == 0) RefreshOverview(); };
+            _timer.Tick += delegate { if (_page == 1) RefreshOverview(); };
             _timer.Start();
 
             FormClosing += delegate(object s2, FormClosingEventArgs e2)
@@ -878,12 +881,55 @@ namespace YFRobot
             _content.Controls.Clear();
             switch (index)
             {
-                case 0: BuildOverview(_content); break;
-                case 1: BuildPlugins(_content); break;
-                case 2: BuildMarket(_content); break;
+                case 0: BuildConsole(_content); break;
+                case 1: BuildOverview(_content); break;
+                case 2: BuildPlugins(_content); break;
+                case 3: BuildMarket(_content); break;
                 default: BuildSettings(_content); break;
             }
             _content.Refresh();
+        }
+
+        // ================= 控制台（内嵌网页） =================
+        WebView2 _web;
+
+        /// <summary>
+        /// 把网页控制台嵌进窗口。
+        ///
+        /// 之前是另开一个 Edge 应用窗口，观感割裂、还容易白屏；
+        /// 本机自带 WebView2 运行时，直接嵌进来即可。
+        /// </summary>
+        void BuildConsole(Panel page)
+        {
+            try
+            {
+                // 用户数据放到 data/ 下，别乱写到 desktop/（那是源码目录）
+                Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", Path.Combine(Program.Root, "data", "webview2"));
+                _web = new WebView2();
+                _web.Dock = DockStyle.Fill;
+                page.Controls.Add(_web);
+
+                _web.CoreWebView2InitializationCompleted += delegate(object s3, CoreWebView2InitializationCompletedEventArgs e3)
+                {
+                    if (!e3.IsSuccess) return;
+                    _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+                    _web.CoreWebView2.Settings.IsStatusBarEnabled = false;
+                    try { _web.Source = new Uri(_ctx.BaseUrlOut + "/console?embed=1"); } catch { }
+                };
+
+                // 初始化是异步的：先发起，完成后在回调里导航
+                _web.EnsureCoreWebView2Async(null);
+            }
+            catch (Exception ex)
+            {
+                var tip = new Label();
+                tip.Text = "内嵌浏览器起不来：" + ex.Message + "\n\n点左侧「概览」→「网页版（浏览器）」照样能用。";
+                tip.ForeColor = DimC;
+                tip.Dock = DockStyle.Fill;
+                tip.TextAlign = ContentAlignment.MiddleCenter;
+                page.Controls.Add(tip);
+                Program.Log("WebView2 初始化失败：" + ex.Message);
+            }
         }
 
         // ================= 概览 =================

@@ -49,6 +49,8 @@ const args = [
   '/reference:System.Management.dll',
   '/reference:System.IO.Compression.dll',
   '/reference:System.IO.Compression.FileSystem.dll',
+  '/reference:' + path.join(ROOT, 'desktop', 'lib', 'Microsoft.Web.WebView2.Core.dll'),
+  '/reference:' + path.join(ROOT, 'desktop', 'lib', 'Microsoft.Web.WebView2.WinForms.dll'),
   SRC,
 ];
 

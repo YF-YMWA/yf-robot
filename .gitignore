@@ -103,3 +103,7 @@ tools/scan-leak*.py
 *.txt.bak
 resources/*.bak
 resources/*.txt.*.bak
+
+# WebView2 运行时数据（浏览器缓存/COOKIE，不是源码）
+desktop/*.WebView2/
+*.WebView2/
