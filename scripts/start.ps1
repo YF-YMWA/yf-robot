@@ -1,5 +1,4 @@
 ﻿# 鲸鲸 · 启动器
-# 照搬 whale-girl 的做法：清代理、设编码、找运行时、启动服务
 param(
   [switch]$NoBrowser,
   [switch]$Check,

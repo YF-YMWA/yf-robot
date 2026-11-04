@@ -70,6 +70,8 @@ const INCLUDE = [
   'examples',
   // 启动脚本：YF-Robot.bat 会调 scripts\start.ps1，漏了就打不开
   'scripts',
+  // 桌面软件化：托盘脚本 + 安装/卸载
+  'desktop',
   // 所有用户入口，一个都不能漏 —— 之前漏过三个，对方拿到手上只有主菜单
   '启动服务.bat',
   'YF-Robot.bat',
@@ -77,6 +79,7 @@ const INCLUDE = [
   '工具菜单.bat',
   '桌面控制台.bat',
   '桌面聊天.bat',
+  '安装软件.bat',
   // 这三个是后加的入口，之前漏了 —— 用户找不到备份/恢复/开机自启
   '备份记忆.bat',
   '恢复记忆.bat',

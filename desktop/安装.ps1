@@ -1,0 +1,91 @@
+﻿# 安装 YF-Robot（当前用户，不需要管理员）
+#
+# 做三件事：
+#   1. 在桌面和开始菜单建快捷方式（指向 desktop\YF-Robot.vbs，双击无黑窗口）
+#   2. 在「控制面板 → 程序和功能」里登记卸载项
+#   3. 可选：开机自启
+#
+# 不复制文件、不改系统目录 —— 在哪解压就在哪运行，卸载也只删快捷方式和注册表项。
+
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+
+function Find-Root {
+    $dir = Split-Path -Parent $PSCommandPath
+    for ($i = 0; $i -lt 4 -and $dir; $i++) {
+        if (Test-Path (Join-Path $dir 'package.json')) { return $dir }
+        $dir = Split-Path -Parent $dir
+    }
+    return $null
+}
+
+$Root = Find-Root
+if (-not $Root) {
+    [System.Windows.Forms.MessageBox]::Show('找不到程序目录（package.json 所在文件夹）。', 'YF-Robot 安装') | Out-Null
+    exit 1
+}
+
+$vbs = Join-Path $Root 'desktop\YF-Robot.vbs'
+if (-not (Test-Path $vbs)) {
+    [System.Windows.Forms.MessageBox]::Show("找不到启动器：$vbs", 'YF-Robot 安装') | Out-Null
+    exit 1
+}
+
+$ver = '0.0.0'
+try { $ver = (Get-Content (Join-Path $Root 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version } catch { }
+
+$shell = New-Object -ComObject WScript.Shell
+$icon = Join-Path $Root 'desktop\YF-Robot.ico'
+$iconTarget = if (Test-Path $icon) { $icon } else { 'wscript.exe' }
+
+function New-Shortcut($path, $target, $args, $desc) {
+    $sc = $shell.CreateShortcut($path)
+    $sc.TargetPath = $target
+    if ($args) { $sc.Arguments = $args }
+    $sc.WorkingDirectory = $Root
+    $sc.Description = $desc
+    if ($iconTarget -ne 'wscript.exe') { $sc.IconLocation = $iconTarget }
+    $sc.Save()
+}
+
+# ===== 1. 快捷方式 =====
+$desktop = [Environment]::GetFolderPath('Desktop')
+$startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'YF-Robot'
+
+New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
+New-Shortcut (Join-Path $desktop 'YF-Robot.lnk') 'wscript.exe' ('"' + $vbs + '"') 'YF-Robot 启动器'
+New-Shortcut (Join-Path $startMenu 'YF-Robot.lnk') 'wscript.exe' ('"' + $vbs + '"') 'YF-Robot 启动器'
+New-Shortcut (Join-Path $startMenu '打开数据目录.lnk') 'explorer.exe' ('"' + (Join-Path $Root 'data') + '"') 'YF-Robot 数据目录'
+New-Shortcut (Join-Path $startMenu '卸载 YF-Robot.lnk') 'wscript.exe' ('"' + (Join-Path $Root 'desktop\卸载.vbs') + '"') '卸载 YF-Robot'
+
+# ===== 2. 卸载登记（当前用户）=====
+$uninstKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\YF-Robot'
+New-Item -Path $uninstKey -Force | Out-Null
+Set-ItemProperty -Path $uninstKey -Name 'DisplayName' -Value 'YF-Robot'
+Set-ItemProperty -Path $uninstKey -Name 'DisplayVersion' -Value $ver
+Set-ItemProperty -Path $uninstKey -Name 'Publisher' -Value 'YF-YMWA'
+Set-ItemProperty -Path $uninstKey -Name 'InstallLocation' -Value $Root
+Set-ItemProperty -Path $uninstKey -Name 'UninstallString' -Value ('wscript.exe "' + (Join-Path $Root 'desktop\卸载.vbs') + '"')
+Set-ItemProperty -Path $uninstKey -Name 'NoModify' -Value 1 -Type DWord
+Set-ItemProperty -Path $uninstKey -Name 'NoRepair' -Value 1 -Type DWord
+
+# ===== 3. 开机自启（问一句）=====
+$silent = ($env:YF_SILENT -eq '1')
+$r = if ($silent) { 'No' } else {
+    [System.Windows.Forms.MessageBox]::Show('要开机自动启动吗？（可以以后在托盘菜单里改）', 'YF-Robot 安装',
+        [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+}
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+if ($r -eq 'Yes') {
+    Set-ItemProperty -Path $runKey -Name 'YF-Robot' -Value ('wscript.exe "' + $vbs + '"')
+} else {
+    Remove-ItemProperty -Path $runKey -Name 'YF-Robot' -ErrorAction SilentlyContinue
+}
+
+if (-not $silent) {
+    [System.Windows.Forms.MessageBox]::Show(
+        "安装完成（版本 $ver）`n`n桌面和开始菜单都有图标了。`n右键托盘图标可以：打开控制台 / 重启服务 / 开机自启 / 退出。",
+        'YF-Robot 安装', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+} else {
+    Write-Host "安装完成（静默）：$Root"
+}
