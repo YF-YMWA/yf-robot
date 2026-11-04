@@ -399,7 +399,8 @@ document.getElementById('reset').addEventListener('click', async () => {
 });
 
 fetch('/api/status').then(r => r.json()).then(s => {
-  document.getElementById('title').textContent = '鲸鲸 · ' + s.model;
+  // 标题只显示角色名（不拼模型名）
+  document.getElementById('title').textContent = s.cardName || '聊天';
 }).catch(() => {});
 
 input.focus();

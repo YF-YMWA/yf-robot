@@ -1,0 +1,14 @@
+{
+  "note": "插件市场索引示例：把 items 换成真实插件条目即可，download 指向 zip。",
+  "version": 1,
+  "items": [
+    {
+      "id": "demo-dice-notes",
+      "name": "示例插件 · 掷骰子与便签",
+      "version": "1.0.0",
+      "author": "YF-Robot",
+      "description": "仓库自带的示例插件（已随包提供，无需下载）",
+      "download": ""
+    }
+  ]
+}
