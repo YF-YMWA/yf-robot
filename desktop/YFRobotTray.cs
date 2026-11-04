@@ -756,7 +756,8 @@ namespace YFRobot
         static readonly Color Green = Color.FromArgb(52, 211, 153);
         static readonly Color Red = Color.FromArgb(251, 113, 133);
 
-        static readonly string[] Pages = { "控制台", "概览", "插件", "市场", "设置" };
+        static readonly string[] Pages = { "控制台", "聊天", "概览", "插件", "市场", "设置" };
+        static readonly string[] PageIcons = { "▤", "✎", "◎", "⬡", "⇩", "⚙" };
 
         public MainForm(TrayContext ctx)
         {
@@ -764,29 +765,42 @@ namespace YFRobot
             Text = "YF-Robot";
             ClientSize = new Size(788, 556);
             StartPosition = FormStartPosition.CenterScreen;
-            FormBorderStyle = FormBorderStyle.Sizable;
-            MaximizeBox = true;
-            MinimumSize = new Size(860, 600);
+            // 无边框：自绘标题栏，观感更接近现代启动器
+            FormBorderStyle = FormBorderStyle.None;
+            MinimumSize = new Size(900, 620);
             Icon = IconFromText("Y", Color.FromArgb(99, 102, 241));
+            DoubleBuffered = true;
+            Padding = new Padding(1);
             BackColor = Bg;
             ForeColor = Txt;
             Font = new Font("Microsoft YaHei UI", 9f);
 
             // 注意顺序：Fill 的面板要先加，Dock.Left 的侧栏后加，
             // 否则 Fill 会把侧栏盖住（WinForms 按反向 z 序排版）。
+            var bar = BuildTitleBar();
+            Controls.Add(bar);
+
+            var body = new Panel();
+            body.Dock = DockStyle.Fill;
+            body.BackColor = Bg;
+            Controls.Add(body);
+
             _content = new Panel();
             _content.Dock = DockStyle.Fill;
             _content.BackColor = Bg;
-            Controls.Add(_content);
+            body.Controls.Add(_content);
 
-            BuildSidebar();
+            BuildSidebar(body);
 
             ShowPage(0);
 
             _timer = new System.Windows.Forms.Timer();
             _timer.Interval = 3000;
-            _timer.Tick += delegate { if (_page == 1) RefreshOverview(); };
+            _timer.Tick += delegate { if (_page == 2) RefreshOverview(); };
             _timer.Start();
+
+            Resize += delegate { RoundCorners(); };
+            Shown += delegate { RoundCorners(); };
 
             FormClosing += delegate(object s2, FormClosingEventArgs e2)
             {
@@ -800,8 +814,147 @@ namespace YFRobot
             };
         }
 
+        // ================= 无边框窗口 =================
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool ReleaseCapture();
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
+
+        const int WM_NCLBUTTONDOWN = 0xA1;
+        const int HTCAPTION = 0x2;
+        const int WM_NCHITTEST = 0x84;
+        const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13,
+                  HTTOPRIGHT = 14, HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
+
+        void DragWindow()
+        {
+            ReleaseCapture();
+            SendMessage(Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        }
+
+        /// <summary>无边框窗口默认不能拖边缘缩放，这里自己算命中区域。</summary>
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_NCHITTEST)
+            {
+                base.WndProc(ref m);
+                var p = PointToClient(new Point(m.LParam.ToInt32() & 0xFFFF, m.LParam.ToInt32() >> 16));
+                const int g = 6;
+                bool l = p.X <= g, r = p.X >= ClientSize.Width - g;
+                bool t = p.Y <= g, b = p.Y >= ClientSize.Height - g;
+                if (t && l) m.Result = (IntPtr)HTTOPLEFT;
+                else if (t && r) m.Result = (IntPtr)HTTOPRIGHT;
+                else if (b && l) m.Result = (IntPtr)HTBOTTOMLEFT;
+                else if (b && r) m.Result = (IntPtr)HTBOTTOMRIGHT;
+                else if (l) m.Result = (IntPtr)HTLEFT;
+                else if (r) m.Result = (IntPtr)HTRIGHT;
+                else if (t) m.Result = (IntPtr)HTTOP;
+                else if (b) m.Result = (IntPtr)HTBOTTOM;
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        /// <summary>圆角窗口（改尺寸时重算）。</summary>
+        void RoundCorners()
+        {
+            try
+            {
+                var path = new System.Drawing.Drawing2D.GraphicsPath();
+                int r = 14;
+                var b = new Rectangle(0, 0, Width, Height);
+                path.AddArc(b.X, b.Y, r, r, 180, 90);
+                path.AddArc(b.Right - r, b.Y, r, r, 270, 90);
+                path.AddArc(b.Right - r, b.Bottom - r, r, r, 0, 90);
+                path.AddArc(b.X, b.Bottom - r, r, r, 90, 90);
+                path.CloseFigure();
+                Region = new Region(path);
+            }
+            catch { }
+        }
+
+        /// <summary>自绘标题栏：拖动 + 最小化/最大化/关闭。</summary>
+        Panel BuildTitleBar()
+        {
+            var bar = new Panel();
+            bar.Dock = DockStyle.Top;
+            bar.Height = 44;
+            bar.BackColor = Side;
+            bar.MouseDown += delegate(object s2, MouseEventArgs e2) { if (e2.Button == MouseButtons.Left) DragWindow(); };
+
+            var dot = new Label();
+            dot.Text = "◉";
+            dot.Font = new Font("Segoe UI", 11f);
+            dot.ForeColor = Acc;
+            dot.Location = new Point(16, 12);
+            dot.AutoSize = true;
+            dot.MouseDown += delegate(object s2, MouseEventArgs e2) { if (e2.Button == MouseButtons.Left) DragWindow(); };
+            bar.Controls.Add(dot);
+
+            var t = new Label();
+            t.Text = "YF-Robot";
+            t.Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
+            t.ForeColor = Txt;
+            t.Location = new Point(38, 13);
+            t.AutoSize = true;
+            t.MouseDown += delegate(object s2, MouseEventArgs e2) { if (e2.Button == MouseButtons.Left) DragWindow(); };
+            bar.Controls.Add(t);
+
+            var min = TitleButton("—", bar);
+            var max = TitleButton("□", bar);
+            var close = TitleButton("✕", bar);
+            min.Click += delegate { WindowState = FormWindowState.Minimized; };
+            max.Click += delegate
+            {
+                WindowState = WindowState == FormWindowState.Maximized
+                    ? FormWindowState.Normal : FormWindowState.Maximized;
+            };
+            close.Click += delegate
+            {
+                Hide();
+                ShowInTaskbar = false;
+                _ctx.ShowTrayMenu();
+            };
+            close.MouseEnter += delegate { close.BackColor = Color.FromArgb(196, 43, 28); };
+            close.MouseLeave += delegate { close.BackColor = Side; };
+
+            // 从右往左排
+            int right = 8;
+            foreach (var b in new[] { close, max, min })
+            {
+                b.Location = new Point(bar.Width - right - 40, 8);
+                right += 44;
+                b.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            }
+            bar.Resize += delegate
+            {
+                int rr = 8;
+                foreach (var b in new[] { close, max, min })
+                {
+                    b.Location = new Point(bar.Width - rr - 40, 8);
+                    rr += 44;
+                }
+            };
+            return bar;
+        }
+
+        Label TitleButton(string text, Control bar)
+        {
+            var b = new Label();
+            b.Text = text;
+            b.Size = new Size(40, 28);
+            b.ForeColor = DimC;
+            b.TextAlign = ContentAlignment.MiddleCenter;
+            b.Font = new Font("Segoe UI", 10f);
+            b.Cursor = Cursors.Hand;
+            bar.Controls.Add(b);
+            b.MouseEnter += delegate { b.BackColor = Color.FromArgb(28, 34, 48); b.ForeColor = Txt; };
+            b.MouseLeave += delegate { b.BackColor = Side; b.ForeColor = DimC; };
+            return b;
+        }
+
         // ================= 侧栏 =================
-        void BuildSidebar()
+        void BuildSidebar(Control host)
         {
             var side = new Panel();
             side.Dock = DockStyle.Left;
@@ -812,7 +965,7 @@ namespace YFRobot
                 using (var pen = new Pen(Brd))
                     e3.Graphics.DrawLine(pen, side.Width - 1, 0, side.Width - 1, side.Height);
             };
-            Controls.Add(side);
+            host.Controls.Add(side);
 
             var logo = new Label();
             logo.Text = "◉";
@@ -842,7 +995,7 @@ namespace YFRobot
             {
                 var idx = i;
                 var item = new Label();
-                item.Text = Pages[i];
+                item.Text = PageIcons[i] + "   " + Pages[i];
                 item.Font = new Font("Microsoft YaHei UI", 10f);
                 item.ForeColor = DimC;
                 item.Location = new Point(0, 92 + i * 40);
@@ -881,10 +1034,11 @@ namespace YFRobot
             _content.Controls.Clear();
             switch (index)
             {
-                case 0: BuildConsole(_content); break;
-                case 1: BuildOverview(_content); break;
-                case 2: BuildPlugins(_content); break;
-                case 3: BuildMarket(_content); break;
+                case 0: BuildWeb(_content, "/console?embed=1"); break;
+                case 1: BuildWeb(_content, "/"); break;
+                case 2: BuildOverview(_content); break;
+                case 3: BuildPlugins(_content); break;
+                case 4: BuildMarket(_content); break;
                 default: BuildSettings(_content); break;
             }
             _content.Refresh();
@@ -899,7 +1053,7 @@ namespace YFRobot
         /// 之前是另开一个 Edge 应用窗口，观感割裂、还容易白屏；
         /// 本机自带 WebView2 运行时，直接嵌进来即可。
         /// </summary>
-        void BuildConsole(Panel page)
+        void BuildWeb(Panel page, string path)
         {
             try
             {
@@ -914,7 +1068,12 @@ namespace YFRobot
                     if (!e3.IsSuccess) return;
                     _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
                     _web.CoreWebView2.Settings.IsStatusBarEnabled = false;
-                    try { _web.Source = new Uri(_ctx.BaseUrlOut + "/console?embed=1"); } catch { }
+                    // 记住上次滚动位置会让人以为页面缺了头部，导航完回到顶部
+                    _web.NavigationCompleted += delegate(object s4, CoreWebView2NavigationCompletedEventArgs e4)
+                    {
+                        try { _web.ExecuteScriptAsync("window.scrollTo(0,0)"); } catch { }
+                    };
+                    try { _web.Source = new Uri(_ctx.BaseUrlOut + path); } catch { }
                 };
 
                 // 初始化是异步的：先发起，完成后在回调里导航
@@ -946,8 +1105,8 @@ namespace YFRobot
             _adpText = Line(44, 56, "适配器：检查中…", card, DimC);
 
             Section(page, "服务", 24, 192);
-            Btn(page, "打开控制台", 24, 218, 176, delegate { _ctx.OpenConsole(); }, true);
-            Btn(page, "聊天窗口", 208, 218, 176, delegate { _ctx.OpenChat(); }, false);
+            Btn(page, "打开控制台", 24, 218, 176, delegate { ShowPage(0); }, true);
+            Btn(page, "聊天窗口", 208, 218, 176, delegate { ShowPage(1); }, false);
             Btn(page, "重启服务", 392, 218, 192, delegate { _ctx.DoRestart(); }, false);
 
             Btn(page, "停止服务", 24, 262, 176, delegate { StopAll(); }, false);
