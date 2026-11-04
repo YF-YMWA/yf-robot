@@ -110,6 +110,11 @@ namespace YFRobot
             Program.Log("托盘启动（版本 " + _version + "，端口 " + _port + "）");
             EnsureService(false);
 
+            // 第一次显示气泡：否则图标若在托盘溢出区，用户会以为"运行了但什么都没发生"
+            _tray.ShowBalloonTip(3500, Program.AppName + " 已启动",
+                "右键托盘图标可以打开控制台 / 重启服务 / 退出。双击直接开控制台。",
+                ToolTipIcon.Info);
+
             _timer = new System.Windows.Forms.Timer();
             _timer.Interval = 5000;
             _timer.Tick += delegate { UpdateState(); };
@@ -331,9 +336,42 @@ namespace YFRobot
             return m;
         }
 
+        /// <summary>
+        /// 打开控制台。
+        ///
+        /// 用 Edge/Chrome 的 --app 模式：没有地址栏和标签页，看起来像独立软件，
+        /// 而不是"在浏览器里开了个网页"。都没有时才退回默认浏览器。
+        /// </summary>
         void OpenConsole()
         {
-            try { Process.Start(BaseUrl() + "/console"); }
+            var url = BaseUrl() + "/console";
+            var candidates = new[]
+            {
+                Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+                Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+                Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+                Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            };
+
+            foreach (var exe in candidates)
+            {
+                if (!File.Exists(exe)) continue;
+                try
+                {
+                    // 单独的 profile 目录：不影响用户自己的浏览器会话
+                    var profile = Path.Combine(Program.Root, "data", "ui-profile");
+                    Directory.CreateDirectory(profile);
+                    var psi = new ProcessStartInfo();
+                    psi.FileName = exe;
+                    psi.Arguments = "--app=" + url + " --window-size=1280,860 --user-data-dir=\"" + profile + "\"";
+                    psi.UseShellExecute = false;
+                    Process.Start(psi);
+                    return;
+                }
+                catch (Exception ex) { Program.Log("用应用窗口打开失败：" + ex.Message); }
+            }
+
+            try { Process.Start(url); }
             catch (Exception ex)
             {
                 MessageBox.Show("打不开控制台：" + ex.Message + "\n服务是不是还没起来？", Program.AppName);

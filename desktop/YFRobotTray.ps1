@@ -63,6 +63,31 @@ function Write-TrayLog([string]$msg) {
     } catch { }
 }
 
+# 打开控制台：优先 Edge/Chrome 应用窗口（无地址栏，像独立软件）
+function Open-Console {
+    $url = "$Base/console"
+    $cands = @(
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
+        (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+        (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe')
+    )
+    $profile = Join-Path $Root 'data\ui-profile'
+    if (-not (Test-Path $profile)) { New-Item -ItemType Directory -Path $profile -Force | Out-Null }
+
+    foreach ($exe in $cands) {
+        if ($exe -and (Test-Path $exe)) {
+            try {
+                Start-Process -FilePath $exe -ArgumentList @(
+                    "--app=$url", '--window-size=1280,860', "--user-data-dir=$profile"
+                )
+                return
+            } catch { }
+        }
+    }
+    Start-Process $url
+}
+
 function Test-Service {
     try {
         $r = Invoke-WebRequest "$Base/api/adapter/config" -UseBasicParsing -TimeoutSec 2
@@ -146,7 +171,7 @@ $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 
 $miOpen = $menu.Items.Add('打开控制台')
 $miOpen.Add_Click({
-    try { Start-Process "$Base/console" } catch {
+    try { Open-Console } catch {
         [System.Windows.Forms.MessageBox]::Show('打不开控制台，服务可能还没起来。', 'YF-Robot') | Out-Null
     }
 })
@@ -210,7 +235,7 @@ $miExit.Add_Click({
 })
 
 $notify.ContextMenuStrip = $menu
-$notify.Add_DoubleClick({ Start-Process "$Base/console" })
+$notify.Add_DoubleClick({ Open-Console })
 
 function Update-State([switch]$Force) {
     $up = Test-Service
