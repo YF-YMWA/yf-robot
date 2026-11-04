@@ -87,7 +87,12 @@ $r = if ($silent) { 'No' } else {
 }
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 if ($r -eq 'Yes') {
-    Set-ItemProperty -Path $runKey -Name 'YF-Robot' -Value ('wscript.exe "' + $vbs + '"')
+    # 开机自启：优先 exe 的 --silent（只驻留托盘，不弹窗口）
+    if (Test-Path $exe) {
+        Set-ItemProperty -Path $runKey -Name 'YF-Robot' -Value ('"' + $exe + '" --silent')
+    } else {
+        Set-ItemProperty -Path $runKey -Name 'YF-Robot' -Value ('wscript.exe "' + $vbs + '"')
+    }
 } else {
     Remove-ItemProperty -Path $runKey -Name 'YF-Robot' -ErrorAction SilentlyContinue
 }

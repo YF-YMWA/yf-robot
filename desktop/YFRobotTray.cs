@@ -28,7 +28,7 @@ namespace YFRobot
         public static string LogFile;
 
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
             bool created;
             using (var mutex = new Mutex(true, "YF-Robot-Tray-Exe", out created))
@@ -45,7 +45,15 @@ namespace YFRobot
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new TrayContext());
+                var silent = false;
+                foreach (var a in args)
+                {
+                    if (string.Equals(a, "--silent", StringComparison.OrdinalIgnoreCase)) silent = true;
+                }
+
+                var ctx = new TrayContext(silent);
+                if (silent) Application.Run(ctx);
+                else Application.Run(new MainForm(ctx));
             }
         }
 
@@ -90,9 +98,65 @@ namespace YFRobot
         DateTime _lastRestart = DateTime.Now.AddHours(-1);
         bool? _wasUp;
         bool _exiting;
+        readonly bool OpenOnStart;
 
-        public TrayContext()
+        public string VersionText { get { return _version; } }
+        public int PortText { get { return _port; } }
+        public bool ServiceUp { get { return IsServiceUp(); } }
+        public void StartSvc() { EnsureService(true); }
+        public void StopSvc() { StopService(); }
+        public void DoRestart() { RestartService(); }
+        public void DoBackup() { BackupMemory(); }
+        public void DoRestore() { RestoreLatest(); }
+        public void OpenConsole() { OpenAppWindow("/console"); }
+        public void OpenChat() { OpenAppWindow("/"); }
+        public bool AutoStartOn { get { return IsAutoStart(); } set { SetAutoStart(value); } }
+
+        public void OpenLogs()
         {
+            var log = Path.Combine(Program.Root, "data", "app.out.log");
+            if (File.Exists(log)) Process.Start("notepad.exe", "\"" + log + "\"");
+            else MessageBox.Show("还没有日志文件：\n" + log, Program.AppName);
+        }
+
+        public void OpenDataDir()
+        {
+            var d = Path.Combine(Program.Root, "data");
+            if (!Directory.Exists(d)) Directory.CreateDirectory(d);
+            Process.Start("explorer.exe", "\"" + d + "\"");
+        }
+
+        /// <summary>读接入状态（适配器是否在线）。失败返回 null。</summary>
+        public bool? AdapterOnline()
+        {
+            try
+            {
+                var req = (HttpWebRequest)WebRequest.Create(BaseUrl() + "/api/admin/bridge");
+                req.Timeout = 1500;
+                req.Proxy = null;
+                using (var resp = (HttpWebResponse)req.GetResponse())
+                using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                {
+                    var json = sr.ReadToEnd();
+                    var i = json.IndexOf("\"online\":");
+                    if (i < 0) return null;
+                    var start = i + 9;
+                    var seg = json.Substring(start, Math.Min(6, json.Length - start)).Trim();
+                    return seg.StartsWith("true");
+                }
+            }
+            catch { return null; }
+        }
+
+        public void ShowTrayMenu()
+        {
+            // 窗口「缩到托盘」时给个提示
+            _tray.ShowBalloonTip(2000, Program.AppName, "已缩到托盘，双击图标可再打开面板", ToolTipIcon.Info);
+        }
+
+        public TrayContext(bool silent)
+        {
+            OpenOnStart = !silent;
             _version = ReadVersion();
             _port = ReadPort();
 
@@ -111,6 +175,9 @@ namespace YFRobot
             EnsureService(false);
 
             // 第一次显示气泡：否则图标若在托盘溢出区，用户会以为"运行了但什么都没发生"
+            // 启动即打开面板：纯托盘程序用户会以为"运行了但什么都没有"
+            if (OpenOnStart) StartWindowWhenReady();
+
             _tray.ShowBalloonTip(3500, Program.AppName + " 已启动",
                 "右键托盘图标可以打开控制台 / 重启服务 / 退出。双击直接开控制台。",
                 ToolTipIcon.Info);
@@ -410,7 +477,29 @@ namespace YFRobot
             return line.Trim();
         }
 
-        void OpenConsole() { OpenAppWindow("/console"); }
+        /// <summary>后台等服务就绪，然后打开面板窗口（用户双击后能立刻看到东西）。</summary>
+        void StartWindowWhenReady()
+        {
+            var t = new System.Threading.Thread(delegate()
+            {
+                for (int i = 0; i < 40; i++) // 最多 20 秒
+                {
+                    if (IsServiceUp()) break;
+                    System.Threading.Thread.Sleep(500);
+                }
+                try
+                {
+                    var mi = _tray.ContextMenuStrip;
+                    // 直接用内部方法打开（与菜单同一套逻辑）
+                    OpenAppWindow("/console");
+                }
+                catch (Exception ex) { Program.Log("启动时打开面板失败：" + ex.Message); }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+
 
         /// <summary>用浏览器应用窗口打开某个路径（无地址栏，像独立软件）。</summary>
         void OpenAppWindow(string pathPart)
@@ -499,4 +588,225 @@ namespace YFRobot
             return Icon.FromHandle(bmp.GetHicon());
         }
     }
+
+    /// <summary>
+    /// 原生启动器面板。
+    ///
+    /// 目标：不打开浏览器也能看状态、管服务、备份恢复。
+    /// 网页控制台仍然保留，但只作为「打开控制台」这个可选入口。
+    /// </summary>
+    class MainForm : Form
+    {
+        readonly TrayContext _ctx;
+        readonly Label _svcDot, _svcText, _adpDot, _adpText, _verText;
+        readonly CheckBox _auto;
+        readonly System.Windows.Forms.Timer _timer;
+
+        static readonly Color Bg = Color.FromArgb(11, 14, 20);
+        static readonly Color Card = Color.FromArgb(20, 25, 35);
+        static readonly Color Brd = Color.FromArgb(40, 48, 66);
+        static readonly Color Txt = Color.FromArgb(232, 237, 247);
+        static readonly Color DimC = Color.FromArgb(139, 149, 168);
+        static readonly Color Acc = Color.FromArgb(99, 102, 241);
+        static readonly Color Green = Color.FromArgb(52, 211, 153);
+        static readonly Color Red = Color.FromArgb(251, 113, 133);
+
+        public MainForm(TrayContext ctx)
+        {
+            _ctx = ctx;
+            Text = "YF-Robot 启动器";
+            ClientSize = new Size(560, 520);
+            StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            MaximizeBox = false;
+            BackColor = Bg;
+            ForeColor = Txt;
+            Font = new Font("Microsoft YaHei UI", 9f);
+
+            var title = new Label();
+            title.Text = "YF-Robot";
+            title.Font = new Font("Microsoft YaHei UI", 18f, FontStyle.Bold);
+            title.ForeColor = Txt;
+            title.Location = new Point(26, 20);
+            title.AutoSize = true;
+            Controls.Add(title);
+
+            _verText = new Label();
+            _verText.Text = "v" + ctx.VersionText + "　·　端口 " + ctx.PortText;
+            _verText.ForeColor = DimC;
+            _verText.Location = new Point(29, 58);
+            _verText.AutoSize = true;
+            Controls.Add(_verText);
+
+            // ── 状态卡
+            var card = Card2(26, 92, 508, 88);
+            Controls.Add(card);
+
+            _svcDot = Dot(16, 18, card);
+            _svcText = Line(42, 20, "服务：检查中…", card, Txt);
+
+            _adpDot = Dot(16, 50, card);
+            _adpText = Line(42, 52, "适配器：检查中…", card, DimC);
+
+            // ── 服务控制
+            Section("服务", 26, 196);
+            Btn("打开控制台", 26, 224, 160, delegate { _ctx.OpenConsole(); }, true);
+            Btn("聊天窗口", 196, 224, 160, delegate { _ctx.OpenChat(); }, false);
+            Btn("重启服务", 366, 224, 168, delegate { _ctx.DoRestart(); }, false);
+            Btn("停止服务", 26, 270, 160, delegate { StopAll(); }, false);
+            Btn("查看日志", 196, 270, 160, delegate { _ctx.OpenLogs(); }, false);
+            Btn("数据目录", 366, 270, 168, delegate { _ctx.OpenDataDir(); }, false);
+
+            // ── 记忆
+            Section("记忆", 26, 322);
+            Btn("备份记忆", 26, 350, 250, delegate { _ctx.DoBackup(); }, false);
+            Btn("恢复最近备份…", 286, 350, 248, delegate { _ctx.DoRestore(); }, false);
+
+            // ── 设置
+            Section("设置", 26, 402);
+            _auto = new CheckBox();
+            _auto.Text = "开机自动启动（只驻留托盘，不弹窗）";
+            _auto.ForeColor = DimC;
+            _auto.Location = new Point(26, 430);
+            _auto.AutoSize = true;
+            _auto.Checked = ctx.AutoStartOn;
+            _auto.CheckedChanged += delegate
+            {
+                try { _ctx.AutoStartOn = _auto.Checked; }
+                catch { _auto.Checked = _ctx.AutoStartOn; }
+            };
+            Controls.Add(_auto);
+
+            var hide = Btn("缩到托盘", 286, 428, 248, delegate { HideToTray(); }, false);
+
+            var tip = new Label();
+            tip.Text = "关掉窗口 = 缩到托盘，服务继续跑";
+            tip.ForeColor = DimC;
+            tip.Location = new Point(29, 476);
+            tip.AutoSize = true;
+            Controls.Add(tip);
+
+            _timer = new System.Windows.Forms.Timer();
+            _timer.Interval = 3000;
+            _timer.Tick += delegate { Refresh(); };
+            _timer.Start();
+            Refresh();
+
+            FormClosing += delegate(object s2, FormClosingEventArgs e2)
+            {
+                if (e2.CloseReason == CloseReason.UserClosing)
+                {
+                    e2.Cancel = true;
+                    HideToTray();
+                }
+            };
+        }
+
+        void StopAll()
+        {
+            if (MessageBox.Show("停止服务会让聊天中断，确定？", "YF-Robot",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            _ctx.StopSvc();
+            Refresh();
+        }
+
+        void HideToTray()
+        {
+            Hide();
+            ShowInTaskbar = false;
+            _ctx.ShowTrayMenu();
+        }
+
+        void Refresh()
+        {
+            var up = _ctx.ServiceUp;
+            _svcDot.ForeColor = up ? Green : Red;
+            _svcText.Text = up ? "服务：运行中　127.0.0.1:" + _ctx.PortText : "服务：未运行";
+            _svcText.ForeColor = up ? Txt : Red;
+
+            var adp = _ctx.AdapterOnline();
+            if (adp == null)
+            {
+                // 服务在线但接口没给结果：按未接入显示，别让用户以为坏了
+                _adpDot.ForeColor = DimC;
+                _adpText.Text = up ? "适配器：未接入（只影响微信收发）" : "适配器：未知（服务未就绪）";
+            }
+            else if (adp.Value)
+            {
+                _adpDot.ForeColor = Green;
+                _adpText.Text = "适配器：已接入";
+            }
+            else
+            {
+                _adpDot.ForeColor = DimC;
+                _adpText.Text = "适配器：未接入（只影响微信收发）";
+            }
+        }
+
+        // ── 小工具
+        Panel Card2(int x, int y, int w, int h)
+        {
+            var p = new Panel();
+            p.Location = new Point(x, y);
+            p.Size = new Size(w, h);
+            p.BackColor = Card;
+            p.Paint += delegate(object s3, PaintEventArgs e3)
+            {
+                using (var pen = new Pen(Brd)) e3.Graphics.DrawRectangle(pen, 0, 0, p.Width - 1, p.Height - 1);
+            };
+            return p;
+        }
+
+        Label Dot(int x, int y, Control parent)
+        {
+            var l = new Label();
+            l.Text = "●";
+            l.Font = new Font("Segoe UI", 13f);
+            l.ForeColor = DimC;
+            l.Location = new Point(x, y);
+            l.AutoSize = true;
+            parent.Controls.Add(l);
+            return l;
+        }
+
+        Label Line(int x, int y, string text, Control parent, Color color)
+        {
+            var l = new Label();
+            l.Text = text;
+            l.ForeColor = color;
+            l.Location = new Point(x, y);
+            l.AutoSize = true;
+            parent.Controls.Add(l);
+            return l;
+        }
+
+        void Section(string text, int x, int y)
+        {
+            var l = new Label();
+            l.Text = text;
+            l.ForeColor = DimC;
+            l.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
+            l.Location = new Point(x, y);
+            l.AutoSize = true;
+            Controls.Add(l);
+        }
+
+        Button Btn(string text, int x, int y, int w, EventHandler onClick, bool primary)
+        {
+            var b = new Button();
+            b.Text = text;
+            b.Location = new Point(x, y);
+            b.Size = new Size(w, 36);
+            b.FlatStyle = FlatStyle.Flat;
+            b.Font = new Font("Microsoft YaHei UI", 9f);
+            b.Cursor = Cursors.Hand;
+            b.ForeColor = primary ? Color.White : Txt;
+            b.BackColor = primary ? Acc : Card;
+            b.FlatAppearance.BorderColor = primary ? Acc : Brd;
+            b.Click += onClick;
+            Controls.Add(b);
+            return b;
+        }
+    }
+
 }
