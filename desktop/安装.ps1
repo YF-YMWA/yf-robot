@@ -1,7 +1,7 @@
 ﻿# 安装 YF-Robot（当前用户，不需要管理员）
 #
 # 做三件事：
-#   1. 在桌面和开始菜单建快捷方式（指向 desktop\YF-Robot.vbs，双击无黑窗口）
+#   1. 在桌面和开始菜单建快捷方式（优先指向根目录 YF-Robot.exe，没有 exe 才回退 vbs）
 #   2. 在「控制面板 → 程序和功能」里登记卸载项
 #   3. 可选：开机自启
 #
@@ -26,7 +26,7 @@ if (-not $Root) {
 }
 
 $vbs = Join-Path $Root 'desktop\YF-Robot.vbs'
-$exe = Join-Path $Root 'desktop\YF-Robot.exe'
+$exe = Join-Path $Root 'YF-Robot.exe'
 
 # 优先用 exe（托盘程序）；没有 exe 就回退到 vbs（PowerShell 版托盘）
 $useExe = Test-Path $exe
@@ -35,7 +35,7 @@ $launchArgs = if ($useExe) { '' } else { '"' + $vbs + '"' }
 
 # 解压来的文件带 Mark-of-the-Web，exe 会被 SmartScreen 拦（发布者未知）。
 # 主动解除锁定，避免用户双击后只看到「Windows 已保护你的电脑」。
-foreach ($f in @($exe, $vbs, (Join-Path $Root 'desktop\YFRobotTray.ps1'))) {
+foreach ($f in @($exe, $vbs, (Join-Path $Root 'desktop\YFRobotTray.ps1'), (Join-Path $Root 'desktop\YF-Robot.ico'))) {
     try { if (Test-Path $f) { Unblock-File -Path $f -ErrorAction SilentlyContinue } } catch { }
 }
 
@@ -49,7 +49,8 @@ try { $ver = (Get-Content (Join-Path $Root 'package.json') -Raw -Encoding UTF8 |
 
 $shell = New-Object -ComObject WScript.Shell
 $icon = Join-Path $Root 'desktop\YF-Robot.ico'
-$iconTarget = if (Test-Path $icon) { $icon } elseif (Test-Path (Join-Path $Root 'desktop\YF-Robot.exe')) { Join-Path $Root 'desktop\YF-Robot.exe' } else { 'wscript.exe' }
+# 优先用 exe 自带图标：.ico 路径若被旧缓存记成空白，快捷方式会一直显示白纸
+$iconTarget = if (Test-Path $exe) { $exe } elseif (Test-Path $icon) { $icon } else { 'wscript.exe' }
 
 function New-Shortcut($path, $target, $arguments, $desc) {
     $sc = $shell.CreateShortcut($path)

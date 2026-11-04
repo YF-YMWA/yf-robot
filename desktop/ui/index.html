@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YF-Robot</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 图标精灵：统一 stroke 风格，避免加载外部字体 -->
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8v8a2 2 0 0 1-1 1.73l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.73l7-4a2 2 0 0 1 2 0l7 4A2 2 0 0 1 21 8z"/><path d="M3.3 7 12 12l8.7-5"/><path d="M12 22V12"/></symbol>
+  <symbol id="i-bag" viewBox="0 0 24 24"><path d="M6 3h12l2 5H4l2-5z"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M9 12a3 3 0 0 0 6 0"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10"/><path d="M18 6h2"/><circle cx="16" cy="6" r="2"/><path d="M4 12h4"/><path d="M12 12h8"/><circle cx="10" cy="12" r="2"/><path d="M4 18h10"/><path d="M18 18h2"/><circle cx="16" cy="18" r="2"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3"/><path d="M13 15h4"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H4l2.2-3.3A8 8 0 1 1 21 12z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17V7.5z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.4 4 5.6 4 9s-1.5 6.6-4 9c-2.5-2.4-4-5.6-4-9s1.5-6.6 4-9z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12.5 5 5L20 6.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-max" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M19 14v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9v5M12 17.5h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></symbol>
+</svg>
+
+<div class="app">
+
+  <!-- ===== 标题栏（可拖动） ===== -->
+  <header class="titlebar" id="titlebar">
+    <div class="brand">
+      <img class="logo" src="icon.png" alt="YF-Robot">
+      <span class="brand-name">YF-Robot</span>
+      <span class="brand-ver" id="brandVer">v—</span>
+    </div>
+
+    <div class="title-status" id="titleStatus">
+      <span class="dot checking"></span>
+      <span id="titleStatusText">正在连接本地服务…</span>
+    </div>
+
+    <div class="winbtns">
+      <button class="winbtn" id="winMin" title="最小化" aria-label="最小化"><svg class="ic"><use href="#i-minus"/></svg></button>
+      <button class="winbtn" id="winMax" title="最大化" aria-label="最大化"><svg class="ic"><use href="#i-max"/></svg></button>
+      <button class="winbtn close" id="winClose" title="关闭到托盘" aria-label="关闭到托盘"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+  </header>
+
+  <div class="shell">
+
+    <!-- ===== 侧栏 ===== -->
+    <aside class="sidebar">
+      <nav class="nav">
+        <div class="nav-label">启动器</div>
+        <button class="nav-item active" data-page="overview"><svg class="ic"><use href="#i-grid"/></svg><span>概览</span></button>
+        <button class="nav-item" data-page="plugins"><svg class="ic"><use href="#i-box"/></svg><span>插件</span><span class="nav-badge" id="navPluginCount"></span></button>
+        <button class="nav-item" data-page="market"><svg class="ic"><use href="#i-bag"/></svg><span>市场</span></button>
+        <button class="nav-item" data-page="settings"><svg class="ic"><use href="#i-sliders"/></svg><span>设置</span></button>
+
+        <div class="nav-label">应用</div>
+        <button class="nav-item" data-open="console"><svg class="ic"><use href="#i-terminal"/></svg><span>控制台</span><svg class="ic ext"><use href="#i-external"/></svg></button>
+        <button class="nav-item" data-open="chat"><svg class="ic"><use href="#i-chat"/></svg><span>聊天</span><svg class="ic ext"><use href="#i-external"/></svg></button>
+        <button class="nav-item" data-open="browser"><svg class="ic"><use href="#i-globe"/></svg><span>网页版</span><svg class="ic ext"><use href="#i-external"/></svg></button>
+      </nav>
+
+      <div class="side-foot">
+        <div class="mini" id="miniStatus">
+          <span class="dot checking"></span>
+          <div class="mini-text">
+            <b id="miniTitle">检查中…</b>
+            <small id="miniSub">127.0.0.1:—</small>
+          </div>
+        </div>
+        <div class="side-ver" id="sideVer">YF-Robot · 本地面板</div>
+      </div>
+    </aside>
+
+    <!-- ===== 内容区 ===== -->
+    <main class="main" id="main">
+
+      <!-- 概览 -->
+      <section class="page active" data-page="overview">
+        <div class="page-head">
+          <div>
+            <h1>概览</h1>
+            <p>服务状态与常用操作，数据都留在本机。</p>
+          </div>
+          <span class="pill"><svg class="ic"><use href="#i-shield"/></svg>仅本机可访问</span>
+        </div>
+
+        <div class="hero" id="hero">
+          <div class="hero-main">
+            <div class="hero-status">
+              <span class="pulse checking" id="heroDot"></span>
+              <div class="hero-copy">
+                <h2 id="heroTitle">正在检查服务…</h2>
+                <p id="heroDesc">稍等，正在确认本地服务是否就绪。</p>
+              </div>
+            </div>
+            <div class="hero-meta">
+              <span class="mono" id="heroAddr">127.0.0.1:8899</span>
+              <span class="sep">·</span>
+              <span id="heroVer">v—</span>
+              <span class="sep">·</span>
+              <span id="heroAuto">开机自启 —</span>
+            </div>
+          </div>
+          <div class="hero-actions">
+            <button class="btn primary" id="btnStart" hidden><svg class="ic"><use href="#i-play"/></svg>启动服务</button>
+            <button class="btn ghost" id="btnRestart"><svg class="ic"><use href="#i-refresh"/></svg>重启</button>
+            <button class="btn danger-ghost" id="btnStop"><svg class="ic"><use href="#i-stop"/></svg>停止</button>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="stat">
+            <div class="k">适配器</div>
+            <div class="v" id="statAdapter">—</div>
+            <div class="hint" id="statAdapterHint">微信收发通道</div>
+          </div>
+          <div class="stat">
+            <div class="k">端口</div>
+            <div class="v mono" id="statPort">—</div>
+            <div class="hint">仅本机监听</div>
+          </div>
+          <div class="stat">
+            <div class="k">插件</div>
+            <div class="v" id="statPlugins">—</div>
+            <div class="hint">plugins/ 目录</div>
+          </div>
+          <div class="stat">
+            <div class="k">开机自启</div>
+            <div class="v" id="statAuto">—</div>
+            <div class="hint">只驻留托盘</div>
+          </div>
+        </div>
+
+        <div class="section-head">
+          <h3>快捷操作</h3>
+          <span>常用功能一步直达</span>
+        </div>
+
+        <div class="quick-grid">
+          <button class="quick" data-act="console">
+            <span class="qi"><svg class="ic"><use href="#i-terminal"/></svg></span>
+            <span class="qt"><b>打开控制台</b><small>模型、角色卡与全部设置</small></span>
+          </button>
+          <button class="quick" data-act="chat">
+            <span class="qi"><svg class="ic"><use href="#i-chat"/></svg></span>
+            <span class="qt"><b>聊天窗口</b><small>和当前角色直接对话</small></span>
+          </button>
+          <button class="quick" data-act="logs">
+            <span class="qi"><svg class="ic"><use href="#i-file"/></svg></span>
+            <span class="qt"><b>查看日志</b><small>服务运行日志</small></span>
+          </button>
+          <button class="quick" data-act="data">
+            <span class="qi"><svg class="ic"><use href="#i-folder"/></svg></span>
+            <span class="qt"><b>数据目录</b><small>记忆、素材与配置</small></span>
+          </button>
+          <button class="quick" data-act="backup">
+            <span class="qi"><svg class="ic"><use href="#i-db"/></svg></span>
+            <span class="qt"><b>备份记忆</b><small>导出当前记忆快照</small></span>
+          </button>
+          <button class="quick" data-act="restore">
+            <span class="qi"><svg class="ic"><use href="#i-clock"/></svg></span>
+            <span class="qt"><b>恢复备份</b><small>回到最近一次快照</small></span>
+          </button>
+        </div>
+
+        <div class="card log-card">
+          <div class="card-head">
+            <h3>最近活动</h3>
+            <span class="hint">data/tray.log</span>
+            <span class="sp"></span>
+            <button class="link" id="btnLogs">打开完整日志</button>
+          </div>
+          <pre class="log" id="trayLog">—</pre>
+        </div>
+      </section>
+
+      <!-- 插件 -->
+      <section class="page" data-page="plugins">
+        <div class="page-head">
+          <div>
+            <h1>插件</h1>
+            <p>放在 plugins/ 目录下的扩展，启停后需要重启服务生效。</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn ghost sm" id="btnPluginDir"><svg class="ic"><use href="#i-folder"/></svg>插件目录</button>
+            <button class="btn ghost sm" id="btnPluginReload"><svg class="ic"><use href="#i-refresh"/></svg>刷新</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="toolbar">
+            <label class="search">
+              <svg class="ic"><use href="#i-search"/></svg>
+              <input id="pluginSearch" placeholder="搜索插件名称或工具…" autocomplete="off">
+            </label>
+            <span class="hint" id="pluginCount">—</span>
+          </div>
+          <div class="plugin-list" id="pluginList">
+            <div class="skeleton-row"></div>
+            <div class="skeleton-row"></div>
+            <div class="skeleton-row"></div>
+          </div>
+          <div class="card-foot">
+            <span class="hint">启停插件后需要重启服务才会生效</span>
+            <button class="btn ghost sm" id="btnRestartFromPlugins">重启服务</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 市场 -->
+      <section class="page" data-page="market">
+        <div class="page-head">
+          <div>
+            <h1>插件市场</h1>
+            <p>从 market/index.json 读取可安装插件，下载后自动解压到 plugins/。</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn ghost sm" id="btnMarketDir"><svg class="ic"><use href="#i-folder"/></svg>市场目录</button>
+            <button class="btn ghost sm" id="btnMarketReload"><svg class="ic"><use href="#i-refresh"/></svg>刷新</button>
+          </div>
+        </div>
+
+        <div class="market-grid" id="marketGrid"></div>
+        <div class="empty" id="marketEmpty" hidden>
+          <span class="empty-ic"><svg class="ic"><use href="#i-bag"/></svg></span>
+          <b>市场里还没有插件</b>
+          <p>编辑 market/index.json 添加条目，保存后点刷新。</p>
+          <button class="btn ghost sm" id="btnMarketEdit">编辑索引</button>
+        </div>
+      </section>
+
+      <!-- 设置 -->
+      <section class="page" data-page="settings">
+        <div class="page-head">
+          <div>
+            <h1>设置</h1>
+            <p>启动行为、更新与版本信息。</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">启动</h3>
+          <div class="setting">
+            <div class="st-text">
+              <b>开机自动启动</b>
+              <small>登录 Windows 后只驻留托盘，不弹出窗口。</small>
+            </div>
+            <button class="switch" id="swAuto" role="switch" aria-checked="false" aria-label="开机自动启动"><i></i></button>
+          </div>
+          <div class="setting">
+            <div class="st-text">
+              <b>关闭窗口时缩到托盘</b>
+              <small>服务继续运行；双击托盘图标可重新打开启动器。</small>
+            </div>
+            <span class="badge">始终开启</span>
+          </div>
+          <div class="setting">
+            <div class="st-text">
+              <b>服务意外退出时自动拉起</b>
+              <small>最多 3 次，两次之间至少间隔 15 秒。</small>
+            </div>
+            <span class="badge">始终开启</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">更新</h3>
+          <div class="setting">
+            <div class="st-text">
+              <b>版本 <span class="mono" id="setVersion">—</span></b>
+              <small id="updateHint">检查是否有新版本可用。</small>
+            </div>
+            <button class="btn ghost sm" id="btnUpdate"><svg class="ic"><use href="#i-download"/></svg>检查更新</button>
+          </div>
+        </div>
+
+        <div class="card about">
+          <img class="about-logo" src="icon.png" alt="YF-Robot">
+          <div class="about-text">
+            <b>YF-Robot</b>
+            <small>人设化 AI 助手 · 本地优先 · 记忆与数据都在本机</small>
+            <div class="about-links">
+              <button class="link" id="btnGithub">项目主页<svg class="ic"><use href="#i-external"/></svg></button>
+              <button class="link" id="btnAboutData">打开数据目录</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- 轻提示 -->
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<!-- 确认弹窗 -->
+<div class="modal-backdrop" id="modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-ic" id="modalIcon"><svg class="ic"><use href="#i-alert"/></svg></div>
+    <h3 id="modalTitle">确认操作</h3>
+    <p id="modalText"></p>
+    <div class="modal-actions">
+      <button class="btn ghost" id="modalCancel">取消</button>
+      <button class="btn danger" id="modalOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

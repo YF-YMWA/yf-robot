@@ -18,6 +18,8 @@ if (-not $silent) {
 $tray = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
     Where-Object { $_.CommandLine -match 'YFRobotTray' }
 foreach ($p in $tray) { Stop-Process -Id $p.ProcessId -Force }
+# 新版启动器是 exe，名字叫 YF-Robot
+Get-Process -Name 'YF-Robot' -ErrorAction SilentlyContinue | Stop-Process -Force
 $node = Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
     Where-Object { $_.CommandLine -match 'app\.mjs' }
 foreach ($p in $node) { Stop-Process -Id $p.ProcessId -Force }

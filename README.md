@@ -16,7 +16,8 @@ Node.js 写核心（零第三方依赖），Python 只给适配器用。Windows 
 👉 **[下载最新版](../../releases/latest)** —— 约 52 MB，包内自带 Node 和 Python 运行时，
 不用装任何环境。
 
-解压到**纯英文路径**（例如 `D:\YF-Robot`），双击 `YF-Robot.bat`。
+解压到**纯英文路径**（例如 `D:\YF-Robot`），双击最外层的 **`YF-Robot.exe`**（推荐）。
+不想用启动器的话，双击 `YF-Robot.bat` 走命令行。
 第一次启动会让你填模型 Key（DeepSeek / 智谱 / 通义 / Ollama 都行）。
 
 > 别解压到桌面或「文档」—— Windows 的受控文件夹访问可能拦住写配置。
@@ -31,10 +32,11 @@ cp config.example.json config.json   # 然后填 Key
 node app.mjs
 ```
 
-三个入口，随便挑一个：
+几个入口，随便挑一个：
 
 | 入口 | 用途 |
 |---|---|
+| 双击最外层的 `YF-Robot.exe` | 图形启动器（推荐）：托盘 + 概览 / 插件 / 市场 / 设置 |
 | 双击 `桌面控制台.bat` | 管理后台，独立窗口（无地址栏） |
 | 双击 `桌面聊天.bat` | 聊天窗口，能传图、能看流式回复 |
 | 浏览器开 `http://127.0.0.1:8899/console` | 从手机或另一台电脑管 |

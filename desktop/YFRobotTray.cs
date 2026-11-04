@@ -1,25 +1,31 @@
-// YF-Robot 托盘启动器（C# 5，系统自带 csc 编译，无第三方依赖）
+// YF-Robot 桌面启动器（C# 5，系统自带 csc 编译，无第三方依赖）
 //
-// 功能：
-//   · 单实例（Mutex），重复双击静默退出
-//   · 启动时服务没跑就自动拉起（不显示控制台）
-//   · 图标随状态变色：绿=运行中 / 灰=已停止 / 黄=重启中
-//   · 服务意外退出自动拉起（最多 3 次，间隔 ≥15 秒）
-//   · 菜单：版本/端口、打开控制台、查看日志、重启服务、数据目录、开机自启、退出
-//   · 动作记 data\tray.log
+// 结构：
+//   · Program        —— 入口、单实例、预览/截图模式、静态入口
+//   · TrayContext    —— 托盘、服务启停/守护、备份恢复、自启
+//   · LauncherBridge —— 暴露给网页界面的桥（GetState / Act / Window）
+//   · MainForm       —— 无边框窗口，界面本体是 desktop/ui 下的单页应用
+//   · ConsoleWindow  —— 控制台 / 聊天的独立原生窗口（WebView2）
+//
+// 界面不再手摆 WinForms 控件：HTML/CSS 负责观感，C# 只做宿主与动作。
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.IO.Compression;
 using System.Management;
 using System.Net;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
-using Microsoft.Web.WebView2.WinForms;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
 
 namespace YFRobot
 {
@@ -28,20 +34,147 @@ namespace YFRobot
         public const string AppName = "YF-Robot";
         public static string Root;
         public static string LogFile;
+        public static string BaseUrl = "http://127.0.0.1:8899";
+        public static Icon AppIcon;
+
+        /// <summary>系统 DPI 缩放比（150% 就 1.5）。界面按这个放大，文字才是原生物理像素。</summary>
+        public static float DpiScale = 1f;
+
+        [DllImport("user32.dll")]
+        static extern bool SetProcessDPIAware();
+        [DllImport("user32.dll")]
+        static extern IntPtr GetDC(IntPtr hWnd);
+        [DllImport("user32.dll")]
+        static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        [DllImport("gdi32.dll")]
+        static extern int GetDeviceCaps(IntPtr hdc, int index);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool SetDllDirectory(string path);
+
+        /// <summary>
+        /// exe 在根目录，WebView2 的托管 DLL / 原生 loader 仍在 desktop\lib。
+        /// 装一个程序集解析器 + 原生 DLL 搜索目录，根目录就不必摆一堆 DLL。
+        /// </summary>
+        static void EnableDesktopLib()
+        {
+            try
+            {
+                var lib = Path.Combine(Root, "desktop", "lib");
+                if (!Directory.Exists(lib)) return;
+
+                AppDomain.CurrentDomain.AssemblyResolve += delegate(object sender, ResolveEventArgs e)
+                {
+                    try
+                    {
+                        var simple = new AssemblyName(e.Name).Name;
+                        var file = Path.Combine(lib, simple + ".dll");
+                        if (File.Exists(file))
+                        {
+                            // 用字节加载而不是 LoadFrom：解压来的 DLL 带 MOTW，
+                            // LoadFrom 会以「远程程序集」为由拒绝（0x80131515）
+                            return Assembly.Load(File.ReadAllBytes(file));
+                        }
+                    }
+                    catch (Exception ex) { Log("加载 WebView2 组件失败：" + ex.Message); }
+                    return null;
+                };
+
+                SetDllDirectory(lib);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// 声明进程为系统 DPI 感知。
+        ///
+        /// 不声明的话 Windows 会把整个窗口（含 WebView2）当位图放大，
+        /// 150% 缩放下字全是糊的；声明后按物理像素渲染，再自己按比例放大尺寸。
+        /// </summary>
+        static void EnableDpiAwareness()
+        {
+            try { SetProcessDPIAware(); } catch { }
+            try
+            {
+                var hdc = GetDC(IntPtr.Zero);
+                var dpi = GetDeviceCaps(hdc, 88); // LOGPIXELSX
+                ReleaseDC(IntPtr.Zero, hdc);
+                if (dpi > 0) DpiScale = Math.Max(1f, dpi / 96f);
+            }
+            catch { }
+        }
+
+        /// <summary>把 96 DPI 下的设计尺寸换算成当前 DPI 的物理像素。</summary>
+        public static int Scale(int px)
+        {
+            return (int)Math.Round(px * DpiScale);
+        }
+
+        /// <summary>当前启动器窗口（托盘回调要用）。</summary>
+        public static MainForm MainForm;
+
+        /// <summary>托盘上下文；静默模式下按需创建启动器窗口时要用。</summary>
+        public static TrayContext Context;
+
+        /// <summary>预览模式：不建托盘、不拉起服务，用来调界面。</summary>
+        public static bool PreviewMode;
+        /// <summary>--shot=路径：界面载入后截图并退出。</summary>
+        public static string ShotPath;
+        /// <summary>--page=plugins：预览时直接打开某一页（自检用）。</summary>
+        public static string StartPage;
+
+        static readonly object LogLock = new object();
 
         [STAThread]
         static void Main(string[] args)
         {
+            EnableDpiAwareness();
+
+            bool silent = false;
+            foreach (var a in args)
+            {
+                if (string.Equals(a, "--silent", StringComparison.OrdinalIgnoreCase)) silent = true;
+                else if (string.Equals(a, "--preview", StringComparison.OrdinalIgnoreCase)) PreviewMode = true;
+                else if (a.StartsWith("--shot=", StringComparison.OrdinalIgnoreCase)) ShotPath = a.Substring(7).Trim('"');
+                else if (a.StartsWith("--page=", StringComparison.OrdinalIgnoreCase)) StartPage = a.Substring(7).Trim().ToLowerInvariant();
+            }
+            if (!string.IsNullOrEmpty(ShotPath)) PreviewMode = true;
+
+            Root = FindRoot();
+            if (Root == null)
+            {
+                MessageBox.Show("找不到程序目录（config.json 所在文件夹）。", AppName);
+                return;
+            }
+            LogFile = Path.Combine(Root, "data", "tray.log");
+            EnableDesktopLib();
+            AppIcon = LoadAppIcon();
+
+            // 预览用独立的 WebView2 数据目录：正常启动的实例正占着 data/webview2，
+            // 同一个目录不能被两个进程同时使用。
+            var udf = Path.Combine(Root, "data", PreviewMode ? "webview2-preview" : "webview2");
+            try { Directory.CreateDirectory(udf); } catch { }
+            Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", udf);
+
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+
+            // 预览模式不抢单实例锁、不碰服务，可以随时和正式实例并存
+            if (PreviewMode)
+            {
+                Log("预览模式启动" + (string.IsNullOrEmpty(ShotPath) ? "" : "（截图）"));
+                var previewCtx = new TrayContext(true, true);
+                var previewForm = new MainForm(previewCtx);
+                MainForm = previewForm;
+                Application.Run(previewForm);
+                return;
+            }
+
             bool created;
             using (var mutex = new Mutex(true, "YF-Robot-Tray-Exe", out created))
             {
                 if (!created)
                 {
-                    /**
-                     * 已经有实例在跑。以前这里直接 return，用户会觉得"双击没反应"
-                     * （尤其是第一个实例已经缩到托盘的时候）。
-                     * 现在通知它把窗口显示出来。
-                     */
+                    // 已有实例：把它叫出来，而不是「双击没反应」
                     try
                     {
                         using (var ev = EventWaitHandle.OpenExisting("YF-Robot-Show"))
@@ -51,71 +184,123 @@ namespace YFRobot
                     return;
                 }
 
-                Root = FindRoot();
-                if (Root == null)
+                var ctx = new TrayContext(silent);
+                Context = ctx;
+
+                // 第二次双击 / 开始菜单再次启动：把已有窗口调出来（而不是再开一个进程）
+                var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "YF-Robot-Show");
+                var listener = new Thread(delegate()
                 {
-                    MessageBox.Show("找不到程序目录（config.json 所在文件夹）。", AppName);
+                    while (true)
+                    {
+                        showEvent.WaitOne();
+                        ShowLauncher();
+                    }
+                });
+                listener.IsBackground = true;
+                listener.Start();
+
+                if (silent)
+                {
+                    Log("静默启动完成（只驻留托盘）");
+                    Application.Run(ctx);
                     return;
                 }
-                LogFile = Path.Combine(Root, "data", "tray.log");
 
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                var silent = false;
-                foreach (var a in args)
+                try
                 {
-                    if (string.Equals(a, "--silent", StringComparison.OrdinalIgnoreCase)) silent = true;
+                    Log("启动器窗口已打开");
+                    var form = new MainForm(ctx);
+                    MainForm = form;
+                    Application.Run(form);
                 }
+                catch (Exception ex)
+                {
+                    Log("界面初始化失败：" + ex);
+                    MessageBox.Show("界面初始化失败：" + ex.Message, AppName);
+                    Application.Run(ctx);
+                }
+            }
+        }
 
-                var ctx = new TrayContext(silent);
-                if (silent) { Application.Run(ctx); }
-                else
+        /// <summary>把启动器窗口调出来；静默模式下第一次调用时才创建窗口。</summary>
+        public static void ShowLauncher()
+        {
+            var ctx = Context;
+            if (ctx == null) return;
+
+            ctx.OnUi(delegate()
+            {
+                var f = MainForm;
+                if (f == null || f.IsDisposed)
                 {
                     try
                     {
-                        Program.Log("启动器窗口已打开");
-                        var form = new MainForm(ctx);
-
-                        // 第二次双击时，把已有窗口调出来（而不是再开一个进程）
-                        var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "YF-Robot-Show");
-                        var listener = new System.Threading.Thread(delegate()
-                        {
-                            while (true)
-                            {
-                                showEvent.WaitOne();
-                                try
-                                {
-                                    form.BeginInvoke(new Action(delegate()
-                                    {
-                                        form.Show();
-                                        if (form.WindowState == FormWindowState.Minimized)
-                                            form.WindowState = FormWindowState.Normal;
-                                        form.Activate();
-                                        form.BringToFront();
-                                    }));
-                                }
-                                catch { }
-                            }
-                        });
-                        listener.IsBackground = true;
-                        listener.Start();
-
-                        Application.Run(form);
+                        Log("按需打开启动器窗口");
+                        f = new MainForm(ctx);
+                        MainForm = f;
+                        f.Show();
                     }
                     catch (Exception ex)
                     {
-                        Program.Log("界面初始化失败：" + ex);
-                        MessageBox.Show("界面初始化失败：" + ex.Message, Program.AppName);
-                        Application.Run(ctx);
+                        Log("打开启动器失败：" + ex.Message);
+                        return;
                     }
                 }
+                f.ShowFromTray();
+            });
+        }
+
+        /// <summary>打开控制台 / 聊天的独立窗口。</summary>
+        public static void OpenConsoleWindow(string path, string title)
+        {
+            ConsoleWindow.Open(BaseUrl + path, path, title);
+        }
+
+        /// <summary>后台任务完成后，把结果推给网页界面。</summary>
+        public static void NotifyResult(string json)
+        {
+            var f = MainForm;
+            if (f == null || f.IsDisposed) return;
+            try
+            {
+                f.BeginInvoke(new Action(delegate() { f.PostRaw(json); }));
             }
+            catch { }
+        }
+
+        public static void Log(string msg)
+        {
+            try
+            {
+                var line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + msg;
+                // 预览/截图的日志单独放，别把「最近活动」刷成开发记录
+                var file = PreviewMode ? Path.Combine(Root, "data", "tray-preview.log") : LogFile;
+                lock (LogLock)
+                {
+                    var dir = Path.GetDirectoryName(file);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                    // 只留最近 300 行，避免无限增长
+                    if (File.Exists(file))
+                    {
+                        var old = File.ReadAllLines(file, Encoding.UTF8);
+                        if (old.Length > 300)
+                        {
+                            var keep = new string[300];
+                            Array.Copy(old, old.Length - 300, keep, 0, 300);
+                            File.WriteAllLines(file, keep, new UTF8Encoding(false));
+                        }
+                    }
+                    File.AppendAllText(file, line + Environment.NewLine, new UTF8Encoding(false));
+                }
+            }
+            catch { }
         }
 
         static string FindRoot()
         {
             var dir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
-            for (int i = 0; i < 3 && dir != null; i++)
+            for (int i = 0; i < 4 && dir != null; i++)
             {
                 if (File.Exists(Path.Combine(dir.FullName, "config.json"))) return dir.FullName;
                 dir = dir.Parent;
@@ -123,48 +308,113 @@ namespace YFRobot
             return null;
         }
 
-        /// <summary>托盘日志：只留最近 300 行。</summary>
-        public static void Log(string msg)
+        /// <summary>窗口 / 托盘状态图标的底图来源。</summary>
+        public static string IconPath;
+
+        /// <summary>加载品牌图标；找不到就退回旧的渐变圆标。</summary>
+        static Icon LoadAppIcon()
         {
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(LogFile));
-                var lines = new System.Collections.Generic.List<string>();
-                if (File.Exists(LogFile))
+                IconPath = Path.Combine(Root, "desktop", "YF-Robot.ico");
+                if (File.Exists(IconPath))
                 {
-                    lines.AddRange(File.ReadAllLines(LogFile, Encoding.UTF8));
-                    if (lines.Count > 300) lines.RemoveRange(0, lines.Count - 300);
+                    // 给一个大尺寸帧，任务栏/高 DPI 下更清楚
+                    return new Icon(IconPath, Scale(48), Scale(48));
                 }
-                lines.Add(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + msg);
-                File.WriteAllLines(LogFile, lines, new UTF8Encoding(false));
+                var exeIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (exeIcon != null) return exeIcon;
             }
             catch { }
+            return BuildFallbackIcon();
+        }
+
+        /// <summary>没有图标文件时的兜底：渐变圆 + Y。</summary>
+        static Icon BuildFallbackIcon()
+        {
+            var bmp = new Bitmap(64, 64);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.Clear(Color.Transparent);
+                using (var brush = new LinearGradientBrush(
+                    new Rectangle(2, 2, 60, 60),
+                    Color.FromArgb(99, 102, 241),
+                    Color.FromArgb(6, 182, 212),
+                    45f))
+                {
+                    g.FillEllipse(brush, 2, 2, 60, 60);
+                }
+                using (var f = new Font("Segoe UI", 34, FontStyle.Bold, GraphicsUnit.Pixel))
+                using (var w = new SolidBrush(Color.White))
+                {
+                    var size = g.MeasureString("Y", f);
+                    g.DrawString("Y", f, w, (64 - size.Width) / 2, (64 - size.Height) / 2);
+                }
+            }
+            return Icon.FromHandle(bmp.GetHicon());
         }
     }
+
+    /// <summary>极简 JSON 转义，够用即可，不引依赖。</summary>
+    static class Json
+    {
+        public static string Str(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var sb = new StringBuilder(s.Length + 8);
+            foreach (var c in s)
+            {
+                switch (c)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        if (c < ' ') sb.Append("\\u").Append(((int)c).ToString("x4"));
+                        else sb.Append(c);
+                        break;
+                }
+            }
+            return sb.ToString();
+        }
+    }
+
+    // =====================================================================
+    //  托盘 / 服务
+    // =====================================================================
 
     class TrayContext : ApplicationContext
     {
         readonly NotifyIcon _tray;
-        readonly System.Windows.Forms.Timer _timer;
         readonly Icon _iconUp, _iconDown, _iconBusy;
+        readonly System.Windows.Forms.Timer _timer;
+        /// <summary>只用来把回调切回 UI 线程的隐藏控件，不显示。</summary>
+        readonly Control _marshal = new Control();
         readonly string _version;
         int _port = 8899;
         int _autoRestarts;
         DateTime _lastRestart = DateTime.Now.AddHours(-1);
         bool? _wasUp;
-        bool _exiting;
-        readonly bool OpenOnStart;
+        bool _manualStop;
+        readonly bool _preview;
 
         public string BaseUrlOut { get { return BaseUrl(); } }
         public string VersionText { get { return _version; } }
         public int PortText { get { return _port; } }
+        public bool Preview { get { return _preview; } }
         public bool ServiceUp { get { return IsServiceUp(); } }
-        public void StartSvc() { EnsureService(true); }
-        public void StopSvc() { StopService(); }
+        public void StartSvc() { _manualStop = false; EnsureService(true); }
+        public void StopSvc() { _manualStop = true; Program.Log("手动停止服务"); StopService(); }
         public void DoRestart() { RestartService(); }
         public void DoBackup() { BackupMemory(); }
         public void DoRestore() { RestoreLatest(); }
-        public void OpenConsole() { OpenAppWindow("/console"); }
+
+        /// <summary>打开控制台（独立窗口，不再另开 Edge）。</summary>
+        public void OpenConsole() { Program.OpenConsoleWindow("/console", "控制台"); }
+        public void OpenChat() { Program.OpenConsoleWindow("/", "聊天"); }
 
         /// <summary>用系统默认浏览器打开（用户明确要网页版时用）。</summary>
         public void OpenInBrowser()
@@ -173,16 +423,15 @@ namespace YFRobot
             try
             {
                 var psi = new ProcessStartInfo(url);
-                psi.UseShellExecute = true;   // 走文件关联，等于在地址栏回车
+                psi.UseShellExecute = true;
                 Process.Start(psi);
                 return;
             }
             catch { }
             try { Process.Start("explorer.exe", url); }
-            catch (Exception ex) { MessageBox.Show("打不开浏览器：" + ex.Message + " 地址：" + url, Program.AppName); }
-
+            catch (Exception ex) { MessageBox.Show("打不开浏览器：" + ex.Message + "\n地址：" + url, Program.AppName); }
         }
-        public void OpenChat() { OpenAppWindow("/"); }
+
         public bool AutoStartOn { get { return IsAutoStart(); } set { SetAutoStart(value); } }
 
         public void OpenLogs()
@@ -231,7 +480,7 @@ namespace YFRobot
                 if (!string.IsNullOrEmpty(token)) url += (path.IndexOf('?') >= 0 ? "&" : "?") + "token=" + token;
 
                 var req = (HttpWebRequest)WebRequest.Create(url);
-                req.Timeout = 4000;
+                req.Timeout = 5000;
                 req.Proxy = null;
                 if (!string.IsNullOrEmpty(token)) req.Headers.Add("x-local-token", token);
                 using (var resp = (HttpWebResponse)req.GetResponse())
@@ -250,7 +499,7 @@ namespace YFRobot
                 var token = ReadToken();
                 var req = (HttpWebRequest)WebRequest.Create(url);
                 req.Method = "POST";
-                req.Timeout = 8000;
+                req.Timeout = 10000;
                 req.Proxy = null;
                 req.ContentType = "application/json; charset=utf-8";
                 if (!string.IsNullOrEmpty(token)) req.Headers.Add("x-local-token", token);
@@ -264,7 +513,6 @@ namespace YFRobot
             catch { return null; }
         }
 
-        /// <summary>本机令牌文件 data/token.txt。</summary>
         string ReadToken()
         {
             try
@@ -287,19 +535,32 @@ namespace YFRobot
 
         public void ShowTrayMenu()
         {
-            // 窗口「缩到托盘」时给个提示
+            if (_tray == null) return;
             _tray.ShowBalloonTip(2000, Program.AppName, "已缩到托盘，双击图标可再打开面板", ToolTipIcon.Info);
         }
 
-        public TrayContext(bool silent)
+        public TrayContext(bool silent) : this(silent, false) { }
+
+        public TrayContext(bool silent, bool preview)
         {
-            OpenOnStart = !silent;
+            _preview = preview;
             _version = ReadVersion();
             _port = ReadPort();
+            Program.BaseUrl = BaseUrl();
 
-            _iconUp = BuildIcon(Color.FromArgb(46, 160, 67));
-            _iconDown = BuildIcon(Color.FromArgb(128, 128, 128));
-            _iconBusy = BuildIcon(Color.FromArgb(214, 158, 46));
+            if (preview)
+            {
+                // 预览：不建托盘、不拉服务、不写后台状态
+                Program.Log("预览模式（版本 " + _version + "，端口 " + _port + "）");
+                return;
+            }
+
+            _iconUp = BuildStatusIcon(Color.FromArgb(52, 211, 153));
+            _iconDown = BuildStatusIcon(Color.FromArgb(139, 149, 168));
+            _iconBusy = BuildStatusIcon(Color.FromArgb(251, 191, 36));
+
+            // 用于把后台回调切回 UI 线程（静默模式下按需开窗口）
+            try { _marshal.CreateControl(); } catch { }
 
             _tray = new NotifyIcon();
             _tray.Icon = _iconDown;
@@ -311,12 +572,8 @@ namespace YFRobot
             Program.Log("托盘启动（版本 " + _version + "，端口 " + _port + "）");
             EnsureService(false);
 
-            // 第一次显示气泡：否则图标若在托盘溢出区，用户会以为"运行了但什么都没发生"
-            // 启动即打开面板：纯托盘程序用户会以为"运行了但什么都没有"
-            if (OpenOnStart) StartWindowWhenReady();
-
             _tray.ShowBalloonTip(3500, Program.AppName + " 已启动",
-                "右键托盘图标可以打开控制台 / 重启服务 / 退出。双击直接开控制台。",
+                "右键托盘图标可打开控制台 / 重启服务 / 退出。双击直接开控制台。",
                 ToolTipIcon.Info);
 
             _timer = new System.Windows.Forms.Timer();
@@ -325,6 +582,21 @@ namespace YFRobot
             _timer.Start();
 
             UpdateState();
+        }
+
+        /// <summary>在 UI 线程上执行（托盘回调、二次启动线程都可能从别的线程进来）。</summary>
+        public void OnUi(Action action)
+        {
+            try
+            {
+                if (_marshal.IsDisposed) return;
+                if (_marshal.InvokeRequired) _marshal.BeginInvoke(action);
+                else action();
+            }
+            catch
+            {
+                try { action(); } catch { }
+            }
         }
 
         // ---------- 配置 ----------
@@ -432,20 +704,62 @@ namespace YFRobot
 
         void RestartService()
         {
-            _tray.Icon = _iconBusy;
-            _tray.Text = Program.AppName + " · 重启中…";
+            if (_tray != null) _tray.Icon = _iconBusy;
+            if (_tray != null) _tray.Text = Program.AppName + " · 重启中…";
             Program.Log("手动重启服务");
-            StopService();
-            Thread.Sleep(1200);
-            EnsureService(true);
-            Thread.Sleep(1500);
+            _manualStop = true;      // 重启的空档里别让守护逻辑再拉一个
+            try
+            {
+                StopService();
+                Thread.Sleep(1200);
+                EnsureService(true);
+                Thread.Sleep(1500);
+            }
+            finally { _manualStop = false; }
             UpdateState();
+        }
+
+        /// <summary>
+        /// 界面触发的重启：不能卡住 UI 线程（托盘菜单里可以用阻塞版）。
+        /// </summary>
+        public void RestartServiceQuiet()
+        {
+            Program.Log("界面重启服务");
+            var t = new Thread(delegate()
+            {
+                try
+                {
+                    _manualStop = true;
+                    try
+                    {
+                        StopService();
+                        Thread.Sleep(1200);
+                        EnsureService(true);
+                        Thread.Sleep(1200);
+                    }
+                    finally { _manualStop = false; }
+                    var up = IsServiceUp();
+                    Program.Log("服务已重启：" + (up ? "运行中" : "未就绪"));
+                    Program.NotifyResult("{\"type\":\"result\",\"ok\":" + (up ? "true" : "false")
+                        + ",\"title\":\"" + (up ? "服务已重启" : "服务重启超时")
+                        + "\",\"text\":\"" + (up ? "本地服务已重新就绪。" : "12 秒后仍未就绪，看下日志。") + "\"}");
+                }
+                catch (Exception ex)
+                {
+                    Program.Log("重启服务失败：" + ex.Message);
+                    Program.NotifyResult("{\"type\":\"result\",\"ok\":false,\"title\":\"重启失败\",\"text\":\""
+                        + Json.Str(ex.Message) + "\"}");
+                }
+            });
+            t.IsBackground = true;
+            t.Start();
         }
 
         // ---------- 状态 ----------
 
         void UpdateState()
         {
+            if (_tray == null) return;
             bool up = IsServiceUp();
 
             if (_wasUp.HasValue && _wasUp.Value != up)
@@ -453,6 +767,7 @@ namespace YFRobot
 
             if (up)
             {
+                _manualStop = false;   // 服务起来了（不管是哪条路径拉起的），恢复守护
                 _tray.Icon = _iconUp;
                 _tray.Text = Program.AppName + " v" + _version + " · 运行中（:" + _port + "）";
                 _autoRestarts = 0;
@@ -465,8 +780,9 @@ namespace YFRobot
                 _tray.Icon = _iconDown;
                 _tray.Text = Program.AppName + " v" + _version + " · 已停止";
 
-                // 服务意外退出：自动拉起，最多 3 次，间隔 ≥15 秒
-                if (_wasUp.HasValue && _wasUp.Value && _autoRestarts < 3)
+                // 服务意外退出：自动拉起，最多 3 次，间隔 ≥15 秒。
+                // 用户手动点「停止」时不自动拉起，否则按钮等于没用。
+                if (!_manualStop && _wasUp.HasValue && _wasUp.Value && _autoRestarts < 3)
                 {
                     if ((DateTime.Now - _lastRestart).TotalSeconds >= 15)
                     {
@@ -494,9 +810,9 @@ namespace YFRobot
             m.Items.Add(info);
             m.Items.Add(new ToolStripSeparator());
 
+            m.Items.Add("打开启动器", null, delegate { Program.ShowLauncher(); });
             m.Items.Add("打开控制台", null, delegate { OpenConsole(); });
-
-            m.Items.Add("聊天窗口", null, delegate { OpenAppWindow("/"); });
+            m.Items.Add("聊天窗口", null, delegate { OpenChat(); });
 
             m.Items.Add(new ToolStripSeparator());
 
@@ -537,22 +853,16 @@ namespace YFRobot
                 if (MessageBox.Show("退出会停止服务（聊天也会断）。确定？", Program.AppName,
                         MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
                 Program.Log("退出托盘，停止服务");
-                _exiting = true;
-                _timer.Stop();
+
+                if (_timer != null) _timer.Stop();
                 StopService();
-                _tray.Visible = false;
+                if (_tray != null) _tray.Visible = false;
                 Application.Exit();
             });
 
             return m;
         }
 
-        /// <summary>
-        /// 打开控制台。
-        ///
-        /// 用 Edge/Chrome 的 --app 模式：没有地址栏和标签页，看起来像独立软件，
-        /// 而不是"在浏览器里开了个网页"。都没有时才退回默认浏览器。
-        /// </summary>
         /// <summary>跑一个 node 工具并返回输出（用于备份/恢复这类一次性动作）。</summary>
         string RunNode(string args, int timeoutMs)
         {
@@ -584,11 +894,25 @@ namespace YFRobot
             }
         }
 
-        void BackupMemory()
+        public string BackupMemoryText()
         {
             Program.Log("手动备份记忆");
             var outText = RunNode("tools\\memory-tool.mjs export", 60000);
             Program.Log("备份结果：" + outText.Replace("\r", "").Replace("\n", " | "));
+            return outText;
+        }
+
+        public string RestoreMemoryText()
+        {
+            Program.Log("从最近备份恢复记忆");
+            var outText = RunNode("tools\\memory-tool.mjs restore --latest", 120000);
+            Program.Log("恢复结果：" + outText.Replace("\r", "").Replace("\n", " | "));
+            return outText;
+        }
+
+        void BackupMemory()
+        {
+            var outText = BackupMemoryText();
             _tray.ShowBalloonTip(3000, Program.AppName + " · 记忆已备份",
                 FirstLine(outText), ToolTipIcon.Info);
             MessageBox.Show(outText, "备份记忆", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -600,82 +924,16 @@ namespace YFRobot
             if (MessageBox.Show("要从最近的备份恢复吗？\n\n当前记忆和会话会被覆盖（备份本身不会删）。\n\n" + FirstLine(list),
                     "恢复记忆", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
 
-            Program.Log("从最近备份恢复记忆");
-            var outText = RunNode("tools\\memory-tool.mjs restore --latest", 120000);
-            Program.Log("恢复结果：" + outText.Replace("\r", "").Replace("\n", " | "));
+            var outText = RestoreMemoryText();
             MessageBox.Show(outText, "恢复记忆", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
-        static string FirstLine(string text)
+        public static string FirstLine(string text)
         {
             if (string.IsNullOrEmpty(text)) return "";
             var i = text.IndexOf('\n');
             var line = i < 0 ? text : text.Substring(0, i);
             return line.Trim();
-        }
-
-        /// <summary>后台等服务就绪，然后打开面板窗口（用户双击后能立刻看到东西）。</summary>
-        void StartWindowWhenReady()
-        {
-            var t = new System.Threading.Thread(delegate()
-            {
-                for (int i = 0; i < 40; i++) // 最多 20 秒
-                {
-                    if (IsServiceUp()) break;
-                    System.Threading.Thread.Sleep(500);
-                }
-                try
-                {
-                    var mi = _tray.ContextMenuStrip;
-                    // 直接用内部方法打开（与菜单同一套逻辑）
-                    OpenAppWindow("/console");
-                }
-                catch (Exception ex) { Program.Log("启动时打开面板失败：" + ex.Message); }
-            });
-            t.IsBackground = true;
-            t.Start();
-        }
-
-
-
-        /// <summary>用浏览器应用窗口打开某个路径（无地址栏，像独立软件）。</summary>
-        void OpenAppWindow(string pathPart)
-        {
-            // 服务没起来就开窗口会白屏：先等一会儿
-            for (int i = 0; i < 30 && !IsServiceUp(); i++) System.Threading.Thread.Sleep(500);
-            var url = BaseUrl() + pathPart;
-            var candidates = new[]
-            {
-                Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
-                Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
-                Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
-                Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
-            };
-
-            foreach (var exe in candidates)
-            {
-                if (!File.Exists(exe)) continue;
-                try
-                {
-                    // 单独的 profile 目录：不影响用户自己的浏览器会话
-                    var profile = Path.Combine(Program.Root, "data", "ui-profile");
-                    Directory.CreateDirectory(profile);
-                    var psi = new ProcessStartInfo();
-                    psi.FileName = exe;
-                    psi.Arguments = "--app=" + url + " --window-size=1280,860 --no-first-run --no-default-browser-check"
-                                   + " --user-data-dir=\"" + profile + "\"";
-                    psi.UseShellExecute = false;
-                    Process.Start(psi);
-                    return;
-                }
-                catch (Exception ex) { Program.Log("用应用窗口打开失败：" + ex.Message); }
-            }
-
-            try { Process.Start(url); }
-            catch (Exception ex)
-            {
-                MessageBox.Show("打不开控制台：" + ex.Message + "\n服务是不是还没起来？", Program.AppName);
-            }
         }
 
         // ---------- 开机自启 ----------
@@ -708,150 +966,693 @@ namespace YFRobot
             }
         }
 
-        // ---------- 图标 ----------
+        // ---------- 托盘状态图标（品牌图标 + 右下角状态点） ----------
 
-        static Icon BuildIcon(Color color)
+        /// <summary>品牌图标右下角加一个状态点：绿=运行中 / 灰=已停止 / 黄=重启中。</summary>
+        static Icon BuildStatusIcon(Color color)
         {
-            var bmp = new Bitmap(32, 32);
+            try
+            {
+                if (Program.AppIcon != null)
+                {
+                    using (var baseBmp = Program.AppIcon.ToBitmap())
+                    using (var bmp = new Bitmap(64, 64))
+                    {
+                        using (var g = Graphics.FromImage(bmp))
+                        {
+                            g.SmoothingMode = SmoothingMode.AntiAlias;
+                            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                            g.Clear(Color.Transparent);
+                            g.DrawImage(baseBmp, new Rectangle(0, 0, 64, 64));
+
+                            const int d = 26;
+                            var x = 64 - d - 2;
+                            var y = 64 - d - 2;
+                            using (var ring = new SolidBrush(Color.FromArgb(235, 11, 14, 20)))
+                                g.FillEllipse(ring, x - 4, y - 4, d + 8, d + 8);
+                            using (var dot = new SolidBrush(color))
+                                g.FillEllipse(dot, x, y, d, d);
+                        }
+                        return Icon.FromHandle(bmp.GetHicon());
+                    }
+                }
+            }
+            catch { }
+            return BuildTintIcon(Program.AppIcon, color);
+        }
+
+        static Icon BuildTintIcon(Icon source, Color color)
+        {
+            var bmp = new Bitmap(64, 64);
             using (var g = Graphics.FromImage(bmp))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.Clear(Color.Transparent);
-                using (var b = new SolidBrush(color)) g.FillEllipse(b, 1, 1, 30, 30);
-                using (var f = new Font("Segoe UI", 16, FontStyle.Bold, GraphicsUnit.Pixel))
+                using (var b = new SolidBrush(color)) g.FillEllipse(b, 2, 2, 60, 60);
+                using (var f = new Font("Segoe UI", 34, FontStyle.Bold, GraphicsUnit.Pixel))
                 using (var w = new SolidBrush(Color.White))
                 {
                     var size = g.MeasureString("Y", f);
-                    g.DrawString("Y", f, w, (32 - size.Width) / 2, (32 - size.Height) / 2);
+                    g.DrawString("Y", f, w, (64 - size.Width) / 2, (64 - size.Height) / 2);
                 }
             }
             return Icon.FromHandle(bmp.GetHicon());
         }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (_tray != null) _tray.Dispose();
+                if (_marshal != null && !_marshal.IsDisposed) _marshal.Dispose();
+            }
+            base.Dispose(disposing);
+        }
     }
 
-    /// <summary>
-    /// 启动器主窗口：左侧导航 + 右侧内容。
-    ///
-    /// 之前用标签页，观感更像"设置对话框"；改成侧栏后更接近常见的桌面应用
-    /// （概览 / 插件 / 市场 / 设置），网页控制台仍然只是其中一个入口。
-    /// </summary>
+    // =====================================================================
+    //  网页界面 ⇄ C# 的桥
+    // =====================================================================
+
+    [ComVisible(true)]
+    [ClassInterface(ClassInterfaceType.AutoDual)]
+    public class LauncherBridge
+    {
+        readonly TrayContext _ctx;
+        readonly MainForm _form;
+
+        internal LauncherBridge(TrayContext ctx, MainForm form)
+        {
+            _ctx = ctx;
+            _form = form;
+        }
+
+        public string Ping() { return "pong"; }
+
+        /// <summary>界面轮询的状态快照。</summary>
+        public string GetState()
+        {
+            var up = _ctx.ServiceUp;
+            bool? adp = up ? _ctx.AdapterOnline() : null;
+
+            var sb = new StringBuilder();
+            sb.Append("{\"version\":\"").Append(Json.Str(_ctx.VersionText)).Append("\",");
+            sb.Append("\"port\":").Append(_ctx.PortText).Append(",");
+            sb.Append("\"serviceUp\":").Append(up ? "true" : "false").Append(",");
+            sb.Append("\"adapterOnline\":").Append(!adp.HasValue ? "null" : (adp.Value ? "true" : "false")).Append(",");
+            sb.Append("\"autoStart\":").Append(_ctx.AutoStartOn ? "true" : "false").Append(",");
+            sb.Append("\"base\":\"").Append(Json.Str(_ctx.BaseUrlOut)).Append("\",");
+            sb.Append("\"trayLog\":[");
+
+            try
+            {
+                var log = Path.Combine(Program.Root, "data", "tray.log");
+                if (File.Exists(log))
+                {
+                    var lines = File.ReadAllLines(log, Encoding.UTF8);
+                    var start = Math.Max(0, lines.Length - 24);
+                    var first = true;
+                    for (int i = start; i < lines.Length; i++)
+                    {
+                        if (lines[i].Trim().Length == 0) continue;
+                        if (!first) sb.Append(",");
+                        first = false;
+                        sb.Append("\"").Append(Json.Str(lines[i])).Append("\"");
+                    }
+                }
+            }
+            catch { }
+
+            sb.Append("]}");
+            return sb.ToString();
+        }
+
+        public string GetPlugins()
+        {
+            var raw = _ctx.ApiGet("/api/admin/plugins");
+            return raw ?? "{\"error\":\"服务未响应\"}";
+        }
+
+        public string GetMarket()
+        {
+            try
+            {
+                var file = Path.Combine(Program.Root, "market", "index.json");
+                if (!File.Exists(file)) return "{\"items\":[]}";
+                return File.ReadAllText(file, Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                return "{\"items\":[],\"error\":\"" + Json.Str(ex.Message) + "\"}";
+            }
+        }
+
+        public string CheckUpdate()
+        {
+            var raw = _ctx.ApiGet("/api/admin/update/check");
+            return raw ?? "{\"error\":\"服务未响应\"}";
+        }
+
+        /// <summary>界面动作总入口；失败也返回 JSON，前端不用 try/catch。</summary>
+        public string Act(string action, string arg)
+        {
+            try
+            {
+                switch (action)
+                {
+                    case "start":
+                        _ctx.StartSvc();
+                        Thread.Sleep(400);
+                        return "{\"ok\":true}";
+                    case "stop":
+                        _ctx.StopSvc();
+                        Thread.Sleep(300);
+                        return "{\"ok\":true}";
+                    case "restart":
+                        _ctx.RestartServiceQuiet();
+                        return "{\"ok\":true}";
+                    case "backup":
+                        RunInBackground("记忆已备份", "备份失败", delegate { return _ctx.BackupMemoryText(); }, null);
+                        return "{\"ok\":true}";
+                    case "restore":
+                        RunInBackground("记忆已恢复", "恢复失败", delegate { return _ctx.RestoreMemoryText(); }, null);
+                        return "{\"ok\":true}";
+                    case "logs":
+                        _ctx.OpenLogs();
+                        return "{\"ok\":true}";
+                    case "data":
+                        _ctx.OpenDataDir();
+                        return "{\"ok\":true}";
+                    case "pluginsDir":
+                        _ctx.OpenFolder(Path.Combine(Program.Root, "plugins"));
+                        return "{\"ok\":true}";
+                    case "marketDir":
+                        _ctx.OpenFolder(Path.Combine(Program.Root, "market"));
+                        return "{\"ok\":true}";
+                    case "marketEdit":
+                        return EditMarketIndex();
+                    case "browser":
+                        _ctx.OpenInBrowser();
+                        return "{\"ok\":true}";
+                    case "github":
+                        OpenUrl("https://github.com/YF-YMWA/yf-robot");
+                        return "{\"ok\":true}";
+                    case "open":
+                        return OpenApp(arg);
+                    case "update":
+                        return CheckUpdate();
+                    case "autoStart":
+                        var on = string.Equals(arg, "true", StringComparison.OrdinalIgnoreCase);
+                        _ctx.AutoStartOn = on;
+                        return "{\"ok\":true,\"autoStart\":" + (_ctx.AutoStartOn ? "true" : "false") + "}";
+                    case "togglePlugin":
+                        return TogglePlugin(arg);
+                    case "install":
+                        return InstallPlugin(arg);
+                    default:
+                        return "{\"ok\":false,\"error\":\"未知操作：" + Json.Str(action) + "\"}";
+                }
+            }
+            catch (Exception ex)
+            {
+                Program.Log("操作失败（" + action + "）：" + ex.Message);
+                return "{\"ok\":false,\"error\":\"" + Json.Str(ex.Message) + "\"}";
+            }
+        }
+
+        string OpenApp(string which)
+        {
+            if (string.Equals(which, "console", StringComparison.OrdinalIgnoreCase))
+            {
+                _ctx.OpenConsole();
+                return "{\"ok\":true}";
+            }
+            if (string.Equals(which, "chat", StringComparison.OrdinalIgnoreCase))
+            {
+                _ctx.OpenChat();
+                return "{\"ok\":true}";
+            }
+            if (string.Equals(which, "browser", StringComparison.OrdinalIgnoreCase))
+            {
+                _ctx.OpenInBrowser();
+                return "{\"ok\":true}";
+            }
+            return "{\"ok\":false,\"error\":\"未知入口\"}";
+        }
+
+        string EditMarketIndex()
+        {
+            var f = Path.Combine(Program.Root, "market", "index.json");
+            if (!File.Exists(f)) return "{\"ok\":false,\"error\":\"还没有索引文件：" + Json.Str(f) + "\"}";
+            Process.Start("notepad.exe", "\"" + f + "\"");
+            return "{\"ok\":true}";
+        }
+
+        static void OpenUrl(string url)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(url);
+                psi.UseShellExecute = true;
+                Process.Start(psi);
+            }
+            catch (Exception ex) { Program.Log("打开链接失败：" + ex.Message); }
+        }
+
+        string TogglePlugin(string arg)
+        {
+            var parts = arg.Split('|');
+            if (parts.Length < 2) return "{\"ok\":false,\"error\":\"参数不完整\"}";
+            var id = parts[0];
+            var enabled = string.Equals(parts[1], "true", StringComparison.OrdinalIgnoreCase);
+            var body = "{\"id\":\"" + Json.Str(id) + "\",\"enabled\":" + (enabled ? "true" : "false") + "}";
+            var r = _ctx.ApiPost("/api/admin/plugins/toggle", body);
+            if (r == null) return "{\"ok\":false,\"error\":\"服务没起来？\"}";
+            return "{\"ok\":true}";
+        }
+
+        string InstallPlugin(string arg)
+        {
+            var sep = arg.IndexOf('|');
+            if (sep < 0) return "{\"ok\":false,\"error\":\"参数不完整\"}";
+            var id = arg.Substring(0, sep);
+            var url = arg.Substring(sep + 1);
+
+            RunInBackground("插件安装完成", "插件安装失败", delegate
+            {
+                var dir = Path.Combine(Program.Root, "plugins");
+                Directory.CreateDirectory(dir);
+                var zip = Path.Combine(Path.GetTempPath(), "yf-plugin-" + DateTime.Now.Ticks + ".zip");
+                try
+                {
+                    var wc = new WebClient();
+                    wc.Proxy = null;
+                    wc.DownloadFile(new Uri(url), zip);
+                    ZipFile.ExtractToDirectory(zip, dir);
+                    return "「" + id + "」已解压到 plugins/，重启服务后生效。";
+                }
+                finally
+                {
+                    try { if (File.Exists(zip)) File.Delete(zip); } catch { }
+                }
+            }, "plugins");
+
+            return "{\"ok\":true}";
+        }
+
+        /// <summary>后台跑一次性操作，完成后用 WebMessage 通知界面。</summary>
+        void RunInBackground(string okTitle, string failTitle, Func<string> work, string refresh)
+        {
+            var t = new Thread(delegate()
+            {
+                string text;
+                var ok = true;
+                try { text = work(); }
+                catch (Exception ex)
+                {
+                    ok = false;
+                    text = ex.Message;
+                    Program.Log(failTitle + "：" + ex.Message);
+                }
+
+                if (text != null && text.Length > 600) text = text.Substring(0, 600) + "…";
+                var json = "{\"type\":\"result\",\"ok\":" + (ok ? "true" : "false")
+                    + ",\"title\":\"" + Json.Str(ok ? okTitle : failTitle)
+                    + "\",\"text\":\"" + Json.Str(text == null ? "" : text.Trim())
+                    + "\"" + (string.IsNullOrEmpty(refresh) ? "" : ",\"refresh\":\"" + refresh + "\"") + "}";
+                Program.NotifyResult(json);
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        /* ---------------- 窗口 ---------------- */
+
+        public void Window(string action)
+        {
+            switch (action)
+            {
+                case "drag": _form.BeginDrag(); break;
+                case "min": _form.WindowState = FormWindowState.Minimized; break;
+                case "max": _form.ToggleMaximize(); break;
+                case "close": _form.Close(); break;
+            }
+        }
+    }
+
+    // =====================================================================
+    //  启动器主窗口
+    // =====================================================================
+
     class MainForm : Form
     {
         readonly TrayContext _ctx;
-        readonly System.Windows.Forms.Timer _timer;
+        readonly LauncherBridge _bridge;
+        WebView2 _web;
+        Panel _loading;
+        bool _webReady;
+        bool _shotDone;
 
-        Panel _content;
-        readonly System.Collections.Generic.List<Label> _nav = new System.Collections.Generic.List<Label>();
-        int _page;
+        [DllImport("user32.dll")]
+        static extern bool ReleaseCapture();
+        [DllImport("user32.dll")]
+        static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
 
-        // 概览
-        Label _svcDot, _svcText, _adpDot, _adpText;
-        // 插件
-        ListView _plist;
-        Label _pHint;
-        // 市场
-        ListView _mlist;
-        Label _mHint;
-        // 设置
-        CheckBox _auto;
-        Label _updText;
-
-        static readonly Color Bg = Color.FromArgb(10, 13, 20);
-        static readonly Color Side = Color.FromArgb(14, 18, 27);
-        static readonly Color Card = Color.FromArgb(20, 25, 36);
-        static readonly Color Brd = Color.FromArgb(38, 46, 63);
-        static readonly Color Txt = Color.FromArgb(232, 237, 247);
-        static readonly Color DimC = Color.FromArgb(135, 146, 166);
-        static readonly Color Acc = Color.FromArgb(99, 102, 241);
-        static readonly Color Green = Color.FromArgb(52, 211, 153);
-        static readonly Color Red = Color.FromArgb(251, 113, 133);
-
-        static readonly string[] Pages = { "控制台", "聊天", "概览", "插件", "市场", "设置" };
-        static readonly string[] PageIcons = { "▤", "✎", "◎", "⬡", "⇩", "⚙" };
+        const int WM_NCLBUTTONDOWN = 0xA1;
+        const int HTCAPTION = 0x2;
 
         public MainForm(TrayContext ctx)
         {
             _ctx = ctx;
-            Text = "YF-Robot";
-            ClientSize = new Size(788, 556);
+            Text = Program.AppName;
+            AutoScaleMode = AutoScaleMode.None;   // 所有尺寸由 Program.Scale 统一换算
+            ClientSize = new Size(Program.Scale(1080), Program.Scale(720));
+            MinimumSize = new Size(Program.Scale(900), Program.Scale(620));
             StartPosition = FormStartPosition.CenterScreen;
-            // 无边框：自绘标题栏，观感更接近现代启动器
             FormBorderStyle = FormBorderStyle.None;
-            MinimumSize = new Size(900, 620);
-            Icon = IconFromText("Y", Color.FromArgb(99, 102, 241));
+            BackColor = Color.FromArgb(11, 14, 20);
+            ForeColor = Color.FromArgb(233, 238, 249);
+            Icon = Program.AppIcon;
             DoubleBuffered = true;
-            Padding = new Padding(1);
-            BackColor = Bg;
-            ForeColor = Txt;
-            Font = new Font("Microsoft YaHei UI", 9f);
+            // 留一圈可抓取的边：WebView2 子窗口会盖住客户区，
+            // 没有这圈边的话无边框窗口在网页区域拖不到边、改不了尺寸。
+            Padding = new Padding(Program.Scale(5));
 
-            // 注意顺序：Fill 的面板要先加，Dock.Left 的侧栏后加，
-            // 否则 Fill 会把侧栏盖住（WinForms 按反向 z 序排版）。
-            var bar = BuildTitleBar();
-            Controls.Add(bar);
+            // 最大化时不要盖住任务栏
+            var wa = Screen.PrimaryScreen.WorkingArea;
+            MaximizedBounds = wa;
 
-            var body = new Panel();
-            body.Dock = DockStyle.Fill;
-            body.BackColor = Bg;
-            Controls.Add(body);
+            _loading = BuildLoading();
+            Controls.Add(_loading);
 
-            _content = new Panel();
-            _content.Dock = DockStyle.Fill;
-            _content.BackColor = Bg;
-            body.Controls.Add(_content);
-
-            BuildSidebar(body);
-
-            ShowPage(0);
-
-            _timer = new System.Windows.Forms.Timer();
-            _timer.Interval = 3000;
-            _timer.Tick += delegate { if (_page == 2) RefreshOverview(); };
-            _timer.Start();
+            _bridge = new LauncherBridge(ctx, this);
+            BuildWeb();
 
             Resize += delegate { RoundCorners(); };
             Shown += delegate { RoundCorners(); };
 
             FormClosing += delegate(object s2, FormClosingEventArgs e2)
             {
-                if (e2.CloseReason == CloseReason.UserClosing)
+                if (e2.CloseReason == CloseReason.UserClosing && !Program.PreviewMode)
                 {
                     e2.Cancel = true;
-                    Hide();
-                    ShowInTaskbar = false;
-                    _ctx.ShowTrayMenu();
+                    HideToTray();
                 }
             };
         }
 
-        // ================= 无边框窗口 =================
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        static extern bool ReleaseCapture();
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        static extern IntPtr SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
+        Panel BuildLoading()
+        {
+            var p = new Panel();
+            p.Dock = DockStyle.Fill;
+            p.BackColor = Color.FromArgb(11, 14, 20);
 
-        const int WM_NCLBUTTONDOWN = 0xA1;
-        const int HTCAPTION = 0x2;
-        const int WM_NCHITTEST = 0x84;
-        const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13,
-                  HTTOPRIGHT = 14, HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
+            var logo = new Label();
+            logo.Text = "Y";
+            logo.Font = new Font("Segoe UI", 26f, FontStyle.Bold);
+            logo.ForeColor = Color.White;
+            logo.BackColor = Color.FromArgb(99, 102, 241);
+            logo.Size = new Size(Program.Scale(58), Program.Scale(58));
+            logo.TextAlign = ContentAlignment.MiddleCenter;
+            logo.Location = new Point((ClientSize.Width - logo.Width) / 2, ClientSize.Height / 2 - Program.Scale(70));
+            logo.Anchor = AnchorStyles.None;
+            p.Controls.Add(logo);
 
-        void DragWindow()
+            var tip = new Label();
+            tip.Text = "正在载入启动器…";
+            tip.ForeColor = Color.FromArgb(139, 149, 168);
+            tip.Font = new Font("Microsoft YaHei UI", 10f);
+            tip.AutoSize = true;
+            tip.Location = new Point(ClientSize.Width / 2, ClientSize.Height / 2 + Program.Scale(4));
+            tip.Anchor = AnchorStyles.None;
+            p.Controls.Add(tip);
+
+            p.Resize += delegate
+            {
+                logo.Location = new Point((p.Width - logo.Width) / 2, p.Height / 2 - Program.Scale(70));
+                tip.Location = new Point((p.Width - tip.Width) / 2, p.Height / 2 + Program.Scale(4));
+            };
+            return p;
+        }
+
+        void BuildWeb()
+        {
+            try
+            {
+                _web = new WebView2();
+                _web.Dock = DockStyle.Fill;
+                _web.DefaultBackgroundColor = Color.FromArgb(11, 14, 20);
+                Controls.Add(_web);
+                _web.BringToFront();
+
+                _web.CoreWebView2InitializationCompleted += delegate(object s, CoreWebView2InitializationCompletedEventArgs e)
+                {
+                    if (!e.IsSuccess)
+                    {
+                        ShowFallback("内嵌浏览器初始化失败：" + (e.InitializationException == null ? "未知错误" : e.InitializationException.Message));
+                        return;
+                    }
+                    var core = _web.CoreWebView2;
+                    core.Settings.AreDefaultContextMenusEnabled = false;
+                    core.Settings.IsStatusBarEnabled = false;
+                    core.Settings.IsZoomControlEnabled = false;
+                    core.Settings.AreDevToolsEnabled = Program.PreviewMode;
+
+                    // 本地界面走虚拟域名：既能用相对路径，也不受 file:// 限制
+                    var ui = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ui");
+                    if (!Directory.Exists(ui)) ui = Path.Combine(Program.Root, "desktop", "ui");
+                    if (!File.Exists(Path.Combine(ui, "index.html")))
+                    {
+                        ShowFallback("找不到界面文件：" + Path.Combine(ui, "index.html"));
+                        return;
+                    }
+
+                    try
+                    {
+                        core.SetVirtualHostNameToFolderMapping("launcher.local", ui,
+                            CoreWebView2HostResourceAccessKind.Allow);
+                    }
+                    catch (Exception ex) { Program.Log("界面域名映射失败：" + ex.Message); }
+
+                    core.AddHostObjectToScript("launcher", _bridge);
+                    core.NavigationCompleted += OnWebNavigated;
+
+                    var url = "https://launcher.local/index.html";
+                    if (!string.IsNullOrEmpty(Program.StartPage)) url += "?page=" + Program.StartPage;
+                    try { _web.Source = new Uri(url); }
+                    catch (Exception ex) { ShowFallback("载入界面失败：" + ex.Message); }
+                };
+
+                _web.EnsureCoreWebView2Async(null);
+            }
+            catch (Exception ex)
+            {
+                ShowFallback("内嵌浏览器起不来：" + ex.Message);
+                Program.Log("WebView2 初始化失败：" + ex.Message);
+            }
+        }
+
+        void OnWebNavigated(object sender, CoreWebView2NavigationCompletedEventArgs e)
+        {
+            if (!e.IsSuccess)
+            {
+                ShowFallback("界面载入失败（WebView2 错误码 " + e.WebErrorStatus + "）");
+                return;
+            }
+
+            _webReady = true;
+            if (_loading != null) _loading.Visible = false;
+            Program.Log("启动器界面已载入");
+
+            if (!string.IsNullOrEmpty(Program.ShotPath))
+            {
+                var timer = new System.Windows.Forms.Timer();
+                timer.Interval = 1600; // 等前端拉完状态、动画落定
+                timer.Tick += delegate
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                    CaptureShot(Program.ShotPath);
+                };
+                timer.Start();
+            }
+        }
+
+        /// <summary>--shot=路径：把网页区域截成 PNG（自检/截图用，不影响正常启动）。</summary>
+        void CaptureShot(string path)
+        {
+            if (_shotDone) return;
+            _shotDone = true;
+            try
+            {
+                var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
+                _web.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, fs)
+                    .ContinueWith(delegate(Task t)
+                    {
+                        try { fs.Close(); } catch { }
+                        if (t.IsFaulted)
+                            Program.Log("截图失败：" + (t.Exception == null ? "未知" : t.Exception.GetBaseException().Message));
+                        else
+                            Program.Log("截图已保存：" + path);
+
+                        try
+                        {
+                            BeginInvoke(new Action(delegate()
+                            {
+                                Close();
+                                Application.Exit();
+                            }));
+                        }
+                        catch { }
+                    });
+            }
+            catch (Exception ex)
+            {
+                Program.Log("截图失败：" + ex.Message);
+            }
+        }
+
+        void ShowFallback(string message)
+        {
+            if (IsDisposed) return;
+            try
+            {
+                if (_web != null) _web.Visible = false;
+                if (_loading != null) _loading.Visible = false;
+                Program.Log("界面回退：" + message);
+
+                var panel = new Panel();
+                panel.Dock = DockStyle.Fill;
+                panel.BackColor = Color.FromArgb(11, 14, 20);
+                Controls.Add(panel);
+                panel.BringToFront();
+
+                var title = new Label();
+                title.Text = "启动器界面没能载入";
+                title.Font = new Font("Microsoft YaHei UI", 15f, FontStyle.Bold);
+                title.ForeColor = Color.FromArgb(233, 238, 249);
+                title.AutoSize = true;
+                title.Location = new Point(40, 44);
+                panel.Controls.Add(title);
+
+                var desc = new Label();
+                desc.Text = message + "\n\n你仍然可以打开控制台或网页版继续使用。";
+                desc.Font = new Font("Microsoft YaHei UI", 9.5f);
+                desc.ForeColor = Color.FromArgb(139, 149, 168);
+                desc.AutoSize = true;
+                desc.MaximumSize = new Size(620, 0);
+                desc.Location = new Point(42, 82);
+                panel.Controls.Add(desc);
+
+                var console = MakeFallbackButton("打开控制台", 42, 170, true);
+                console.Click += delegate { _ctx.OpenConsole(); };
+
+                var browser = MakeFallbackButton("网页版（浏览器）", 166, 170, false);
+                browser.Click += delegate { _ctx.OpenInBrowser(); };
+
+                var quit = MakeFallbackButton("退出", 330, 170, false);
+                quit.Click += delegate { Application.Exit(); };
+                panel.Controls.Add(console);
+                panel.Controls.Add(browser);
+                panel.Controls.Add(quit);
+            }
+            catch (Exception ex)
+            {
+                Program.Log("回退界面也失败了：" + ex.Message);
+            }
+        }
+
+        static Button MakeFallbackButton(string text, int x, int y, bool primary)
+        {
+            var b = new Button();
+            b.Text = text;
+            b.Location = new Point(x, y);
+            b.Size = new Size(text.Length > 6 ? 150 : 110, 38);
+            b.FlatStyle = FlatStyle.Flat;
+            b.Font = new Font("Microsoft YaHei UI", 9.5f);
+            b.ForeColor = Color.White;
+            b.BackColor = primary ? Color.FromArgb(99, 102, 241) : Color.FromArgb(28, 34, 48);
+            b.FlatAppearance.BorderColor = primary ? Color.FromArgb(99, 102, 241) : Color.FromArgb(56, 66, 84);
+            b.Cursor = Cursors.Hand;
+            return b;
+        }
+
+        // ---------- 给桥用 ----------
+
+        public void BeginDrag()
         {
             ReleaseCapture();
             SendMessage(Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
         }
 
-        /// <summary>无边框窗口默认不能拖边缘缩放，这里自己算命中区域。</summary>
+        public void ToggleMaximize()
+        {
+            if (WindowState == FormWindowState.Maximized)
+            {
+                WindowState = FormWindowState.Normal;
+            }
+            else
+            {
+                MaximizedBounds = Screen.FromControl(this).WorkingArea;
+                WindowState = FormWindowState.Maximized;
+            }
+            RoundCorners();
+        }
+
+        public void ShowFromTray()
+        {
+            Show();
+            ShowInTaskbar = true;
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            Activate();
+            BringToFront();
+            if (_webReady && _web != null) _web.Focus();
+        }
+
+        void HideToTray()
+        {
+            Hide();
+            ShowInTaskbar = false;
+            _ctx.ShowTrayMenu();
+        }
+
+        /// <summary>把一条后台结果发给网页界面。</summary>
+        public void PostRaw(string json)
+        {
+            if (_web == null || _web.CoreWebView2 == null) return;
+            try { _web.CoreWebView2.PostWebMessageAsJson(json); }
+            catch (Exception ex) { Program.Log("推送结果失败：" + ex.Message); }
+        }
+
+        // ---------- 无边框辅助 ----------
+
+        const int WM_NCHITTEST = 0x84;
+        const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13,
+                  HTTOPRIGHT = 14, HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
+
+        /// <summary>
+        /// 无边框窗口默认不能拖边缘缩放。Padding 留出的那一圈由窗体自己接管，
+        /// WebView2 只占中间，所以这里按光标位置回报缩放命中区。
+        /// </summary>
         protected override void WndProc(ref Message m)
         {
             if (m.Msg == WM_NCHITTEST)
             {
                 base.WndProc(ref m);
-                var p = PointToClient(new Point(m.LParam.ToInt32() & 0xFFFF, m.LParam.ToInt32() >> 16));
-                const int g = 6;
-                bool l = p.X <= g, r = p.X >= ClientSize.Width - g;
-                bool t = p.Y <= g, b = p.Y >= ClientSize.Height - g;
+                if (WindowState == FormWindowState.Maximized) return;
+
+                var lp = m.LParam.ToInt32();
+                var screenPoint = new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF));
+                var p = PointToClient(screenPoint);
+                var g = Program.Scale(5);   // 可抓取的边框宽度也跟着 DPI 放大
+                var w = ClientSize.Width;
+                var h = ClientSize.Height;
+                if (p.X < 0 || p.Y < 0 || p.X > w || p.Y > h) return;
+
+                bool l = p.X <= g, r = p.X >= w - g;
+                bool t = p.Y <= g, b = p.Y >= h - g;
+                if (!(l || r || t || b)) return;
+
                 if (t && l) m.Result = (IntPtr)HTTOPLEFT;
                 else if (t && r) m.Result = (IntPtr)HTTOPRIGHT;
                 else if (b && l) m.Result = (IntPtr)HTBOTTOMLEFT;
@@ -859,7 +1660,7 @@ namespace YFRobot
                 else if (l) m.Result = (IntPtr)HTLEFT;
                 else if (r) m.Result = (IntPtr)HTRIGHT;
                 else if (t) m.Result = (IntPtr)HTTOP;
-                else if (b) m.Result = (IntPtr)HTBOTTOM;
+                else m.Result = (IntPtr)HTBOTTOM;
                 return;
             }
             base.WndProc(ref m);
@@ -870,8 +1671,13 @@ namespace YFRobot
         {
             try
             {
-                var path = new System.Drawing.Drawing2D.GraphicsPath();
-                int r = 14;
+                if (WindowState == FormWindowState.Maximized)
+                {
+                    Region = null;
+                    return;
+                }
+                var path = new GraphicsPath();
+                int r = Program.Scale(14);
                 var b = new Rectangle(0, 0, Width, Height);
                 path.AddArc(b.X, b.Y, r, r, 180, 90);
                 path.AddArc(b.Right - r, b.Y, r, r, 270, 90);
@@ -882,672 +1688,193 @@ namespace YFRobot
             }
             catch { }
         }
+    }
 
-        /// <summary>自绘标题栏：拖动 + 最小化/最大化/关闭。</summary>
-        Panel BuildTitleBar()
+    // =====================================================================
+    //  控制台 / 聊天 独立窗口
+    // =====================================================================
+
+    class ConsoleWindow : Form
+    {
+        static readonly Dictionary<string, ConsoleWindow> OpenWindows = new Dictionary<string, ConsoleWindow>();
+
+        readonly string _url;
+        readonly string _key;
+        WebView2 _web;
+        Panel _cover;
+        bool _failed;
+
+        [DllImport("dwmapi.dll")]
+        static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        public static void Open(string url, string key, string title)
         {
-            var bar = new Panel();
-            bar.Dock = DockStyle.Top;
-            bar.Height = 44;
-            bar.BackColor = Side;
-            bar.MouseDown += delegate(object s2, MouseEventArgs e2) { if (e2.Button == MouseButtons.Left) DragWindow(); };
-
-            var dot = new Label();
-            dot.Text = "◉";
-            dot.Font = new Font("Segoe UI", 11f);
-            dot.ForeColor = Acc;
-            dot.Location = new Point(16, 12);
-            dot.AutoSize = true;
-            dot.MouseDown += delegate(object s2, MouseEventArgs e2) { if (e2.Button == MouseButtons.Left) DragWindow(); };
-            bar.Controls.Add(dot);
-
-            var t = new Label();
-            t.Text = "YF-Robot";
-            t.Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
-            t.ForeColor = Txt;
-            t.Location = new Point(38, 13);
-            t.AutoSize = true;
-            t.MouseDown += delegate(object s2, MouseEventArgs e2) { if (e2.Button == MouseButtons.Left) DragWindow(); };
-            bar.Controls.Add(t);
-
-            var min = TitleButton("—", bar);
-            var max = TitleButton("□", bar);
-            var close = TitleButton("✕", bar);
-            min.Click += delegate { WindowState = FormWindowState.Minimized; };
-            max.Click += delegate
+            ConsoleWindow win;
+            if (OpenWindows.TryGetValue(key, out win) && win != null && !win.IsDisposed)
             {
-                WindowState = WindowState == FormWindowState.Maximized
-                    ? FormWindowState.Normal : FormWindowState.Maximized;
-            };
-            close.Click += delegate
-            {
-                Hide();
-                ShowInTaskbar = false;
-                _ctx.ShowTrayMenu();
-            };
-            close.MouseEnter += delegate { close.BackColor = Color.FromArgb(196, 43, 28); };
-            close.MouseLeave += delegate { close.BackColor = Side; };
-
-            // 从右往左排
-            int right = 8;
-            foreach (var b in new[] { close, max, min })
-            {
-                b.Location = new Point(bar.Width - right - 40, 8);
-                right += 44;
-                b.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+                if (win.WindowState == FormWindowState.Minimized) win.WindowState = FormWindowState.Normal;
+                win.Show();
+                win.Activate();
+                win.BringToFront();
+                return;
             }
-            bar.Resize += delegate
+
+            win = new ConsoleWindow(url, key, title);
+            OpenWindows[key] = win;
+            win.Show();
+        }
+
+        ConsoleWindow(string url, string key, string title)
+        {
+            _url = url;
+            _key = key;
+            Text = Program.AppName + " · " + title;
+            AutoScaleMode = AutoScaleMode.None;
+            ClientSize = new Size(Program.Scale(1280), Program.Scale(860));
+            MinimumSize = new Size(Program.Scale(900), Program.Scale(620));
+            StartPosition = FormStartPosition.CenterScreen;
+            BackColor = Color.FromArgb(11, 14, 20);
+            Icon = Program.AppIcon;
+
+            _cover = new Panel();
+            _cover.Dock = DockStyle.Fill;
+            _cover.BackColor = Color.FromArgb(11, 14, 20);
+
+            var tip = new Label();
+            tip.Text = "正在载入 " + title + "…";
+            tip.ForeColor = Color.FromArgb(139, 149, 168);
+            tip.Font = new Font("Microsoft YaHei UI", 10f);
+            tip.AutoSize = true;
+            tip.Location = new Point(40, 40);
+            _cover.Controls.Add(tip);
+
+            Controls.Add(_cover);
+
+            Shown += delegate
             {
-                int rr = 8;
-                foreach (var b in new[] { close, max, min })
+                UseDarkTitleBar();
+                BuildWeb();
+            };
+
+            FormClosing += delegate(object s, FormClosingEventArgs e)
+            {
+                if (e.CloseReason == CloseReason.UserClosing)
                 {
-                    b.Location = new Point(bar.Width - rr - 40, 8);
-                    rr += 44;
+                    // 关掉只隐藏：下次打开是秒开，服务端状态也还在
+                    e.Cancel = true;
+                    Hide();
                 }
             };
-            return bar;
         }
 
-        Label TitleButton(string text, Control bar)
+        void BuildWeb()
         {
-            var b = new Label();
-            b.Text = text;
-            b.Size = new Size(40, 28);
-            b.ForeColor = DimC;
-            b.TextAlign = ContentAlignment.MiddleCenter;
-            b.Font = new Font("Segoe UI", 10f);
-            b.Cursor = Cursors.Hand;
-            bar.Controls.Add(b);
-            b.MouseEnter += delegate { b.BackColor = Color.FromArgb(28, 34, 48); b.ForeColor = Txt; };
-            b.MouseLeave += delegate { b.BackColor = Side; b.ForeColor = DimC; };
-            return b;
-        }
-
-        // ================= 侧栏 =================
-        void BuildSidebar(Control host)
-        {
-            var side = new Panel();
-            side.Dock = DockStyle.Left;
-            side.Width = 176;
-            side.BackColor = Side;
-            side.Paint += delegate(object s3, PaintEventArgs e3)
-            {
-                using (var pen = new Pen(Brd))
-                    e3.Graphics.DrawLine(pen, side.Width - 1, 0, side.Width - 1, side.Height);
-            };
-            host.Controls.Add(side);
-
-            var logo = new Label();
-            logo.Text = "◉";
-            logo.Font = new Font("Segoe UI", 17f);
-            logo.ForeColor = Acc;
-            logo.Location = new Point(18, 20);
-            logo.AutoSize = true;
-            side.Controls.Add(logo);
-
-            var name = new Label();
-            name.Text = "YF-Robot";
-            name.Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold);
-            name.ForeColor = Txt;
-            name.Location = new Point(44, 24);
-            name.AutoSize = true;
-            side.Controls.Add(name);
-
-            var ver = new Label();
-            ver.Text = "v" + _ctx.VersionText;
-            ver.ForeColor = DimC;
-            ver.Font = new Font("Microsoft YaHei UI", 8f);
-            ver.Location = new Point(46, 46);
-            ver.AutoSize = true;
-            side.Controls.Add(ver);
-
-            for (int i = 0; i < Pages.Length; i++)
-            {
-                var idx = i;
-                var item = new Label();
-                item.Text = PageIcons[i] + "   " + Pages[i];
-                item.Font = new Font("Microsoft YaHei UI", 10f);
-                item.ForeColor = DimC;
-                item.Location = new Point(0, 92 + i * 40);
-                item.Size = new Size(176, 36);
-                item.TextAlign = ContentAlignment.MiddleLeft;
-                item.Padding = new Padding(24, 0, 0, 0);
-                item.Cursor = Cursors.Hand;
-                item.Click += delegate { ShowPage(idx); };
-                item.MouseEnter += delegate { if (idx != _page) item.BackColor = Color.FromArgb(22, 27, 38); };
-                item.MouseLeave += delegate { if (idx != _page) item.BackColor = Side; };
-                side.Controls.Add(item);
-                _nav.Add(item);
-            }
-
-            var foot = new Label();
-            foot.Text = "端口 " + _ctx.PortText + "　·　本地面板";
-            foot.ForeColor = Color.FromArgb(90, 99, 116);
-            foot.Font = new Font("Microsoft YaHei UI", 8f);
-            foot.Location = new Point(20, side.Height - 30);
-            foot.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
-            foot.AutoSize = true;
-            side.Controls.Add(foot);
-        }
-
-        void ShowPage(int index)
-        {
-            _page = index;
-            for (int i = 0; i < _nav.Count; i++)
-            {
-                var on = i == index;
-                _nav[i].ForeColor = on ? Txt : DimC;
-                _nav[i].Font = new Font("Microsoft YaHei UI", 10f, on ? FontStyle.Bold : FontStyle.Regular);
-                _nav[i].BackColor = on ? Color.FromArgb(24, 29, 42) : Side;
-            }
-
-            _content.Controls.Clear();
-            switch (index)
-            {
-                case 0: BuildWeb(_content, "/console"); break;
-                case 1: BuildWeb(_content, "/"); break;
-                case 2: BuildOverview(_content); break;
-                case 3: BuildPlugins(_content); break;
-                case 4: BuildMarket(_content); break;
-                default: BuildSettings(_content); break;
-            }
-            _content.Refresh();
-        }
-
-        // ================= 控制台（内嵌网页） =================
-        WebView2 _web;
-
-        /// <summary>
-        /// 把网页控制台嵌进窗口。
-        ///
-        /// 之前是另开一个 Edge 应用窗口，观感割裂、还容易白屏；
-        /// 本机自带 WebView2 运行时，直接嵌进来即可。
-        /// </summary>
-        void BuildWeb(Panel page, string path)
-        {
+            if (_web != null) return;
             try
             {
-                // 用户数据放到 data/ 下，别乱写到 desktop/（那是源码目录）
-                Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", Path.Combine(Program.Root, "data", "webview2"));
                 _web = new WebView2();
                 _web.Dock = DockStyle.Fill;
-                page.Controls.Add(_web);
+                _web.DefaultBackgroundColor = Color.FromArgb(11, 14, 20);
+                Controls.Add(_web);
+                _web.BringToFront();
 
-                _web.CoreWebView2InitializationCompleted += delegate(object s3, CoreWebView2InitializationCompletedEventArgs e3)
+                _web.CoreWebView2InitializationCompleted += delegate(object s, CoreWebView2InitializationCompletedEventArgs e)
                 {
-                    if (!e3.IsSuccess) return;
-                    _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-                    _web.CoreWebView2.Settings.IsStatusBarEnabled = false;
-                    // 记住上次滚动位置会让人以为页面缺了头部，导航完回到顶部
-                    _web.NavigationCompleted += delegate(object s4, CoreWebView2NavigationCompletedEventArgs e4)
+                    if (!e.IsSuccess)
                     {
-                        try { _web.ExecuteScriptAsync("window.scrollTo(0,0)"); } catch { }
+                        Fail(e.InitializationException == null ? "初始化失败" : e.InitializationException.Message);
+                        return;
+                    }
+                    var core = _web.CoreWebView2;
+                    core.Settings.AreDefaultContextMenusEnabled = false;
+                    core.Settings.IsStatusBarEnabled = false;
+                    core.Settings.IsZoomControlEnabled = false;
+                    core.Settings.AreDevToolsEnabled = Program.PreviewMode;
+
+                    core.NavigationCompleted += delegate(object s2, CoreWebView2NavigationCompletedEventArgs e2)
+                    {
+                        if (e2.IsSuccess && _cover != null)
+                        {
+                            _cover.Visible = false;
+                        }
+                        else if (!e2.IsSuccess)
+                        {
+                            Fail("页面载入失败：" + e2.WebErrorStatus + "（服务没起来？）");
+                        }
                     };
-                    try { _web.Source = new Uri(_ctx.BaseUrlOut + path); } catch { }
+
+                    try { _web.Source = new Uri(_url); }
+                    catch (Exception ex) { Fail(ex.Message); }
                 };
 
-                // 初始化是异步的：先发起，完成后在回调里导航
                 _web.EnsureCoreWebView2Async(null);
             }
             catch (Exception ex)
             {
-                var tip = new Label();
-                tip.Text = "内嵌浏览器起不来：" + ex.Message + "\n\n点左侧「概览」→「网页版（浏览器）」照样能用。";
-                tip.ForeColor = DimC;
-                tip.Dock = DockStyle.Fill;
-                tip.TextAlign = ContentAlignment.MiddleCenter;
-                page.Controls.Add(tip);
-                Program.Log("WebView2 初始化失败：" + ex.Message);
+                Fail(ex.Message);
             }
         }
 
-        // ================= 概览 =================
-        void BuildOverview(Panel page)
+        void Fail(string message)
         {
-            Header(page, "概览", "服务状态与常用操作");
+            if (_failed) return;
+            _failed = true;
+            Program.Log("控制台窗口失败：" + message);
+            if (_web != null) _web.Visible = false;
 
-            var card = Card2(24, 84, 560, 92);
-            page.Controls.Add(card);
+            if (_cover == null || _cover.IsDisposed) return;
+            _cover.Visible = true;
+            _cover.Controls.Clear();
 
-            _svcDot = Dot(20, 20, card);
-            _svcText = Line(44, 22, "服务：检查中…", card, Txt);
-            _adpDot = Dot(20, 54, card);
-            _adpText = Line(44, 56, "适配器：检查中…", card, DimC);
+            var title = new Label();
+            title.Text = "控制台没能载入";
+            title.Font = new Font("Microsoft YaHei UI", 14f, FontStyle.Bold);
+            title.ForeColor = Color.FromArgb(233, 238, 249);
+            title.AutoSize = true;
+            title.Location = new Point(40, 40);
+            _cover.Controls.Add(title);
 
-            Section(page, "服务", 24, 192);
-            Btn(page, "打开控制台", 24, 218, 176, delegate { ShowPage(0); }, true);
-            Btn(page, "聊天窗口", 208, 218, 176, delegate { ShowPage(1); }, false);
-            Btn(page, "重启服务", 392, 218, 192, delegate { _ctx.DoRestart(); }, false);
+            var desc = new Label();
+            desc.Text = message + "\n\n可以先用浏览器打开：" + _url;
+            desc.Font = new Font("Microsoft YaHei UI", 9.5f);
+            desc.ForeColor = Color.FromArgb(139, 149, 168);
+            desc.MaximumSize = new Size(720, 0);
+            desc.AutoSize = true;
+            desc.Location = new Point(42, 80);
+            _cover.Controls.Add(desc);
 
-            Btn(page, "停止服务", 24, 262, 176, delegate { StopAll(); }, false);
-            Btn(page, "查看日志", 208, 262, 176, delegate { _ctx.OpenLogs(); }, false);
-            Btn(page, "数据目录", 392, 262, 192, delegate { _ctx.OpenDataDir(); }, false);
-
-            Section(page, "记忆", 24, 316);
-            Btn(page, "网页版（浏览器）", 24, 342, 560, delegate { _ctx.OpenInBrowser(); }, false);
-            Btn(page, "备份记忆", 24, 390, 268, delegate { _ctx.DoBackup(); }, false);
-            Btn(page, "恢复最近备份…", 300, 390, 284, delegate { _ctx.DoRestore(); }, false);
-
-            RefreshOverview();
+            var open = new Button();
+            open.Text = "用浏览器打开";
+            open.Location = new Point(42, 150);
+            open.Size = new Size(140, 38);
+            open.FlatStyle = FlatStyle.Flat;
+            open.ForeColor = Color.White;
+            open.BackColor = Color.FromArgb(99, 102, 241);
+            open.FlatAppearance.BorderColor = Color.FromArgb(99, 102, 241);
+            open.Cursor = Cursors.Hand;
+            open.Click += delegate
+            {
+                try { Process.Start(_url); } catch { }
+            };
+            _cover.Controls.Add(open);
         }
 
-        void StopAll()
+        void UseDarkTitleBar()
         {
-            if (MessageBox.Show("停止服务会让聊天中断，确定？", "YF-Robot",
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            _ctx.StopSvc();
-            RefreshOverview();
-        }
-
-        void RefreshOverview()
-        {
-            if (_svcText == null || _svcText.IsDisposed) return;
-            var up = _ctx.ServiceUp;
-            _svcDot.ForeColor = up ? Green : Red;
-            _svcText.Text = up ? "服务：运行中　127.0.0.1:" + _ctx.PortText : "服务：未运行";
-            _svcText.ForeColor = up ? Txt : Red;
-
-            var adp = _ctx.AdapterOnline();
-            if (adp == null)
-            {
-                _adpDot.ForeColor = DimC;
-                _adpText.Text = up ? "适配器：未接入（只影响微信收发）" : "适配器：未知（服务未就绪）";
-            }
-            else if (adp.Value)
-            {
-                _adpDot.ForeColor = Green;
-                _adpText.Text = "适配器：已接入";
-            }
-            else
-            {
-                _adpDot.ForeColor = DimC;
-                _adpText.Text = "适配器：未接入（只影响微信收发）";
-            }
-        }
-
-        // ================= 插件 =================
-        void BuildPlugins(Panel page)
-        {
-            Header(page, "插件", "放在 plugins/ 目录下的扩展");
-
-            var bar = new Panel();
-            bar.Location = new Point(24, 84);
-            bar.Size = new Size(560, 40);
-            bar.BackColor = Bg;
-            page.Controls.Add(bar);
-
-            Btn(bar, "刷新", 0, 0, 88, delegate { LoadPlugins(); }, false);
-            Btn(bar, "启用 / 禁用", 96, 0, 112, delegate { TogglePlugin(); }, false);
-            Btn(bar, "插件目录", 216, 0, 104, delegate { _ctx.OpenFolder(Path.Combine(Program.Root, "plugins")); }, false);
-
-            _plist = new ListView();
-            _plist.Location = new Point(24, 132);
-            _plist.Size = new Size(560, 352);
-            _plist.View = View.Details;
-            _plist.FullRowSelect = true;
-            _plist.BackColor = Card;
-            _plist.ForeColor = Txt;
-            _plist.BorderStyle = BorderStyle.None;
-            _plist.Columns.Add("名称", 290);
-            _plist.Columns.Add("版本", 70);
-            _plist.Columns.Add("状态", 80);
-            _plist.Columns.Add("工具", 120);
-            page.Controls.Add(_plist);
-
-            _pHint = new Label();
-            _pHint.Location = new Point(24, 492);
-            _pHint.Size = new Size(560, 40);
-            _pHint.ForeColor = DimC;
-            _pHint.Text = " ";
-            page.Controls.Add(_pHint);
-
-            LoadPlugins();
-        }
-
-        void LoadPlugins()
-        {
-            if (_plist == null || _plist.IsDisposed) return;
-            _plist.Items.Clear();
-            var json = _ctx.ApiGet("/api/admin/plugins");
-            if (json == null)
-            {
-                _pHint.Text = "读不到插件列表（服务没起来？）";
-                return;
-            }
-            foreach (var obj in JsonObjects(json, "plugins"))
-            {
-                var name = JStr(obj, "name");
-                var item = new ListViewItem(string.IsNullOrEmpty(name) ? JStr(obj, "id") : name);
-                item.SubItems.Add(JStr(obj, "version"));
-                var st = JStr(obj, "state");
-                item.SubItems.Add(st == "loaded" ? "已启用" : (string.IsNullOrEmpty(st) ? "未加载" : st));
-                item.SubItems.Add(JStr(obj, "tools"));
-                item.Tag = JStr(obj, "id");
-                _plist.Items.Add(item);
-            }
-            _pHint.Text = _plist.Items.Count == 0
-                ? "还没有插件。把插件文件夹放到 plugins/ 下，然后点刷新。"
-                : "共 " + _plist.Items.Count + " 个插件；启停后需要重启服务生效。";
-        }
-
-        void TogglePlugin()
-        {
-            if (_plist.SelectedItems.Count == 0) { MessageBox.Show("先选中一个插件", "YF-Robot"); return; }
-            var id = Convert.ToString(_plist.SelectedItems[0].Tag);
-            var cur = _plist.SelectedItems[0].SubItems[2].Text == "已启用";
-            var r = _ctx.ApiPost("/api/admin/plugins/toggle",
-                "{\"id\":\"" + id + "\",\"enabled\":" + (cur ? "false" : "true") + "}");
-            if (r == null) { MessageBox.Show("操作失败（服务没起来？）", "YF-Robot"); return; }
-            LoadPlugins();
-        }
-
-        // ================= 市场 =================
-        void BuildMarket(Panel page)
-        {
-            Header(page, "市场", "从 market\\index.json 读取可安装插件");
-
-            var bar = new Panel();
-            bar.Location = new Point(24, 84);
-            bar.Size = new Size(560, 40);
-            bar.BackColor = Bg;
-            page.Controls.Add(bar);
-
-            Btn(bar, "刷新列表", 0, 0, 96, delegate { LoadMarket(); }, false);
-            Btn(bar, "安装选中", 104, 0, 96, delegate { InstallSelected(); }, true);
-            Btn(bar, "编辑索引", 208, 0, 96, delegate
-            {
-                var f = Path.Combine(Program.Root, "market", "index.json");
-                if (File.Exists(f)) Process.Start("notepad.exe", "\"" + f + "\"");
-                else MessageBox.Show("还没有索引文件：\n" + f, "YF-Robot");
-            }, false);
-
-            _mlist = new ListView();
-            _mlist.Location = new Point(24, 132);
-            _mlist.Size = new Size(560, 330);
-            _mlist.View = View.Details;
-            _mlist.FullRowSelect = true;
-            _mlist.BackColor = Card;
-            _mlist.ForeColor = Txt;
-            _mlist.BorderStyle = BorderStyle.None;
-            _mlist.Columns.Add("插件", 200);
-            _mlist.Columns.Add("版本", 70);
-            _mlist.Columns.Add("说明", 280);
-            page.Controls.Add(_mlist);
-
-            _mHint = new Label();
-            _mHint.Location = new Point(24, 470);
-            _mHint.Size = new Size(560, 62);
-            _mHint.ForeColor = DimC;
-            _mHint.Text = " ";
-            page.Controls.Add(_mHint);
-
-            LoadMarket();
-        }
-
-        void LoadMarket()
-        {
-            if (_mlist == null || _mlist.IsDisposed) return;
-            _mlist.Items.Clear();
-
-            var file = Path.Combine(Program.Root, "market", "index.json");
-            if (!File.Exists(file))
-            {
-                _mHint.Text = "还没有市场索引。新建 market\\index.json，格式：\n" +
-                              "{ \"items\": [ { \"id\":\"id\", \"name\":\"名字\", \"version\":\"1.0.0\", " +
-                              "\"description\":\"说明\", \"download\":\"https://.../x.zip\" } ] }";
-                return;
-            }
-
-            string json;
-            try { json = File.ReadAllText(file, Encoding.UTF8); }
-            catch (Exception ex) { _mHint.Text = "读索引失败：" + ex.Message; return; }
-
-            foreach (var obj in JsonObjects(json, "items"))
-            {
-                var item = new ListViewItem(JStr(obj, "name"));
-                item.SubItems.Add(JStr(obj, "version"));
-                item.SubItems.Add(JStr(obj, "description"));
-                item.Tag = JStr(obj, "download");
-                _mlist.Items.Add(item);
-            }
-            _mHint.Text = _mlist.Items.Count == 0
-                ? "索引里还没有插件"
-                : "共 " + _mlist.Items.Count + " 个可安装插件（来源：market\\index.json）";
-        }
-
-        void InstallSelected()
-        {
-            if (_mlist.SelectedItems.Count == 0) { MessageBox.Show("先选中要安装的插件", "YF-Robot"); return; }
-            var url = Convert.ToString(_mlist.SelectedItems[0].Tag);
-            if (string.IsNullOrEmpty(url)) { MessageBox.Show("这一项没有下载地址", "YF-Robot"); return; }
-
-            var dir = Path.Combine(Program.Root, "plugins");
-            Directory.CreateDirectory(dir);
-            var zip = Path.Combine(Path.GetTempPath(), "yf-plugin-" + DateTime.Now.Ticks + ".zip");
-
             try
             {
-                var wc = new WebClient();
-                wc.Proxy = null;
-                wc.DownloadFile(new Uri(url), zip);
-                System.IO.Compression.ZipFile.ExtractToDirectory(zip, dir);
-                File.Delete(zip);
-                MessageBox.Show("已解压到 plugins/。\n重启服务后生效（概览 → 重启服务）。", "YF-Robot");
-                LoadPlugins();
+                int flag = 1;
+                // 20 = DWMWA_USE_IMMERSIVE_DARK_MODE（Win10 20H1+），19 是老版本
+                if (DwmSetWindowAttribute(Handle, 20, ref flag, sizeof(int)) != 0)
+                    DwmSetWindowAttribute(Handle, 19, ref flag, sizeof(int));
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show("安装失败：" + ex.Message + "\n\n也可以手动把压缩包解压到 plugins/。", "YF-Robot");
-            }
+            catch { }
         }
 
-        // ================= 设置 =================
-        void BuildSettings(Panel page)
+        protected override void Dispose(bool disposing)
         {
-            Header(page, "设置", "启动项与版本信息");
-
-            _auto = new CheckBox();
-            _auto.Text = "开机自动启动（只驻留托盘，不弹窗）";
-            _auto.ForeColor = DimC;
-            _auto.Location = new Point(24, 92);
-            _auto.AutoSize = true;
-            _auto.Checked = _ctx.AutoStartOn;
-            _auto.CheckedChanged += delegate
-            {
-                try { _ctx.AutoStartOn = _auto.Checked; }
-                catch { _auto.Checked = _ctx.AutoStartOn; }
-            };
-            page.Controls.Add(_auto);
-
-            Section(page, "更新", 24, 136);
-            Btn(page, "检查更新", 24, 162, 132, delegate { CheckUpdate(); }, false);
-            _updText = new Label();
-            _updText.Text = " ";
-            _updText.ForeColor = DimC;
-            _updText.Location = new Point(172, 172);
-            _updText.AutoSize = true;
-            page.Controls.Add(_updText);
-
-            Section(page, "关于", 24, 212);
-            var about = new Label();
-            about.Text = "YF-Robot　v" + _ctx.VersionText + "\n"
-                       + "本地面板不依赖浏览器，网页控制台是可选的。\n"
-                       + "插件市场索引：market\\index.json（以后可换成远程地址）";
-            about.ForeColor = DimC;
-            about.Location = new Point(24, 238);
-            about.AutoSize = true;
-            page.Controls.Add(about);
-        }
-
-        void CheckUpdate()
-        {
-            _updText.Text = "检查中…";
-            var json = _ctx.ApiGet("/api/admin/update/check");
-            if (json == null) { _updText.Text = "检查失败（服务没起来？）"; return; }
-            var local = JStr(json, "local");
-            var latest = JStr(json, "latest");
-            var has = json.IndexOf("\"hasUpdate\":true") >= 0;
-            _updText.Text = has
-                ? "有新版本：" + latest + "（当前 " + local + "）"
-                : "已是最新（" + (string.IsNullOrEmpty(local) ? _ctx.VersionText : local) + "）";
-        }
-
-        /// <summary>画一个圆底字母图标（窗口/任务栏用）。</summary>
-        static Icon IconFromText(string text, Color color)
-        {
-            var bmp = new Bitmap(32, 32);
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                g.Clear(Color.Transparent);
-                using (var b = new SolidBrush(color)) g.FillEllipse(b, 1, 1, 30, 30);
-                using (var f = new Font("Segoe UI", 16, FontStyle.Bold, GraphicsUnit.Pixel))
-                using (var w = new SolidBrush(Color.White))
-                {
-                    var size = g.MeasureString(text, f);
-                    g.DrawString(text, f, w, (32 - size.Width) / 2, (32 - size.Height) / 2);
-                }
-            }
-            return Icon.FromHandle(bmp.GetHicon());
-        }
-
-        // ================= 小工具 =================
-        void Header(Control parent, string title, string sub)
-        {
-            var t = new Label();
-            t.Text = title;
-            t.Font = new Font("Microsoft YaHei UI", 15f, FontStyle.Bold);
-            t.ForeColor = Txt;
-            t.Location = new Point(24, 24);
-            t.AutoSize = true;
-            parent.Controls.Add(t);
-
-            var d = new Label();
-            d.Text = sub;
-            d.ForeColor = DimC;
-            d.Location = new Point(26, 56);
-            d.AutoSize = true;
-            parent.Controls.Add(d);
-        }
-
-        Panel Card2(int x, int y, int w, int h)
-        {
-            var p = new Panel();
-            p.Location = new Point(x, y);
-            p.Size = new Size(w, h);
-            p.BackColor = Card;
-            p.Paint += delegate(object s3, PaintEventArgs e3)
-            {
-                using (var pen = new Pen(Brd)) e3.Graphics.DrawRectangle(pen, 0, 0, p.Width - 1, p.Height - 1);
-            };
-            return p;
-        }
-
-        Label Dot(int x, int y, Control parent)
-        {
-            var l = new Label();
-            l.Text = "●";
-            l.Font = new Font("Segoe UI", 13f);
-            l.ForeColor = DimC;
-            l.Location = new Point(x, y);
-            l.AutoSize = true;
-            parent.Controls.Add(l);
-            return l;
-        }
-
-        Label Line(int x, int y, string text, Control parent, Color color)
-        {
-            var l = new Label();
-            l.Text = text;
-            l.ForeColor = color;
-            l.Location = new Point(x, y);
-            l.AutoSize = true;
-            parent.Controls.Add(l);
-            return l;
-        }
-
-        void Section(Control parent, string text, int x, int y)
-        {
-            var l = new Label();
-            l.Text = text;
-            l.ForeColor = DimC;
-            l.Font = new Font("Microsoft YaHei UI", 8.5f, FontStyle.Bold);
-            l.Location = new Point(x, y);
-            l.AutoSize = true;
-            parent.Controls.Add(l);
-        }
-
-        Button Btn(Control parent, string text, int x, int y, int w, EventHandler onClick, bool primary)
-        {
-            var b = new Button();
-            b.Text = text;
-            b.Location = new Point(x, y);
-            b.Size = new Size(w, 38);
-            b.FlatStyle = FlatStyle.Flat;
-            b.Font = new Font("Microsoft YaHei UI", 9.5f);
-            b.Cursor = Cursors.Hand;
-            b.ForeColor = primary ? Color.White : Txt;
-            b.BackColor = primary ? Acc : Card;
-            b.FlatAppearance.BorderColor = primary ? Acc : Brd;
-            b.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(116, 120, 245) : Color.FromArgb(28, 34, 48);
-            b.Click += onClick;
-            parent.Controls.Add(b);
-            return b;
-        }
-
-        /// <summary>极简 JSON 取值：够用即可，不引依赖。</summary>
-        static string JStr(string json, string key)
-        {
-            if (string.IsNullOrEmpty(json)) return "";
-            var k = "\"" + key + "\":";
-            var i = json.IndexOf(k);
-            if (i < 0) return "";
-            var j = i + k.Length;
-            while (j < json.Length && (json[j] == ' ' || json[j] == '\n' || json[j] == '\r')) j++;
-            if (j >= json.Length) return "";
-            if (json[j] == '"')
-            {
-                var e = json.IndexOf('"', j + 1);
-                if (e < 0) return "";
-                return json.Substring(j + 1, e - j - 1);
-            }
-            var end = j;
-            while (end < json.Length && ",}\n\r ".IndexOf(json[end]) < 0) end++;
-            return json.Substring(j, end - j);
-        }
-
-        static System.Collections.Generic.List<string> JsonObjects(string json, string arrayKey)
-        {
-            var list = new System.Collections.Generic.List<string>();
-            if (string.IsNullOrEmpty(json)) return list;
-            var k = "\"" + arrayKey + "\":";
-            var i = json.IndexOf(k);
-            if (i < 0) return list;
-            var open = json.IndexOf('[', i);
-            if (open < 0) return list;
-
-            int depth = 0, startIdx = -1;
-            for (int p = open; p < json.Length; p++)
-            {
-                var c = json[p];
-                if (c == '{')
-                {
-                    if (depth == 1 && startIdx < 0) startIdx = p;
-                    depth++;
-                }
-                else if (c == '}')
-                {
-                    depth--;
-                    if (depth == 1 && startIdx >= 0)
-                    {
-                        list.Add(json.Substring(startIdx, p - startIdx + 1));
-                        startIdx = -1;
-                    }
-                }
-                else if (c == ']' && depth == 1) break;
-            }
-            return list;
+            if (disposing) OpenWindows.Remove(_key);
+            base.Dispose(disposing);
         }
     }
 }
-

@@ -40,6 +40,8 @@ const WITH_ADAPTER = process.argv.includes('--with-adapter');
 
 /** 要复制的目录/文件。 */
 const INCLUDE = [
+  // 启动器 exe 放最外层：解压后第一眼就能看到
+  'YF-Robot.exe',
   'app.mjs',
   'launch_background.mjs',
   'menu.mjs',
@@ -148,6 +150,9 @@ const TOOLS_ALLOW = new Set([
   'check-config-save.mjs', // 配置读写
   'check-config-coverage.mjs', // 配置字段覆盖（schema vs 读接口）
   'memory-tool.mjs', // 备份/恢复记忆.bat 用
+  'build-desktop.mjs', // 重新编译启动器 exe
+  'check-desktop.mjs', // 桌面软件化自检（文档里让用户跑的）
+  'make-launcher-icon.py', // 重新生成品牌图标
   'build-sticker-index.mjs', // 重建表情包描述索引
   'to_gbk.ps1', // 编码转换小工具
 ]);
@@ -946,4 +951,30 @@ console.log(`  目录: ${DIST}`);
 console.log(`  文件: ${distFiles.length} 个`);
 console.log(`  大小: ${(distSize / 1024 / 1024).toFixed(1)} MB`);
 console.log('');
+
+if (MAKE_ZIP) {
+  const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+  const suffix = WITH_ADAPTER ? '-with-adapter' : '';
+  const zipPath = path.join(ROOT, `YF-Robot-v${version}${suffix}.zip`);
+  console.log('【打包】生成 zip…');
+  fs.rmSync(zipPath, { force: true });
+
+  const r = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-Command',
+      `Compress-Archive -Path '${path.join(DIST, '*')}' -DestinationPath '${zipPath}' -CompressionLevel Optimal -Force`,
+    ],
+    { encoding: 'utf8', timeout: 900000, windowsHide: true },
+  );
+  if (r.status !== 0) {
+    console.error('  ✗ 打 zip 失败：' + String(r.stderr || r.stdout || '').slice(0, 300));
+    process.exit(1);
+  }
+  const zipMb = (fs.statSync(zipPath).size / 1024 / 1024).toFixed(1);
+  console.log(`  ✓ ${path.basename(zipPath)}（${zipMb} MB）`);
+  console.log('');
+}
+
 console.log('  分发前请先自己解压试运行一次。');
