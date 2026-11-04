@@ -162,6 +162,13 @@ namespace YFRobot
         public void DoBackup() { BackupMemory(); }
         public void DoRestore() { RestoreLatest(); }
         public void OpenConsole() { OpenAppWindow("/console"); }
+
+        /// <summary>用系统默认浏览器打开（用户明确要网页版时用）。</summary>
+        public void OpenInBrowser()
+        {
+            try { Process.Start(BaseUrl() + "/console"); }
+            catch (Exception ex) { MessageBox.Show("打不开浏览器：" + ex.Message, Program.AppName); }
+        }
         public void OpenChat() { OpenAppWindow("/"); }
         public bool AutoStartOn { get { return IsAutoStart(); } set { SetAutoStart(value); } }
 
@@ -642,7 +649,8 @@ namespace YFRobot
                     Directory.CreateDirectory(profile);
                     var psi = new ProcessStartInfo();
                     psi.FileName = exe;
-                    psi.Arguments = "--app=" + url + " --window-size=1280,860 --user-data-dir=\"" + profile + "\"";
+                    psi.Arguments = "--app=" + url + " --window-size=1280,860 --no-first-run --no-default-browser-check"
+                                   + " --user-data-dir=\"" + profile + "\"";
                     psi.UseShellExecute = false;
                     Process.Start(psi);
                     return;
@@ -753,19 +761,22 @@ namespace YFRobot
             Text = "YF-Robot";
             ClientSize = new Size(788, 556);
             StartPosition = FormStartPosition.CenterScreen;
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
+            MinimumSize = new Size(860, 600);
+            Icon = IconFromText("Y", Color.FromArgb(99, 102, 241));
             BackColor = Bg;
             ForeColor = Txt;
             Font = new Font("Microsoft YaHei UI", 9f);
 
-            BuildSidebar();
-
+            // 注意顺序：Fill 的面板要先加，Dock.Left 的侧栏后加，
+            // 否则 Fill 会把侧栏盖住（WinForms 按反向 z 序排版）。
             _content = new Panel();
-            _content.Location = new Point(176, 0);
-            _content.Size = new Size(612, 556);
+            _content.Dock = DockStyle.Fill;
             _content.BackColor = Bg;
             Controls.Add(_content);
+
+            BuildSidebar();
 
             ShowPage(0);
 
@@ -790,8 +801,8 @@ namespace YFRobot
         void BuildSidebar()
         {
             var side = new Panel();
-            side.Location = new Point(0, 0);
-            side.Size = new Size(176, 556);
+            side.Dock = DockStyle.Left;
+            side.Width = 176;
             side.BackColor = Side;
             side.Paint += delegate(object s3, PaintEventArgs e3)
             {
@@ -847,7 +858,8 @@ namespace YFRobot
             foot.Text = "端口 " + _ctx.PortText + "　·　本地面板";
             foot.ForeColor = Color.FromArgb(90, 99, 116);
             foot.Font = new Font("Microsoft YaHei UI", 8f);
-            foot.Location = new Point(20, 520);
+            foot.Location = new Point(20, side.Height - 30);
+            foot.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             foot.AutoSize = true;
             side.Controls.Add(foot);
         }
@@ -897,8 +909,9 @@ namespace YFRobot
             Btn(page, "数据目录", 392, 262, 192, delegate { _ctx.OpenDataDir(); }, false);
 
             Section(page, "记忆", 24, 316);
-            Btn(page, "备份记忆", 24, 342, 268, delegate { _ctx.DoBackup(); }, false);
-            Btn(page, "恢复最近备份…", 300, 342, 284, delegate { _ctx.DoRestore(); }, false);
+            Btn(page, "网页版（浏览器）", 24, 342, 560, delegate { _ctx.OpenInBrowser(); }, false);
+            Btn(page, "备份记忆", 24, 390, 268, delegate { _ctx.DoBackup(); }, false);
+            Btn(page, "恢复最近备份…", 300, 390, 284, delegate { _ctx.DoRestore(); }, false);
 
             RefreshOverview();
         }
@@ -1162,6 +1175,25 @@ namespace YFRobot
             _updText.Text = has
                 ? "有新版本：" + latest + "（当前 " + local + "）"
                 : "已是最新（" + (string.IsNullOrEmpty(local) ? _ctx.VersionText : local) + "）";
+        }
+
+        /// <summary>画一个圆底字母图标（窗口/任务栏用）。</summary>
+        static Icon IconFromText(string text, Color color)
+        {
+            var bmp = new Bitmap(32, 32);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.Clear(Color.Transparent);
+                using (var b = new SolidBrush(color)) g.FillEllipse(b, 1, 1, 30, 30);
+                using (var f = new Font("Segoe UI", 16, FontStyle.Bold, GraphicsUnit.Pixel))
+                using (var w = new SolidBrush(Color.White))
+                {
+                    var size = g.MeasureString(text, f);
+                    g.DrawString(text, f, w, (32 - size.Width) / 2, (32 - size.Height) / 2);
+                }
+            }
+            return Icon.FromHandle(bmp.GetHicon());
         }
 
         // ================= 小工具 =================
