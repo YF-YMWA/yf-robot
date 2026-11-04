@@ -292,6 +292,13 @@ namespace YFRobot
 
             m.Items.Add("打开控制台", null, delegate { OpenConsole(); });
 
+            m.Items.Add("聊天窗口", null, delegate { OpenAppWindow("/"); });
+
+            m.Items.Add(new ToolStripSeparator());
+
+            m.Items.Add("备份记忆", null, delegate { BackupMemory(); });
+            m.Items.Add("恢复最近备份…", null, delegate { RestoreLatest(); });
+
             m.Items.Add("查看日志", null, delegate
             {
                 var log = Path.Combine(Program.Root, "data", "app.out.log");
@@ -342,9 +349,73 @@ namespace YFRobot
         /// 用 Edge/Chrome 的 --app 模式：没有地址栏和标签页，看起来像独立软件，
         /// 而不是"在浏览器里开了个网页"。都没有时才退回默认浏览器。
         /// </summary>
-        void OpenConsole()
+        /// <summary>跑一个 node 工具并返回输出（用于备份/恢复这类一次性动作）。</summary>
+        string RunNode(string args, int timeoutMs)
         {
-            var url = BaseUrl() + "/console";
+            try
+            {
+                var psi = new ProcessStartInfo();
+                psi.FileName = NodePath();
+                psi.Arguments = args;
+                psi.WorkingDirectory = Program.Root;
+                psi.CreateNoWindow = true;
+                psi.UseShellExecute = false;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+                psi.StandardOutputEncoding = Encoding.UTF8;
+                psi.StandardErrorEncoding = Encoding.UTF8;
+                var p = Process.Start(psi);
+                var output = p.StandardOutput.ReadToEnd();
+                var err = p.StandardError.ReadToEnd();
+                if (!p.WaitForExit(timeoutMs))
+                {
+                    try { p.Kill(); } catch { }
+                    return "（超时）" + output;
+                }
+                return (output + err).Trim();
+            }
+            catch (Exception ex)
+            {
+                return "执行失败：" + ex.Message;
+            }
+        }
+
+        void BackupMemory()
+        {
+            Program.Log("手动备份记忆");
+            var outText = RunNode("tools\\memory-tool.mjs export", 60000);
+            Program.Log("备份结果：" + outText.Replace("\r", "").Replace("\n", " | "));
+            _tray.ShowBalloonTip(3000, Program.AppName + " · 记忆已备份",
+                FirstLine(outText), ToolTipIcon.Info);
+            MessageBox.Show(outText, "备份记忆", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        void RestoreLatest()
+        {
+            var list = RunNode("tools\\memory-tool.mjs list", 60000);
+            if (MessageBox.Show("要从最近的备份恢复吗？\n\n当前记忆和会话会被覆盖（备份本身不会删）。\n\n" + FirstLine(list),
+                    "恢复记忆", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+
+            Program.Log("从最近备份恢复记忆");
+            var outText = RunNode("tools\\memory-tool.mjs restore --latest", 120000);
+            Program.Log("恢复结果：" + outText.Replace("\r", "").Replace("\n", " | "));
+            MessageBox.Show(outText, "恢复记忆", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        static string FirstLine(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            var i = text.IndexOf('\n');
+            var line = i < 0 ? text : text.Substring(0, i);
+            return line.Trim();
+        }
+
+        void OpenConsole() { OpenAppWindow("/console"); }
+
+        /// <summary>用浏览器应用窗口打开某个路径（无地址栏，像独立软件）。</summary>
+        void OpenAppWindow(string pathPart)
+        {
+            var url = BaseUrl() + pathPart;
             var candidates = new[]
             {
                 Environment.ExpandEnvironmentVariables(@"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),

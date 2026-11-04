@@ -64,6 +64,28 @@ function Write-TrayLog([string]$msg) {
 }
 
 # 打开控制台：优先 Edge/Chrome 应用窗口（无地址栏，像独立软件）
+# 跑一个 node 工具并返回输出
+function Invoke-NodeTool([string]$arguments) {
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = (Get-Node)
+        $psi.Arguments = $arguments
+        $psi.WorkingDirectory = $Root
+        $psi.CreateNoWindow = $true
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+        $p = [System.Diagnostics.Process]::Start($psi)
+        $out = $p.StandardOutput.ReadToEnd()
+        $err = $p.StandardError.ReadToEnd()
+        $p.WaitForExit(120000) | Out-Null
+        return ($out + $err).Trim()
+    } catch {
+        return "执行失败：$($_.Exception.Message)"
+    }
+}
+
 function Open-Console {
     $url = "$Base/console"
     $cands = @(
@@ -167,6 +189,35 @@ $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $miInfo = New-Object System.Windows.Forms.ToolStripMenuItem("YF-Robot v$Version · 端口 $Port")
 $miInfo.Enabled = $false
 $menu.Items.Add($miInfo) | Out-Null
+$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
+
+$miChat = $menu.Items.Add('聊天窗口')
+$miChat.Add_Click({ Open-Console })  # 聊天页就是首页，用应用窗口打开
+
+$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
+
+$miBackup = $menu.Items.Add('备份记忆')
+$miBackup.Add_Click({
+    Write-TrayLog '手动备份记忆'
+    $out = Invoke-NodeTool 'tools\memory-tool.mjs export'
+    Write-TrayLog ('备份结果：' + ($out -replace "`r?`n", ' | '))
+    [System.Windows.Forms.MessageBox]::Show($out, '备份记忆') | Out-Null
+})
+
+$miRestore = $menu.Items.Add('恢复最近备份…')
+$miRestore.Add_Click({
+    $list = Invoke-NodeTool 'tools\memory-tool.mjs list'
+    $first = ($list -split "`r?`n" | Select-Object -First 1)
+    $r = [System.Windows.Forms.MessageBox]::Show(
+        "要从最近的备份恢复吗？`n`n当前记忆和会话会被覆盖（恢复前会自动再存一份）。`n`n$first",
+        '恢复记忆', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+    if ($r -ne 'Yes') { return }
+    Write-TrayLog '从最近备份恢复记忆'
+    $out = Invoke-NodeTool 'tools\memory-tool.mjs restore --latest'
+    Write-TrayLog ('恢复结果：' + ($out -replace "`r?`n", ' | '))
+    [System.Windows.Forms.MessageBox]::Show($out, '恢复记忆') | Out-Null
+})
+
 $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 
 $miOpen = $menu.Items.Add('打开控制台')
