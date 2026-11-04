@@ -169,8 +169,18 @@ namespace YFRobot
         /// <summary>用系统默认浏览器打开（用户明确要网页版时用）。</summary>
         public void OpenInBrowser()
         {
-            try { Process.Start(BaseUrl() + "/console"); }
-            catch (Exception ex) { MessageBox.Show("打不开浏览器：" + ex.Message, Program.AppName); }
+            var url = BaseUrl() + "/console";
+            try
+            {
+                var psi = new ProcessStartInfo(url);
+                psi.UseShellExecute = true;   // 走文件关联，等于在地址栏回车
+                Process.Start(psi);
+                return;
+            }
+            catch { }
+            try { Process.Start("explorer.exe", url); }
+            catch (Exception ex) { MessageBox.Show("打不开浏览器：" + ex.Message + " 地址：" + url, Program.AppName); }
+
         }
         public void OpenChat() { OpenAppWindow("/"); }
         public bool AutoStartOn { get { return IsAutoStart(); } set { SetAutoStart(value); } }
@@ -1034,7 +1044,7 @@ namespace YFRobot
             _content.Controls.Clear();
             switch (index)
             {
-                case 0: BuildWeb(_content, "/console?embed=1"); break;
+                case 0: BuildWeb(_content, "/console"); break;
                 case 1: BuildWeb(_content, "/"); break;
                 case 2: BuildOverview(_content); break;
                 case 3: BuildPlugins(_content); break;
