@@ -1,3 +1,23 @@
+## [0.9.25] - 2026-11-05
+
+### 更名
+
+- **产品更名为 E Night Companion，简称 ENbot**
+  - E 可以是 **Eternal（永恒）**，也可以是 **Electronic（电子）**，名字留一点想象空间
+  - 启动器 exe：`ENbot.exe`；图标：`desktop\ENbot.ico`；主入口：`ENbot.bat`
+  - 界面标题栏、侧栏、关于页、控制台、聊天页、托盘提示、安装/卸载、文档全部换名
+  - 版本资源：ProductName = E Night Companion，FileDescription = ENbot 启动器
+- **旧品牌迁移**
+  - 安装器会删除旧的 `YF-Robot.lnk`、开始菜单 `YF-Robot` 文件夹、旧卸载项和旧开机自启项
+  - `YF-Robot.bat` 保留为兼容入口，实际调用 `ENbot.bat`
+  - `YF-Robot.vbs` → `ENbot.vbs`；旧 exe/图标编译时自动清理
+- **关于页加入名字解释**：E = Eternal / Electronic
+
+### 说明
+
+- GitHub 仓库地址仍是 `YF-YMWA/yf-robot`（更新检查、Release 不受影响）
+- 数据目录、`config.json`、记忆和会话都不变
+
 ## [0.9.24] - 2026-11-04
 
 ### 重写

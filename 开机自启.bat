@@ -2,14 +2,14 @@
 chcp 936 >nul
 setlocal
 cd /d "%~dp0"
-title 开机自启 - YF-Robot
+title 开机自启 - ENbot
 
 echo ============================================
 echo   开机自启
 echo ============================================
 echo.
 echo  为什么要这个：
-echo    电脑重启或关机再开机之后，YF-Robot 不会自己启动。
+echo    电脑重启或关机再开机之后，ENbot 不会自己启动。
 echo    表现就是「微信里她不回话」「桌面控制台连不上」。
 echo    装了自启之后，登录 Windows 就会在后台自动跑起来（无窗口）。
 echo.

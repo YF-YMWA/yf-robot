@@ -100,6 +100,6 @@ ode.exe toolscheck-console-dup.mjs`
 
 ## 4. 框架与适配器保持分离
 
-- 主仓（`YF-Robot`）**不出现**任何微信/平台自动化代码
+- 主仓（`ENbot`）**不出现**任何微信/平台自动化代码
 - 需要平台能力时，走 `adapters/<名字>/` 或独立仓库
 - 提 PR / 提交前自查一遍：主仓里有没有 Windows 窗口、剪贴板、UIA 相关代码

@@ -197,7 +197,7 @@ export function pruneSnapshots(root, keep = KEEP) {
  */
 export function restoreBundle(root, bundle, opts = {}) {
   if (!bundle || bundle.kind !== 'yf-robot-memory') {
-    throw new Error('这个文件不是 YF-Robot 的记忆备份');
+    throw new Error('这个文件不是 ENbot 的记忆备份');
   }
 
   const cards = Object.keys(bundle.cards || {});

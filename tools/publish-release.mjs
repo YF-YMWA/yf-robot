@@ -12,7 +12,7 @@ const TOKEN = process.env.GH_TOKEN || '';
 const REPO = 'YF-YMWA/yf-robot';
 const VERSION = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
 const TAG = 'v' + VERSION;
-const FILE = 'YF-Robot-v' + VERSION + '.zip';
+const FILE = 'ENbot-v' + VERSION + '.zip';
 
 if (!TOKEN) {
   console.error('  缺少 GH_TOKEN');
@@ -22,14 +22,16 @@ if (!TOKEN) {
 const H = {
   authorization: `Bearer ${TOKEN}`,
   accept: 'application/vnd.github+json',
-  'user-agent': 'YF-Robot',
+  'user-agent': 'ENbot',
   'content-type': 'application/json',
 };
 
-const notes = `## YF-Robot ${TAG}
+const notes = `## E Night Companion（ENbot）${TAG}
 
-解压到纯英文路径（例如 \`D:\\YF-Robot\`），双击最外层的 **\`YF-Robot.exe\`** 启动
-（不想用启动器就双击 \`YF-Robot.bat\`）。包内自带 Node 和 Python 运行时，不需要另装环境。
+ENbot 是 **E Night Companion** 的简称。E 可以是 **Eternal（永恒）**，也可以是 **Electronic（电子）**。
+
+解压到纯英文路径（例如 \`D:\\ENbot\`），双击最外层的 **\`ENbot.exe\`** 启动
+（不想用启动器就双击 \`ENbot.bat\`）。包内自带 Node 和 Python 运行时，不需要另装环境。
 
 ### 这个包包含什么
 
@@ -38,13 +40,17 @@ const notes = `## YF-Robot ${TAG}
 
 要接微信，请把适配器放到 \`adapters/<名字>/\` 下（见 docs/multi-adapter.md）。
 
-### 本次更新（0.9.24）
+### 本次更新（0.9.25）
 
-- **启动器界面重写**：WebView2 单页应用，无边框窗口 + 侧栏，
+- **更名**：YF-Robot → **E Night Companion（ENbot）**
+  - 启动器 exe 改为 \`ENbot.exe\`，快捷方式、托盘、安装器、控制台、文档统一换名
+  - 旧品牌快捷方式 / 启动项 / 卸载项由安装器自动迁移
+  - \`YF-Robot.bat\` 保留为兼容入口，实际调用 \`ENbot.bat\`
+- **启动器界面**：WebView2 单页应用，无边框窗口 + 侧栏，
   概览 / 插件 / 市场 / 设置；服务状态、日志、备份恢复都在里面
 - **控制台 / 聊天改成独立原生窗口**：仍用 WebView2 内嵌，不再拉起 Edge
 - **高 DPI**：声明系统 DPI 感知，150% / 200% 缩放下不再被位图放大
-- **exe 放到最外层**：根目录 \`YF-Robot.exe\`（约 226 KB），自带多尺寸图标与版本信息
+- **exe 放到最外层**：根目录 \`ENbot.exe\`，自带多尺寸图标与版本信息
 - **新品牌图标**：机器人头像，16/20/24 单独优化；托盘图标带状态点
 - **预览 / 截图模式**：\`--preview\`、\`--shot=路径\`、\`--page=plugins\`
 - **打包**：\`pack.mjs --zip\` 直接产出发布包
@@ -59,9 +65,10 @@ const notes = `## YF-Robot ${TAG}
 
 ### 升级说明
 
-- **0.9.23 的「一键更新」只覆盖代码，不会替换新的启动器 exe 和桌面 UI。**
-  升级到 0.9.24 请手动解压覆盖（\`config.json\`、\`data/\` 会保留）。
-- 0.9.24 起「一键更新」默认勾选「连适配器一起更新」：
+- **0.9.24 及更早的「一键更新」只覆盖代码，不会替换新的启动器 exe 和桌面 UI。**
+  升级到 0.9.25 请手动解压覆盖（\`config.json\`、\`data/\` 会保留）。
+- 解压后跑一次 \`安装软件.bat\`：会建 \`ENbot\` 快捷方式，并清掉旧的 \`YF-Robot\` 快捷方式/启动项/卸载项。
+- 「一键更新」默认勾选「连适配器一起更新」：
   只更新 \`adapter/\` 下的非 git 副本，保留 \`config.json\` 和 \`data/\`；
   \`adapter/\` 是 git 副本时会跳过。
 - 带微信适配器的完整包（\`-with-adapter.zip\`）不放在这个 Release 里。
@@ -85,7 +92,7 @@ async function main() {
       headers: H,
       body: JSON.stringify({
         tag_name: TAG,
-        name: `YF-Robot ${TAG}`,
+        name: `E Night Companion（ENbot）${TAG}`,
         body: notes,
         draft: false,
         prerelease: false,
@@ -116,7 +123,7 @@ async function main() {
     headers: {
       authorization: `Bearer ${TOKEN}`,
       accept: 'application/vnd.github+json',
-      'user-agent': 'YF-Robot',
+      'user-agent': 'ENbot',
       'content-type': 'application/zip',
       'content-length': String(buf.length),
     },

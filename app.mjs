@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * YF-Robot 内核入口。
+ * ENbot 内核入口。
  *
  *   node app.mjs            启动所有已启用通道
  *   node app.mjs --doctor   只做配置与连通性检查，不启动服务
@@ -363,7 +363,7 @@ async function main() {
         if (alive) {
           console.error('');
           console.error('========================================');
-          console.error('  已经有一个 YF-Robot 在运行了（PID ' + old + '）');
+          console.error('  已经有一个 ENbot 在运行了（PID ' + old + '）');
           console.error('');
           console.error('  同时开两个会互相抢微信机器人和适配器，');
           console.error('  表现是「消息一会儿回一会儿不回」。');

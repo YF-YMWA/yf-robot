@@ -1,10 +1,11 @@
 # 统一行尾，避免 Windows 提交后别人 clone 下来满屏 diff
 * text=auto eol=lf
 
-# 批处理 / PowerShell 必须是 CRLF，否则 cmd 解析会出问题
+# 批处理 / PowerShell / VBS 必须是 CRLF，否则 cmd / wscript 解析会出问题
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+*.vbs text eol=crlf
 
 # 二进制
 *.png binary

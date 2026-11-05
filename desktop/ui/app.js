@@ -1,5 +1,5 @@
 /* =========================================================
-   YF-Robot 启动器前端
+   ENbot 启动器前端
    与 C# 宿主通过 chrome.webview.hostObjects.launcher 通信；
    没有宿主时（直接用浏览器打开 / 截图预览）退化为演示数据。
    ========================================================= */
@@ -163,7 +163,7 @@
     const adapterOn = state.adapterOnline === true;
 
     $('#brandVer').textContent = 'v' + state.version;
-    $('#sideVer').textContent = `YF-Robot · v${state.version} · 本地面板`;
+    $('#sideVer').textContent = `ENbot · v${state.version} · 本地面板`;
 
     // 标题栏
     setDot($('#titleStatus .dot'), up ? 'ok' : 'bad');

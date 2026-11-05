@@ -1,9 +1,9 @@
 {
-  "name": "yf-robot",
-  "version": "0.9.24",
+  "name": "enbot",
+  "version": "0.9.25",
   "private": false,
   "type": "module",
-  "description": "YF-Robot —— 人设化 AI 助手，支持微信接入、角色卡、长期记忆、看图/画图/语音/联网学习",
+  "description": "E Night Companion（ENbot）—— 人设化 AI 助手，支持微信接入、角色卡、长期记忆、看图/画图/语音/联网学习",
   "keywords": [
     "ai",
     "chatbot",
@@ -14,7 +14,7 @@
     "agent"
   ],
   "license": "MIT",
-  "author": "YF-Robot contributors",
+  "author": "ENbot contributors",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/YF-YMWA/yf-robot.git"

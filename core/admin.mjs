@@ -3792,7 +3792,7 @@ print('%016x' % bits)
    * 包一个 askLlm，供学习/摘要这类「提取型任务」用。
    *
    * 关键：必须走裸 LLM，不能走 engine.handle()。
-   * 走 handle 会套上YF-Robot 的人设和回复规则（气泡切分、字数限制、口头禅），
+   * 走 handle 会套上ENbot 的人设和回复规则（气泡切分、字数限制、口头禅），
    * 结果是模型不肯按格式输出 —— 实测「每条一行」的要求全被忽略，
    * 摘要挤成一段、词条解析失败都源于此。
    */
@@ -5429,7 +5429,7 @@ print('%016x' % bits)
   async #latestTag(repo) {
     const fetchJSON = async (p) => {
       const url = 'https://api.github.com/repos/' + repo + p;
-      const headers = { 'user-agent': 'YF-Robot', accept: 'application/vnd.github+json' };
+      const headers = { 'user-agent': 'ENbot', accept: 'application/vnd.github+json' };
 
       try {
         const r = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });

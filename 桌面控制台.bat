@@ -2,7 +2,7 @@
 setlocal
 chcp 936 >nul 2>nul
 cd /d "%~dp0"
-title YF-Robot 控制台
+title ENbot 控制台
 
 REM ============================================
 REM  把控制台当成一个独立软件打开。

@@ -90,7 +90,7 @@ console.log('  相关日志:', imgRetry.length, '条');
 imgRetry.slice(-4).forEach((l) => console.log('   ' + l.slice(0, 100)));
 
 // ===== 与核心通信 =====
-const httpIssues = pick(/请求 YF-Robot 失败|上传核心失败|ReadTimeout|ConnectionError|ConnectionReset/);
+const httpIssues = pick(/请求 ENbot 失败|上传核心失败|ReadTimeout|ConnectionError|ConnectionReset/);
 console.log('');
 console.log('【适配器 ↔ 核心】');
 console.log('  通信异常:', httpIssues.length, '条');

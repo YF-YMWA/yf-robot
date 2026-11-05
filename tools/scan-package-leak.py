@@ -206,9 +206,9 @@ def scan_zip(path):
 def main():
     zips = sys.argv[1:]
     if not zips:
-        zips = sorted(f for f in os.listdir('.') if f.endswith('.zip') and f.startswith('YF-Robot'))
+        zips = sorted(f for f in os.listdir('.') if f.endswith('.zip') and f.startswith('ENbot'))
     if not zips:
-        print('  没有找到 YF-Robot-*.zip')
+        print('  没有找到 ENbot-*.zip')
         return 1
 
     results = [(z, scan_zip(z)) for z in zips]

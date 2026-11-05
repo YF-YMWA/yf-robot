@@ -328,7 +328,7 @@ export function buildStartCommand(root, id) {
    * 点启动还是去跑微信那个脚本 —— 报「文件不存在」，看着像启动失败。
    */
   const entry = a.entry || ENTRY;
-  const title = (a.name || '适配器') + '（YF-Robot）— 关掉窗口即停止';
+  const title = (a.name || '适配器') + '（ENbot）— 关掉窗口即停止';
 
   /**
    * 启动脚本，带守护循环。

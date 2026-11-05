@@ -59,7 +59,7 @@ function checkSyntax(file) {
 
 /** 桌面快捷方式（装了才有） */
 function checkShortcut() {
-  const desktop = path.join(process.env.USERPROFILE || '', 'Desktop', 'YF-Robot.lnk');
+  const desktop = path.join(process.env.USERPROFILE || '', 'Desktop', 'ENbot.lnk');
   if (!fs.existsSync(desktop)) {
     record('桌面快捷方式', true, '未安装（可选）');
     return;
@@ -81,7 +81,7 @@ function checkShortcut() {
       [
         '$sh = New-Object -ComObject WScript.Shell',
         `$sc = $sh.CreateShortcut('${desktop.replace(/'/g, "''")}')`,
-        "if (-not (Test-Path $sc.TargetPath)) { 'MISSING' } elseif ($sc.TargetPath -like '*YF-Robot.exe') { 'EXE' } elseif ($sc.Arguments) { 'OK' } else { 'EMPTY' }",
+        "if (-not (Test-Path $sc.TargetPath)) { 'MISSING' } elseif ($sc.TargetPath -like '*ENbot.exe') { 'EXE' } elseif ($sc.Arguments) { 'OK' } else { 'EMPTY' }",
       ].join('\r\n'),
       'utf8',
     );
@@ -93,7 +93,7 @@ function checkShortcut() {
 
     /**
      * 三种合法情况：
-     *   EXE      直接指向根目录 YF-Robot.exe（参数本来就该为空）
+     *   EXE      直接指向根目录 ENbot.exe（参数本来就该为空）
      *   OK       wscript.exe + 脚本参数（回退方案）
      * 旧版本装过、exe 又被挪走的快捷方式会报 MISSING。
      */
@@ -132,16 +132,22 @@ function checkUi() {
 
 /** exe 放最外层 + 图标（双击前第一眼看到的东西） */
 function checkLauncher() {
-  const exe = path.join(ROOT, 'YF-Robot.exe');
+  const exe = path.join(ROOT, 'ENbot.exe');
   const hasExe = fs.existsSync(exe) && fs.statSync(exe).size > 20000;
-  record('根目录 YF-Robot.exe', hasExe, hasExe ? '' : '先跑 tools/build-desktop.mjs');
+  record('根目录 ENbot.exe', hasExe, hasExe ? '' : '先跑 tools/build-desktop.mjs');
 
-  const old = path.join(D, 'YF-Robot.exe');
-  record('旧 desktop/exe 已移除', !fs.existsSync(old), 'exe 只放根目录，避免用户点错');
+  // 旧品牌 / 旧位置残留会让用户点错
+  const legacy = [
+    path.join(D, 'YF-Robot.exe'),
+    path.join(ROOT, 'YF-Robot.exe'),
+    path.join(D, 'YF-Robot.ico'),
+  ];
+  const stale = legacy.filter((p) => fs.existsSync(p));
+  record('旧品牌文件已清理', stale.length === 0, stale.map((p) => path.relative(ROOT, p)).join('、'));
 
-  const ico = path.join(D, 'YF-Robot.ico');
+  const ico = path.join(D, 'ENbot.ico');
   const hasIco = fs.existsSync(ico) && fs.statSync(ico).size > 10000;
-  record('品牌图标 YF-Robot.ico', hasIco, hasIco ? '' : '图标缺失，exe/快捷方式会退回默认图标');
+  record('品牌图标 ENbot.ico', hasIco, hasIco ? '' : '图标缺失，exe/快捷方式会退回默认图标');
 }
 
 console.log('  检查桌面软件化组件…\n');
@@ -149,7 +155,7 @@ console.log('  检查桌面软件化组件…\n');
 checkPs1('YFRobotTray.ps1');
 checkPs1('安装.ps1');
 checkPs1('卸载.ps1');
-checkVbs('YF-Robot.vbs');
+checkVbs('ENbot.vbs');
 checkVbs('安装.vbs');
 checkVbs('卸载.vbs');
 checkSyntax('YFRobotTray.ps1');

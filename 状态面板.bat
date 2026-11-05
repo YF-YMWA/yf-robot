@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul 2>nul
-title YF-Robot · 状态面板
+title ENbot · 状态面板
 cd /d "%~dp0"
 
 if not exist "runtime\node.exe" (

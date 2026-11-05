@@ -2,7 +2,7 @@
 setlocal
 chcp 936 >nul 2>nul
 cd /d "%~dp0"
-title YF-Robot 聊天
+title ENbot 聊天
 
 REM ============================================
 REM  把网页聊天页当成独立窗口打开。

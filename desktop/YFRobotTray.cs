@@ -1,4 +1,4 @@
-// YF-Robot 桌面启动器（C# 5，系统自带 csc 编译，无第三方依赖）
+// ENbot 桌面启动器（C# 5，系统自带 csc 编译，无第三方依赖）
 //
 // 结构：
 //   · Program        —— 入口、单实例、预览/截图模式、静态入口
@@ -31,7 +31,7 @@ namespace YFRobot
 {
     static class Program
     {
-        public const string AppName = "YF-Robot";
+        public const string AppName = "ENbot";
         public static string Root;
         public static string LogFile;
         public static string BaseUrl = "http://127.0.0.1:8899";
@@ -170,14 +170,14 @@ namespace YFRobot
             }
 
             bool created;
-            using (var mutex = new Mutex(true, "YF-Robot-Tray-Exe", out created))
+            using (var mutex = new Mutex(true, "ENbot-Tray-Exe", out created))
             {
                 if (!created)
                 {
                     // 已有实例：把它叫出来，而不是「双击没反应」
                     try
                     {
-                        using (var ev = EventWaitHandle.OpenExisting("YF-Robot-Show"))
+                        using (var ev = EventWaitHandle.OpenExisting("ENbot-Show"))
                             ev.Set();
                     }
                     catch { }
@@ -188,7 +188,7 @@ namespace YFRobot
                 Context = ctx;
 
                 // 第二次双击 / 开始菜单再次启动：把已有窗口调出来（而不是再开一个进程）
-                var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "YF-Robot-Show");
+                var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "ENbot-Show");
                 var listener = new Thread(delegate()
                 {
                     while (true)
@@ -316,7 +316,7 @@ namespace YFRobot
         {
             try
             {
-                IconPath = Path.Combine(Root, "desktop", "YF-Robot.ico");
+                IconPath = Path.Combine(Root, "desktop", "ENbot.ico");
                 if (File.Exists(IconPath))
                 {
                     // 给一个大尺寸帧，任务栏/高 DPI 下更清楚

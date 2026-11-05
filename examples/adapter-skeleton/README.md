@@ -4,7 +4,7 @@
 
 ## 跑起来
 
-先启动核心（双击 `YF-Robot.bat`，或 `node app.mjs`），然后：
+先启动核心（双击 `ENbot.bat`，或 `node app.mjs`），然后：
 
 ```bash
 node examples/adapter-skeleton/adapter.mjs

@@ -5,13 +5,18 @@ import { execFileSync } from 'node:child_process';
 
 const ROOT = process.cwd();
 const SRC = path.join(ROOT, 'desktop', 'YFRobotTray.cs');
-const ICON = path.join(ROOT, 'desktop', 'YF-Robot.ico');
+const ICON = path.join(ROOT, 'desktop', 'ENbot.ico');
 const TMPDIR = path.join(ROOT, '.tmp', 'ctmp');
 // 先编译到临时目录再搬过来：某些安全软件会拦 csc 直接往项目目录写 exe
-const OUT = path.join(TMPDIR, 'YF-Robot.exe');
+const OUT = path.join(TMPDIR, 'ENbot.exe');
 // exe 放在最外层：解压后第一眼就能看到，不用进 desktop/ 找
-const FINAL = path.join(ROOT, 'YF-Robot.exe');
-const OLD = path.join(ROOT, 'desktop', 'YF-Robot.exe');
+const FINAL = path.join(ROOT, 'ENbot.exe');
+// 旧品牌 / 旧位置的文件，编译完顺手清掉，避免用户点错
+const LEGACY = [
+  path.join(ROOT, 'YF-Robot.exe'),
+  path.join(ROOT, 'desktop', 'YF-Robot.exe'),
+  path.join(ROOT, 'desktop', 'YF-Robot.ico'),
+];
 const VERSION_CS = path.join(TMPDIR, 'VersionInfo.cs');
 
 /** 找 csc.exe：优先 64 位 .NET Framework 4 */
@@ -49,9 +54,9 @@ const asmVer = parts.slice(0, 4).join('.');
 fs.writeFileSync(
   VERSION_CS,
   `using System.Reflection;
-[assembly: AssemblyTitle("YF-Robot 启动器")]
-[assembly: AssemblyDescription("YF-Robot 桌面启动器（托盘 + 本地面板）")]
-[assembly: AssemblyProduct("YF-Robot")]
+[assembly: AssemblyTitle("ENbot 启动器")]
+[assembly: AssemblyDescription("E Night Companion（ENbot）桌面启动器")]
+[assembly: AssemblyProduct("E Night Companion")]
 [assembly: AssemblyCompany("YF-YMWA")]
 [assembly: AssemblyCopyright("YF-YMWA")]
 [assembly: AssemblyVersion("${asmVer}")]
@@ -104,14 +109,16 @@ try {
   fs.unlinkSync(OUT);
 } catch (e) {
   console.error('  [X] 写入 ' + path.relative(ROOT, FINAL) + ' 失败：' + e.message);
-  console.error('      （关掉正在运行的 YF-Robot 再试一次）');
+  console.error('      （关掉正在运行的 ENbot 再试一次）');
   process.exit(1);
 }
 
-// 旧位置留着的 exe 会让人误点，直接清掉
-try {
-  if (fs.existsSync(OLD)) fs.unlinkSync(OLD);
-} catch {}
+// 旧位置 / 旧品牌的 exe 和图标会让人误点，直接清掉
+for (const f of LEGACY) {
+  try {
+    if (fs.existsSync(f)) fs.unlinkSync(f);
+  } catch {}
+}
 
 const size = fs.statSync(FINAL).size;
 console.log(`  ✓ 已生成 ${path.relative(ROOT, FINAL)}（${(size / 1024).toFixed(0)} KB，含图标与版本信息）`);

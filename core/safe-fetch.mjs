@@ -125,7 +125,7 @@ export async function safeFetchText(url, opts = {}) {
         signal: ac.signal,
         redirect: 'manual', // 自己跟跳转，每一跳都重新校验，防止跳到内网
         headers: {
-          'user-agent': 'YF-Robot/1.0 (learning)',
+          'user-agent': 'ENbot/1.0 (learning)',
           accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5',
           'accept-language': 'zh-CN,zh;q=0.9',
         },

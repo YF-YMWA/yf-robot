@@ -7,7 +7,7 @@
 全程在独立目录（default-workspace/pkg-e2e），不碰开发目录的 data/。
 
 用法：
-  python tools/test_package.py YF-Robot-v0.2.zip
+  python tools/test_package.py ENbot-v0.2.zip
 """
 import json
 import os
@@ -19,7 +19,7 @@ import urllib.request
 import zipfile
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ZIP = os.path.join(BASE, sys.argv[1] if len(sys.argv) > 1 else 'YF-Robot-v0.2.zip')
+ZIP = os.path.join(BASE, sys.argv[1] if len(sys.argv) > 1 else 'ENbot-v0.2.zip')
 WORK = os.path.join(os.path.dirname(BASE), 'pkg-e2e')
 NODE = os.path.join(BASE, 'runtime', 'node.exe')
 PORT = 19750
@@ -68,7 +68,7 @@ def main():
     log('')
     log('=== 2. 关键文件 ===')
     must = [
-        'YF-Robot.bat', '启动服务.bat', '状态面板.bat', '工具菜单.bat',
+        'ENbot.bat', '启动服务.bat', '状态面板.bat', '工具菜单.bat',
         'app.mjs', 'config.json', 'config.example.json',
         'LICENSE', 'NOTICE', 'README.md', '使用说明.md',
         'docs/adapter-protocol.md', 'examples/adapter-skeleton/adapter.mjs',
@@ -178,7 +178,7 @@ def main():
     err.close()
     log('  服务已停')
     log('  解压目录保留在: %s' % WORK)
-    log('  （想再手工验就进去双击 YF-Robot.bat）')
+    log('  （想再手工验就进去双击 ENbot.bat）')
 
     open(OUT, 'w', encoding='utf-8').write('\n'.join(L))
     return 0

@@ -2,7 +2,7 @@
 chcp 936 >nul
 setlocal
 cd /d "%~dp0"
-title 恢复记忆 - YF-Robot
+title 恢复记忆 - ENbot
 
 echo ============================================
 echo   恢复记忆

@@ -1,6 +1,8 @@
-# 桌面软件化
+# E Night Companion（ENbot）桌面版
 
-YF-Robot 现在像正常软件一样用：**双击桌面图标启动，右下角托盘常驻，没有黑窗口**。
+E Night Companion 简称 **ENbot**。E 可以是 **Eternal（永恒）**，也可以是 **Electronic（电子）**。
+
+ENbot 现在像正常软件一样用：**双击桌面图标启动，右下角托盘常驻，没有黑窗口**。
 
 ---
 
@@ -31,7 +33,7 @@ YF-Robot 现在像正常软件一样用：**双击桌面图标启动，右下角
 ## 怎么用
 
 ```
-桌面「YF-Robot」图标  ← 双击启动（和普通软件一样）
+桌面「ENbot」图标  ← 双击启动（和普通软件一样）
 右下角托盘图标        ← 右键菜单
 ```
 
@@ -39,7 +41,7 @@ YF-Robot 现在像正常软件一样用：**双击桌面图标启动，右下角
 
 | 菜单项 | 作用 |
 |---|---|
-| YF-Robot v0.9.24 · 端口 8899 | 只显示，点了没反应（第一行） |
+| ENbot v0.9.24 · 端口 8899 | 只显示，点了没反应（第一行） |
 | 打开启动器 | 把启动器窗口调出来（概览页） |
 | 打开控制台 | 独立窗口打开控制台 |
 | 聊天窗口 | 独立窗口打开聊天页 |
@@ -94,13 +96,13 @@ YF-Robot 现在像正常软件一样用：**双击桌面图标启动，右下角
 
 ```
 安装：双击「安装软件.bat」（或 desktop\安装.vbs）
-卸载：开始菜单 → YF-Robot → 卸载 YF-Robot
-     或 控制面板 → 程序和功能 → YF-Robot
+卸载：开始菜单 → ENbot → 卸载 ENbot
+     或 控制面板 → 程序和功能 → ENbot
 ```
 
 安装做三件事（都只写当前用户，不需要管理员）：
 
-1. 桌面和开始菜单建快捷方式（指向 `desktop\YF-Robot.vbs`）
+1. 桌面和开始菜单建快捷方式（指向根目录 `ENbot.exe`；没有 exe 时回退 `desktop\ENbot.vbs`）
 2. 「程序和功能」里登记卸载项（带版本号）
 3. 问一句要不要开机自启
 
@@ -110,14 +112,14 @@ YF-Robot 现在像正常软件一样用：**双击桌面图标启动，右下角
 
 ## 启动器：exe（必要时回退 vbs）
 
-主启动器是**根目录**的 `YF-Robot.exe`（约 226 KB，含多尺寸图标与版本信息，双击无黑窗口）。
-解压后它就在最外层，和 `YF-Robot.bat` 放在一起，不用进 `desktop\` 找。
+主启动器是**根目录**的 `ENbot.exe`（约 225 KB，含多尺寸图标与版本信息，双击无黑窗口）。
+解压后它就在最外层，和 `ENbot.bat` 放在一起，不用进 `desktop\` 找。
 
 ### 图标
 
 | 文件 | 用途 |
 |---|---|
-| `desktop\YF-Robot.ico` | 16 / 20 / 24 / 32 / 40 / 48 / 64 / 96 / 128 / 256 多尺寸，编译进 exe；快捷方式优先用 exe 自带图标 |
+| `desktop\ENbot.ico` | 16 / 20 / 24 / 32 / 40 / 48 / 64 / 96 / 128 / 256 多尺寸，编译进 exe；快捷方式优先用 exe 自带图标 |
 | `desktop\ui\icon.png` | 界面里标题栏与「关于」页的 256px 版本 |
 
 托盘图标是「品牌图标 + 右下角状态点」：绿=运行中，灰=已停止，黄=重启中。
@@ -152,19 +154,19 @@ C# 只做宿主与动作：
 调界面时不用起托盘、也不抢单实例锁：
 
 ```bat
-YF-Robot.exe --preview
+ENbot.exe --preview
 ```
 
 截图自检（界面载入后 1.6 秒截图并退出，不需要手动截屏）：
 
 ```bat
-YF-Robot.exe --shot=C:\temp\launcher.png
+ENbot.exe --shot=C:\temp\launcher.png
 ```
 
 加 `--page=plugins`（或 `market` / `settings`）可以直接截某一页：
 
 ```bat
-YF-Robot.exe --page=plugins --shot=C:\temp\plugins.png
+ENbot.exe --page=plugins --shot=C:\temp\plugins.png
 ```
 
 预览用单独的 WebView2 数据目录 `data\webview2-preview`，
@@ -178,7 +180,7 @@ runtime\node.exe tools\build-desktop.mjs
 
 > 编译时会把 csc 的临时目录指到 `.tmp\ctmp`。
 > 用系统默认 TEMP 时，部分安全软件会拦 csc 写临时文件（报 CS1567 拒绝访问）。
-> 输出是根目录的 `YF-Robot.exe`，并自动清掉旧的 `desktop\YF-Robot.exe`。
+> 输出是根目录的 `ENbot.exe`，并自动清掉旧的 `desktop\YF-Robot.exe` 和根目录 `YF-Robot.exe`。
 
 ### 界面起不来怎么办
 
@@ -186,7 +188,7 @@ runtime\node.exe tools\build-desktop.mjs
 「打开控制台 / 网页版（浏览器）/ 退出」，功能不至于丢。
 `data\tray.log` 里会写明原因（`界面回退：…`）。
 
-没有 exe 时，安装器会自动回退到 `desktop\YF-Robot.vbs`（PowerShell 版托盘），
+没有 exe 时，安装器会自动回退到 `desktop\ENbot.vbs`（PowerShell 版托盘），
 托盘功能一致（图标变色、自动重启、日志），只是没有新的启动器窗口。
 
 ---

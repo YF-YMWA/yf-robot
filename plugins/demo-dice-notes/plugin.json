@@ -2,7 +2,7 @@
   "name": "示例插件 · 掷骰子与便签",
   "version": "1.0.0",
   "description": "演示插件能做什么：提供两个工具（掷骰子、记便签），并挂一个 onMessage 钩子",
-  "author": "YF-Robot",
+  "author": "ENbot",
   "homepage": "",
   "tools": [
     {

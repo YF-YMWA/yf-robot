@@ -41,7 +41,7 @@ const WITH_ADAPTER = process.argv.includes('--with-adapter');
 /** 要复制的目录/文件。 */
 const INCLUDE = [
   // 启动器 exe 放最外层：解压后第一眼就能看到
-  'YF-Robot.exe',
+  'ENbot.exe',
   'app.mjs',
   'launch_background.mjs',
   'menu.mjs',
@@ -70,12 +70,13 @@ const INCLUDE = [
   // 主仓只发框架，这样「主仓不含任何平台自动化代码」这句话才成立。
   'docs',
   'examples',
-  // 启动脚本：YF-Robot.bat 会调 scripts\start.ps1，漏了就打不开
+  // 启动脚本：ENbot.bat 会调 scripts\start.ps1，漏了就打不开
   'scripts',
   // 桌面软件化：托盘脚本 + 安装/卸载
   'desktop',
   // 所有用户入口，一个都不能漏 —— 之前漏过三个，对方拿到手上只有主菜单
   '启动服务.bat',
+  'ENbot.bat',
   'YF-Robot.bat',
   '状态面板.bat',
   '工具菜单.bat',
@@ -278,7 +279,7 @@ function scanSecrets(files) {
 // ===== 主流程 =====
 
 console.log('========================================');
-console.log('  YF-Robot · 打包');
+console.log('  ENbot · 打包');
 console.log('========================================');
 console.log('');
 
@@ -494,7 +495,7 @@ if (fs.existsSync(examplePath)) {
 
 // 6. 生成使用说明
 console.log('【6】生成说明文件…');
-const readme = `# YF-Robot · 人设化 AI 助手
+const readme = `# ENbot · 人设化 AI 助手
 
 一个能陪聊、能干活的人设化 AI 助手，支持角色卡、长期记忆、看图、画图、语音、联网。
 
@@ -515,7 +516,7 @@ const readme = `# YF-Robot · 人设化 AI 助手
 
 ### 2. 启动
 
-双击 \`YF-Robot.bat\`，按提示：
+双击 \`ENbot.bat\`，按提示：
 
 1. 选择模型服务商
 2. 粘贴 API Key
@@ -579,7 +580,7 @@ const readme = `# YF-Robot · 人设化 AI 助手
 三道退路（万一开了收不了场）：
 
 1. 控制台勾「应急：保持运行」
-2. \`YF-Robot.bat\` → 选 9「关掉关网页即停服务」
+2. \`ENbot.bat\` → 选 9「关掉关网页即停服务」
 3. 手改 \`config.json\`：\`server.stopWhenNoConsole = false\`
 
 ### 8. Key 不会莫名其妙丢
@@ -832,7 +833,10 @@ if (WITH_ADAPTER) {
 console.log('【8】完整性检查…');
 
 const MUST_HAVE = [
-  ['YF-Robot.bat', '主启动入口'],
+  ['ENbot.exe', '启动器 exe'],
+  ['ENbot.bat', '主启动入口'],
+  ['YF-Robot.bat', '旧入口兼容（指向 ENbot.bat）'],
+  ['desktop/ENbot.ico', '启动器图标'],
   ['启动服务.bat', '直接启动'],
   ['桌面控制台.bat', '控制台（独立窗口）'],
   ['桌面聊天.bat', '聊天（独立窗口）'],
@@ -841,7 +845,7 @@ const MUST_HAVE = [
   ['app.mjs', '服务入口'],
   ['config.json', '配置'],
   ['使用说明.md', '说明文档'],
-  ['scripts/start.ps1', '启动脚本（YF-Robot.bat 调用）'],
+  ['scripts/start.ps1', '启动脚本（ENbot.bat 调用）'],
   ['web/console.html', '控制台页面'],
   ['core/engine.mjs', '引擎'],
   ['core/admin.mjs', '管理接口'],
@@ -955,7 +959,7 @@ console.log('');
 if (MAKE_ZIP) {
   const version = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
   const suffix = WITH_ADAPTER ? '-with-adapter' : '';
-  const zipPath = path.join(ROOT, `YF-Robot-v${version}${suffix}.zip`);
+  const zipPath = path.join(ROOT, `ENbot-v${version}${suffix}.zip`);
   console.log('【打包】生成 zip…');
   fs.rmSync(zipPath, { force: true });
 

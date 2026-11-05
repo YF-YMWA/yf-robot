@@ -1,6 +1,6 @@
-﻿# YF-Robot 托盘启动器（PowerShell + WinForms，不依赖编译器）
+﻿# ENbot 托盘启动器（PowerShell + WinForms，不依赖编译器）
 #
-# 由 desktop\YF-Robot.vbs 以隐藏窗口拉起，所以看不到控制台。
+# 由 desktop\ENbot.vbs 以隐藏窗口拉起，所以看不到控制台。
 #
 # 行为：
 #   · 单实例（Mutex）：重复双击静默退出
@@ -26,11 +26,11 @@ function Find-Root {
 
 $Root = Find-Root
 if (-not $Root) {
-    [System.Windows.Forms.MessageBox]::Show('找不到程序目录（config.json 所在文件夹）。', 'YF-Robot') | Out-Null
+    [System.Windows.Forms.MessageBox]::Show('找不到程序目录（config.json 所在文件夹）。', 'ENbot') | Out-Null
     exit 1
 }
 
-$mutex = New-Object System.Threading.Mutex($false, 'YF-Robot-Tray-PS')
+$mutex = New-Object System.Threading.Mutex($false, 'ENbot-Tray-PS')
 if (-not $mutex.WaitOne(0)) {
     # 已有实例：静默退出（弹框会让这个进程卡在那儿，看起来像开了两个）
     exit 0
@@ -140,7 +140,7 @@ function Start-ServiceSafe {
         $script:Child = [System.Diagnostics.Process]::Start($psi)
         Write-TrayLog ("服务已启动 pid=" + $script:Child.Id)
     } catch {
-        [System.Windows.Forms.MessageBox]::Show("启动服务失败：$($_.Exception.Message)", 'YF-Robot') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show("启动服务失败：$($_.Exception.Message)", 'ENbot') | Out-Null
     }
 }
 
@@ -181,12 +181,12 @@ $IconBusy = New-Icon ([System.Drawing.Color]::FromArgb(214, 158, 46))
 
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Icon = $IconDown
-$notify.Text = "YF-Robot v$Version"
+$notify.Text = "ENbot v$Version"
 $notify.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
-$miInfo = New-Object System.Windows.Forms.ToolStripMenuItem("YF-Robot v$Version · 端口 $Port")
+$miInfo = New-Object System.Windows.Forms.ToolStripMenuItem("ENbot v$Version · 端口 $Port")
 $miInfo.Enabled = $false
 $menu.Items.Add($miInfo) | Out-Null
 $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
@@ -223,7 +223,7 @@ $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 $miOpen = $menu.Items.Add('打开控制台')
 $miOpen.Add_Click({
     try { Open-Console } catch {
-        [System.Windows.Forms.MessageBox]::Show('打不开控制台，服务可能还没起来。', 'YF-Robot') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show('打不开控制台，服务可能还没起来。', 'ENbot') | Out-Null
     }
 })
 
@@ -231,13 +231,13 @@ $miLog = $menu.Items.Add('查看日志')
 $miLog.Add_Click({
     $log = Join-Path $Root 'data\app.out.log'
     if (Test-Path $log) { Start-Process notepad.exe $log }
-    else { [System.Windows.Forms.MessageBox]::Show("还没有日志文件：$log", 'YF-Robot') | Out-Null }
+    else { [System.Windows.Forms.MessageBox]::Show("还没有日志文件：$log", 'ENbot') | Out-Null }
 })
 
 $miRestart = $menu.Items.Add('重启服务')
 $miRestart.Add_Click({
     $notify.Icon = $IconBusy
-    $notify.Text = 'YF-Robot · 重启中…'
+    $notify.Text = 'ENbot · 重启中…'
     Stop-ServiceSafe
     Start-Sleep -Milliseconds 1200
     Start-ServiceSafe
@@ -256,19 +256,19 @@ $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 
 $miAuto = New-Object System.Windows.Forms.ToolStripMenuItem('开机自启')
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$miAuto.Checked = [bool](Get-ItemProperty -Path $RunKey -Name 'YF-Robot' -ErrorAction SilentlyContinue)
+$miAuto.Checked = [bool](Get-ItemProperty -Path $RunKey -Name 'ENbot' -ErrorAction SilentlyContinue)
 $miAuto.Add_Click({
     try {
         if ($miAuto.Checked) {
-            Remove-ItemProperty -Path $RunKey -Name 'YF-Robot' -ErrorAction SilentlyContinue
+            Remove-ItemProperty -Path $RunKey -Name 'ENbot' -ErrorAction SilentlyContinue
             $miAuto.Checked = $false
         } else {
-            $vbs = Join-Path $Root 'desktop\YF-Robot.vbs'
-            Set-ItemProperty -Path $RunKey -Name 'YF-Robot' -Value ('wscript.exe "' + $vbs + '"')
+            $vbs = Join-Path $Root 'desktop\ENbot.vbs'
+            Set-ItemProperty -Path $RunKey -Name 'ENbot' -Value ('wscript.exe "' + $vbs + '"')
             $miAuto.Checked = $true
         }
     } catch {
-        [System.Windows.Forms.MessageBox]::Show("设置开机自启失败：$($_.Exception.Message)", 'YF-Robot') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show("设置开机自启失败：$($_.Exception.Message)", 'ENbot') | Out-Null
     }
 })
 $menu.Items.Add($miAuto) | Out-Null
@@ -277,7 +277,7 @@ $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 
 $miExit = $menu.Items.Add('退出（停止服务）')
 $miExit.Add_Click({
-    $r = [System.Windows.Forms.MessageBox]::Show('退出会停止服务（聊天也会断）。确定？', 'YF-Robot',
+    $r = [System.Windows.Forms.MessageBox]::Show('退出会停止服务（聊天也会断）。确定？', 'ENbot',
         [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
     if ($r -ne 'Yes') { return }
     Stop-ServiceSafe
@@ -296,11 +296,11 @@ function Update-State([switch]$Force) {
 
     if ($up) {
         $notify.Icon = $IconUp
-        $notify.Text = "YF-Robot v$Version · 运行中（:$Port）"
+        $notify.Text = "ENbot v$Version · 运行中（:$Port）"
         $script:AutoRestarts = 0
     } else {
         $notify.Icon = $IconDown
-        $notify.Text = "YF-Robot v$Version · 已停止"
+        $notify.Text = "ENbot v$Version · 已停止"
 
         # 服务意外退出：自动拉起（最多 3 次，间隔至少 20 秒）
         if ($prev -eq $true -and $script:AutoRestarts -lt 3) {
@@ -309,7 +309,7 @@ function Update-State([switch]$Force) {
                 $script:AutoRestarts++
                 Write-TrayLog ("检测到服务退出，第 $($script:AutoRestarts) 次自动重启")
                 $script:LastRestartAt = Get-Date
-                $notify.ShowBalloonTip(3000, 'YF-Robot',
+                $notify.ShowBalloonTip(3000, 'ENbot',
                     "服务好像退出了，正在自动重启（第 $($script:AutoRestarts) 次）",
                     [System.Windows.Forms.ToolTipIcon]::Warning)
                 try { Start-ServiceSafe } catch { Write-TrayLog ("自动重启失败: " + $_.Exception.Message) }
@@ -319,7 +319,7 @@ function Update-State([switch]$Force) {
 
     # 状态变化时给一次气泡提示
     if ($prev -eq $false -and $up) {
-        $notify.ShowBalloonTip(2500, 'YF-Robot', "服务已就绪（端口 $Port），双击图标打开控制台", [System.Windows.Forms.ToolTipIcon]::Info)
+        $notify.ShowBalloonTip(2500, 'ENbot', "服务已就绪（端口 $Port），双击图标打开控制台", [System.Windows.Forms.ToolTipIcon]::Info)
     }
 
     $script:WasUp = $up

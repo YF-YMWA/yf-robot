@@ -13,7 +13,7 @@ body:
     attributes:
       label: 发生了什么
       description: 一句话说清现象，比如「发消息没回复」「控制台打不开」
-      placeholder: 双击 YF-Robot.bat 之后浏览器打开是空白页
+      placeholder: 双击 ENbot.bat 之后浏览器打开是空白页
     validations:
       required: true
 
@@ -61,7 +61,7 @@ body:
     attributes:
       label: 版本
       description: 发行包文件名，或 git commit
-      placeholder: YF-Robot-v0.2.zip
+      placeholder: ENbot-v0.2.zip
     validations:
       required: true
 

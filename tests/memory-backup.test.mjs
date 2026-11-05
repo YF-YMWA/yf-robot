@@ -116,7 +116,7 @@ test('恢复：配置也会跟着回来', () => {
 
 test('恢复：拒绝不是本程序备份的文件', () => {
   const root = makeRoot('reject');
-  assert.throws(() => restoreBundle(root, { kind: 'something-else' }), /不是 YF-Robot 的记忆备份/);
+  assert.throws(() => restoreBundle(root, { kind: 'something-else' }), /不是 ENbot 的记忆备份/);
 });
 
 test('恢复：dryRun 只报计划，不动文件', () => {

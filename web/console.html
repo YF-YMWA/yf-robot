@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>YF-Robot · 控制台</title>
+<title>ENbot · 控制台</title>
 <style>
   :root {
     --bg: #0d1117; --panel: #161b22; --border: #30363d;
@@ -453,7 +453,7 @@
 <body>
 
 <aside>
-  <div class="brand">YF-Robot · 控制台<small id="brandSub"></small></div>
+  <div class="brand">ENbot · 控制台<small id="brandSub"></small></div>
   <nav>
     <a data-page="guide">上手指南</a>
     <a data-page="overview" class="active">总览</a>
@@ -699,7 +699,7 @@
             勾上这个，就算上面那个开关开着，服务也<strong>不会</strong>因为关网页而退出。<br>
             <span style="color:var(--dim)">
               万一开了「关网页即停」又收不了场，随时回来勾这个；<br>
-              网页也打不开的话：双击 <code>YF-Robot.bat</code> 选「关掉『关网页即停服务』」，
+              网页也打不开的话：双击 <code>ENbot.bat</code> 选「关掉『关网页即停服务』」，
               或者直接删掉 <code>data\keep-alive</code> 反过来。
             </span>
           </div>
@@ -2621,7 +2621,7 @@ async function testAll() {
  * 关网页不会停服务，所以给一个明确入口，省得去任务管理器里翻 node.exe。
  */
 async function stopService() {
-  if (!confirm('确定停止 YF-Robot 服务？\n\n停止后微信不会自动回复，需要重新双击「YF-Robot.bat」启动。')) return;
+  if (!confirm('确定停止 ENbot 服务？\n\n停止后微信不会自动回复，需要重新双击「ENbot.bat」启动。')) return;
 
   try {
     await api('shutdown', { method: 'POST', body: {} });
@@ -2633,7 +2633,7 @@ async function stopService() {
     '<div style="display:flex;align-items:center;justify-content:center;height:100vh;' +
     'font-family:system-ui;font-size:15px;color:#8b949e;text-align:center;line-height:2">' +
     '<div>服务已停止<br><br>' +
-    '<span style="font-size:13px">想重新启动就双击 <b>YF-Robot.bat</b><br>' +
+    '<span style="font-size:13px">想重新启动就双击 <b>ENbot.bat</b><br>' +
     '可以关掉这个页面了</span></div></div>';
 }
 
@@ -2674,7 +2674,7 @@ async function restartService() {
     const hint = document.getElementById('restartHint');
     if (hint && tries > 10) {
       hint.innerHTML =
-        '服务没有自动起来。<br>请手动双击 <b>YF-Robot.bat</b> 重新启动。';
+        '服务没有自动起来。<br>请手动双击 <b>ENbot.bat</b> 重新启动。';
     }
     if (tries > 40) clearInterval(timer);
   }, 1000);
@@ -3237,7 +3237,7 @@ async function saveServerMode() {
     const ok = confirm(
       '开启后：关掉所有控制台页面约 15 秒，服务会自动退出。\n\n' +
         '如果你在用微信，微信那边也会立刻不回话。\n\n' +
-        '确定要开吗？（随时可以用「保持运行」或YF-Robot.bat 关掉）',
+        '确定要开吗？（随时可以用「保持运行」或ENbot.bat 关掉）',
     );
     if (!ok) {
       if (hint) hint.textContent = '已取消';

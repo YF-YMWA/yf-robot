@@ -39,6 +39,7 @@ const CODE_ENTRIES = [
   'CHANGELOG.md',
   'NOTICE',
   'LICENSE',
+  'ENbot.bat',
   'YF-Robot.bat',
   '启动服务.bat',
   '工具菜单.bat',
@@ -213,7 +214,7 @@ export async function applyUpdate({
   let buf;
   try {
     const r = await fetchLoose(url, {
-      headers: { 'user-agent': 'YF-Robot' },
+      headers: { 'user-agent': 'ENbot' },
       timeoutMs: 120000,
       log: (m) => log(m),
     });
@@ -267,7 +268,7 @@ export async function applyUpdate({
         let label = 'main（最新提交）';
         try {
           const tr = await fetch('https://api.github.com/repos/' + adapterRepo + '/tags?per_page=5', {
-            headers: { 'user-agent': 'YF-Robot' },
+            headers: { 'user-agent': 'ENbot' },
             signal: AbortSignal.timeout(8000),
           });
           const tags = tr.ok ? await tr.json() : [];
@@ -282,7 +283,7 @@ export async function applyUpdate({
 
         const aurl = 'https://github.com/' + adapterRepo + '/archive/refs/' + ref + '.zip';
         const ar = await fetchLoose(aurl, {
-          headers: { 'user-agent': 'YF-Robot' },
+          headers: { 'user-agent': 'ENbot' },
           timeoutMs: 120000,
           log: (m) => log(m),
         });

@@ -1,7 +1,7 @@
-"""生成 YF-Robot 品牌图标（只依赖 Pillow，发行包自带）。
+"""生成 ENbot 品牌图标（只依赖 Pillow，发行包自带）。
 
 输出：
-  desktop/YF-Robot.ico       多尺寸（16 → 256），给 exe 与快捷方式用
+  desktop/ENbot.ico       多尺寸（16 → 256），给 exe 与快捷方式用
   desktop/ui/icon.png        256px，给启动器界面用
 
 用法（仓库自带 Python，已包含 Pillow）：
@@ -167,11 +167,11 @@ def main():
     img.resize((256, 256), Image.LANCZOS).save(os.path.join(ui_dir, "icon.png"))
 
     sizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
-    ico = os.path.join(ROOT, "desktop", "YF-Robot.ico")
+    ico = os.path.join(ROOT, "desktop", "ENbot.ico")
     save_ico(img, ico, sizes)
 
     print("已生成：")
-    print("  desktop/YF-Robot.ico   ", os.path.getsize(ico), "bytes")
+    print("  desktop/ENbot.ico   ", os.path.getsize(ico), "bytes")
     print("  desktop/ui/icon.png")
 
 
