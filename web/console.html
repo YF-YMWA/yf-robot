@@ -1334,7 +1334,7 @@
     <div class="card">
       <h2>上传素材</h2>
       <div class="hint" style="margin-bottom:12px">
-        支持 PNG / JPG / GIF / WEBP，单张最大 8MB。GIF 会动，效果最像表情包。
+        支持 PNG / JPG / GIF / APNG / WEBP；静态图最大 16MB，动图最大 32MB。GIF 会动，效果最像表情包。
       </div>
       <div class="row">
         <label>类型</label>
@@ -5676,8 +5676,10 @@ async function uploadFiles() {
 
   for (const f of files) {
     try {
-      if (f.size > 8 * 1024 * 1024) {
-        errors.push(`${f.name} 太大`);
+      const isAnim = /^image\/(gif|apng|webp)$/i.test(f.type) || /\.(gif|apng|webp)$/i.test(f.name);
+      const maxMB = isAnim ? 32 : 16;
+      if (f.size > maxMB * 1024 * 1024) {
+        errors.push(`${f.name} 太大（${isAnim ? '动图' : '静态图'}上限 ${maxMB}MB）`);
         continue;
       }
 

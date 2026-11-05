@@ -439,9 +439,9 @@ export class WebChannel {
 
         // 除 GET/HEAD 外都要读 body —— DELETE 也可能带参数
         const hasBody = !['GET', 'HEAD'].includes(req.method);
-        // 管理接口里也可能带大 base64（上传图片、导入语音包），放宽到 16MB
+        // 管理接口里也可能带大 base64（32MB 动图 -> 约 43MB base64），放宽到 64MB
         const body = hasBody
-          ? await readJson(req, null, 16 * 1024 * 1024).catch(() => null)
+          ? await readJson(req, null, 64 * 1024 * 1024).catch(() => null)
           : null;
         const r = await this.admin.handle(req.method, url.pathname, body);
         if (r) return json(res, r.code, r.body);

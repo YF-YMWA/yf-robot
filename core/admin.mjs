@@ -23,6 +23,7 @@ import zlib from 'node:zlib';
 import cryptoMod from 'node:crypto';
 import { spawnSync as spawnSyncMod } from 'node:child_process';
 import { ROOT } from './config.mjs';
+import { isAnimatedImage } from './image.mjs';
 import { listCards, loadAnyPersona } from './card.mjs';
 import {
   LEARNING_DEFAULTS,
@@ -3084,12 +3085,29 @@ print('%016x' % bits)
 
       try {
         const buf = fs.readFileSync(file);
+        const animated = isAnimatedImage(buf);
+        const markAnimated = () => {
+          index[item.name] = {
+            ...(index[item.name] || {}),
+            desc: '动图',
+            tags: ['动图'],
+            addedAt: Math.floor(Date.now() / 1000),
+            source: 'format',
+            animated: true,
+          };
+          done++;
+          tagged++;
+        };
         const r = await this.engine.vision.describe(buf, { prompt: this.#describePrompt() });
 
         let desc = String(r?.description || '').trim();
         desc = this.#cleanDesc(desc);
 
         if (!desc || desc.includes('看不清')) {
+          if (animated) {
+            markAnimated();
+            continue;
+          }
           failed.push(item.name);
           continue;
         }
@@ -3103,6 +3121,10 @@ print('%016x' % bits)
          * 留着空白反而诚实，等下次重拍。
          */
         if (this.#looksLikeBadDesc(desc)) {
+          if (animated) {
+            markAnimated();
+            continue;
+          }
           this.log.warn?.(`[sticker-index] ${item.name} 描述像截歪了，跳过`);
           failed.push(item.name);
           continue;
@@ -3114,6 +3136,7 @@ print('%016x' % bits)
         for (const [tag, words] of Object.entries(TAGS)) {
           if (words.some((w) => desc.includes(w))) tags.push(tag);
         }
+        if (animated && !tags.includes('动图')) tags.unshift('动图');
 
         // 新描述没抽出标签、但旧条目有 → 沿用旧的，别把好东西覆盖没了
         // （桥接后台线程也会写这个索引，两边可能交叉覆盖）
@@ -3122,9 +3145,10 @@ print('%016x' % bits)
 
         index[item.name] = {
           desc: desc.slice(0, 200),
-          tags: finalTags,
+          tags: finalTags.length ? finalTags : animated ? ['动图'] : [],
           addedAt: Math.floor(Date.now() / 1000),
           source: 'rebuild',
+          animated,
         };
         done++;
         if (finalTags.length) tagged++;
@@ -4909,10 +4933,9 @@ print('%016x' % bits)
 
     if (!b64) return { ok: false, error: '没有图片数据' };
 
-    // 限制 8MB
-    const approxSize = Math.floor((b64.length * 3) / 4);
-    if (approxSize > 8 * 1024 * 1024) {
-      return { ok: false, error: '图片太大（上限 8MB）' };
+    // base64 体积先做个粗上限，真正的大小按解码后的字节数判断
+    if (b64.length > 48 * 1024 * 1024) {
+      return { ok: false, error: '图片太大（上限 32MB 动图 / 16MB 静态图）' };
     }
 
     let buf;
@@ -4930,6 +4953,13 @@ print('%016x' % bits)
     else if (buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') ext = '.webp';
 
     if (!ext) return { ok: false, error: '不是支持的图片格式（支持 png/jpg/gif/webp）' };
+
+    // 动图单独放宽：GIF / APNG / 动画 WebP 上限 32MB，静态图 16MB
+    const animated = isAnimatedImage(buf);
+    const maxMB = animated ? 32 : 16;
+    if (buf.length > maxMB * 1024 * 1024) {
+      return { ok: false, error: `${animated ? '动图' : '图片'}太大（上限 ${maxMB}MB）` };
+    }
 
     // 生成文件名（内容哈希，天然去重）
     const crypto = cryptoMod;
@@ -4970,10 +5000,13 @@ print('%016x' % bits)
       tags: tagInfo?.tags || [],
       desc: tagInfo?.desc || '',
       tagged: Boolean(tagInfo?.ok),
+      animated: Boolean(tagInfo?.animated),
       message:
         `已上传（${(buf.length / 1024).toFixed(0)}KB）` +
         (tagInfo?.ok
-          ? `，已识别：${(tagInfo.tags || []).join('、') || '（没匹配到情绪词）'}`
+          ? tagInfo.desc
+            ? `，已识别：${(tagInfo.tags || []).join('、') || '（没匹配到情绪词）'}`
+            : `，已标记：${(tagInfo.tags || []).join('、') || '动图'}（内容未识别）`
           : `，但没识别成功：${tagInfo?.error || '未知原因'}`),
     };
   }
@@ -4984,7 +5017,29 @@ print('%016x' % bits)
    * @returns {{ok:boolean, tags:string[], desc:string, error?:string}}
    */
   async #tagOneMedia(kind, name, buf) {
+    const animated = isAnimatedImage(buf);
+
     if (!this.engine?.vision?.enabled) {
+      if (animated) {
+        const index = this.#readStickerIndex();
+        index[name] = {
+          ...(index[name] || {}),
+          desc: '动图',
+          tags: ['动图'],
+          at: new Date().toISOString(),
+          kind,
+          source: 'format',
+          animated: true,
+        };
+        this.#writeStickerIndex(index);
+        return {
+          ok: true,
+          tags: ['动图'],
+          desc: '',
+          animated: true,
+          error: '看图模型没启用，已标记动图',
+        };
+      }
       return { ok: false, tags: [], desc: '', error: '看图模型没启用，打不了标签' };
     }
 
@@ -5038,6 +5093,26 @@ print('%016x' % bits)
     }
 
     if (isBad(desc)) {
+      if (animated) {
+        const index = this.#readStickerIndex();
+        index[name] = {
+          ...(index[name] || {}),
+          desc: '动图',
+          tags: ['动图'],
+          at: new Date().toISOString(),
+          kind,
+          source: 'format',
+          animated: true,
+        };
+        this.#writeStickerIndex(index);
+        return {
+          ok: true,
+          tags: ['动图'],
+          desc: '',
+          animated: true,
+          error: '内容没识别出来，已标记为动图',
+        };
+      }
       return {
         ok: false,
         tags: [],
@@ -5046,6 +5121,20 @@ print('%016x' % bits)
       };
     }
     if (this.#looksLikeBadDesc(desc)) {
+      if (animated) {
+        const index = this.#readStickerIndex();
+        index[name] = {
+          ...(index[name] || {}),
+          desc: '动图',
+          tags: ['动图'],
+          at: new Date().toISOString(),
+          kind,
+          source: 'format',
+          animated: true,
+        };
+        this.#writeStickerIndex(index);
+        return { ok: true, tags: ['动图'], desc: '', animated: true, error: '描述不可用，已标记为动图' };
+      }
       return { ok: false, tags: [], desc: '', error: '描述不可用（像截歪了）' };
     }
 
@@ -5054,20 +5143,23 @@ print('%016x' % bits)
     for (const [tag, words] of Object.entries(TAGS)) {
       if (words.some((w) => desc.includes(w))) tags.push(tag);
     }
+    // 格式标签：动图无论描述有没有情绪词，都给它一个能挑中的标签
+    if (animated && !tags.includes('动图')) tags.unshift('动图');
 
     const index = this.#readStickerIndex();
     const entry = {
       ...(index[name] || {}),
       desc: desc.slice(0, 200),
-      tags: tags.length ? tags : ['普通'],
+      tags: tags.length ? tags : [animated ? '动图' : '普通'],
       at: new Date().toISOString(),
       kind,
       source: usedSource,
+      animated,
     };
     index[name] = entry;
     this.#writeStickerIndex(index);
 
-    return { ok: true, tags: entry.tags, desc };
+    return { ok: true, tags: entry.tags, desc, animated };
   }
 
   /** 是不是 GIF（看文件头，不看扩展名） */

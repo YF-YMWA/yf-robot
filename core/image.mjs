@@ -103,6 +103,45 @@ export function sniffFormat(buf) {
 }
 
 /**
+ * 是否带动画（GIF / APNG / 动画 WebP）。
+ *
+ * 动图上传后视觉模型经常只认一帧，素材库还要单独给它「动图」标签，
+ * 所以不能只看扩展名。
+ *
+ * @param {Buffer} buf
+ * @returns {boolean}
+ */
+export function isAnimatedImage(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 12) return false;
+  const format = sniffFormat(buf);
+
+  if (format === 'gif') {
+    // 每个动画帧前有一个 Graphic Control Extension: 21 F9 04
+    let gce = 0;
+    for (let i = 0; i + 7 < buf.length; i++) {
+      if (buf[i] === 0x21 && buf[i + 1] === 0xf9 && buf[i + 2] === 0x04) gce++;
+      if (gce > 1) return true;
+    }
+    return buf.includes(Buffer.from('NETSCAPE2.0'));
+  }
+
+  if (format === 'png') {
+    // APNG 的 acTL 块
+    return buf.includes(Buffer.from('acTL'));
+  }
+
+  if (format === 'webp') {
+    // VP8X 的动画标志位（flags 第 2 位），或 ANIM 块
+    if (buf.subarray(12, 16).toString('ascii') === 'VP8X' && buf.length > 20) {
+      return (buf[20] & 0x02) !== 0;
+    }
+    return buf.includes(Buffer.from('ANIM'));
+  }
+
+  return false;
+}
+
+/**
  * 判断是否可能是 wxgf 容器。
  *
  * wxgf 没有公开规范，实际特征是：
@@ -281,8 +320,9 @@ export async function prepareImage(input, opts = {}) {
   const originalMime = FORMATS[format];
   const maxEdge = opts.maxEdge || 1568;
 
-  // GIF 可能带动画，视觉模型多数只取首帧或直接报错，统一转静态 JPEG
-  const needsConvert = !originalMime || format === 'gif';
+  // GIF / APNG / 动画 WebP 都可能带动画，视觉模型多数只取首帧或直接报错，
+  // 统一先转成静态 JPEG 再送识别。
+  const needsConvert = !originalMime || format === 'gif' || isAnimatedImage(buf);
 
   if (!needsConvert && buf.length < 4 * 1024 * 1024) {
     const size = await probeSize(buf, opts).catch(() => null);
