@@ -104,6 +104,35 @@ test('发现：git 副本会被标记', () => {
   assert.equal(listAdapters(root)[0].hasGit, true);
 });
 
+test('发现：manifest 的 runtime / health / log / features', () => {
+  const root = makeRoot('runtime-fields');
+  makeAdapter(root, 'tg', {
+    'adapter.json': JSON.stringify({
+      name: 'Telegram',
+      entry: 'main.mjs',
+      runtime: 'node',
+      needsAdmin: false,
+      platform: 'telegram',
+      health: 'http://127.0.0.1:9010/health',
+      log: 'data/adapter.log',
+      features: ['text', 'image', 'group'],
+    }),
+    'main.mjs': '',
+  });
+  const a = listAdapters(root)[0];
+  assert.equal(a.runtime, 'node');
+  assert.equal(a.platform, 'telegram');
+  assert.equal(a.health, 'http://127.0.0.1:9010/health');
+  assert.equal(a.log, 'data/adapter.log');
+  assert.deepEqual(a.features, ['text', 'image', 'group']);
+});
+
+test('发现：没写 runtime 时按 .mjs 推断 node', () => {
+  const root = makeRoot('infer-node');
+  makeAdapter(root, 'node-adapter', { 'adapter.json': '{"entry":"main.mjs"}', 'main.mjs': '' });
+  assert.equal(listAdapters(root)[0].runtime, 'node');
+});
+
 test('选择：按 id 取，取不到返回 null', () => {
   const root = makeRoot('pick');
   makeAdapter(root, 'qq', { 'adapter.json': '{"entry":"a.py"}', 'a.py': '' });

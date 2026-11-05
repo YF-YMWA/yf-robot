@@ -873,6 +873,23 @@ export class AdminApi {
         return { code: 200, body: { ok: true, name, enabled: on, off: current.tools.off } };
       }
 
+      // ===== 沙箱面板 =====
+      if (method === 'GET' && pathname === '/api/admin/sandbox') {
+        return { code: 200, body: this.#sandboxStatus() };
+      }
+      if (method === 'POST' && pathname === '/api/admin/sandbox/clean') {
+        return { code: 200, body: this.#sandboxClean(body) };
+      }
+      if (method === 'GET' && pathname === '/api/admin/sandbox/trash') {
+        return { code: 200, body: { ok: true, items: this.#sandboxTrash() } };
+      }
+      if (method === 'POST' && pathname === '/api/admin/sandbox/restore') {
+        return { code: 200, body: this.#sandboxRestore(body) };
+      }
+      if (method === 'GET' && pathname === '/api/admin/sandbox/audit') {
+        return { code: 200, body: { ok: true, items: this.#sandboxAudit(30) } };
+      }
+
       // ===== 逻辑库 =====
       if (method === 'GET' && pathname === '/api/admin/logic') {
         const lib = this.engine.logic();
@@ -1059,6 +1076,9 @@ export class AdminApi {
             id: a.id,
             name: a.name,
             entry: a.entry,
+            runtime: a.runtime || '',
+            platform: a.platform || '',
+            features: a.features || [],
             mode: a.mode,
             description: a.description,
             needsAdmin: a.needsAdmin,
@@ -2259,6 +2279,216 @@ export class AdminApi {
   }
 
   // ===== 素材库（图片 / 表情包） =====
+
+  /** 沙箱根目录（和工作目录设置保持一致）。 */
+  #sandboxPath() {
+    const p = String(this.config?.tools?.sandbox || '').trim();
+    return path.resolve(p && path.isAbsolute(p) ? p : path.join(this.root, p || 'agent-workspace'));
+  }
+
+  #sandboxTrashDir() {
+    return path.join(this.root, 'data', 'sandbox-trash');
+  }
+
+  /** 递归统计目录（不跟随链接）。 */
+  #dirStats(dir) {
+    const out = { files: 0, bytes: 0 };
+    if (!dir || !fs.existsSync(dir)) return out;
+    const stack = [dir];
+    while (stack.length) {
+      const cur = stack.pop();
+      let list = [];
+      try {
+        list = fs.readdirSync(cur, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of list) {
+        if (e.isSymbolicLink()) continue;
+        const full = path.join(cur, e.name);
+        if (e.isDirectory()) {
+          stack.push(full);
+          continue;
+        }
+        try {
+          const st = fs.statSync(full);
+          out.files++;
+          out.bytes += st.size;
+        } catch {}
+      }
+    }
+    return out;
+  }
+
+  #sandboxAudit(limit = 30) {
+    const file = path.join(this.root, 'data', 'sandbox-audit.log');
+    if (!fs.existsSync(file)) return [];
+    const n = Math.max(1, Math.min(200, Number(limit) || 30));
+    let lines = [];
+    try {
+      lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).slice(-n);
+    } catch {
+      return [];
+    }
+    return lines.map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return { at: '', event: 'raw', text: line.slice(0, 300) };
+      }
+    });
+  }
+
+  #sandboxTrash() {
+    const dir = this.#sandboxTrashDir();
+    if (!fs.existsSync(dir)) return [];
+    const items = [];
+    let names = [];
+    try {
+      names = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+    } catch {
+      return [];
+    }
+    for (const name of names) {
+      const d = path.join(dir, name);
+      try {
+        const m = JSON.parse(fs.readFileSync(path.join(d, 'manifest.json'), 'utf8'));
+        items.push({
+          id: name,
+          at: m.at || '',
+          action: m.action || 'overwrite',
+          path: m.path || '',
+          size: Number(m.size) || 0,
+          backup: Boolean(m.backup),
+        });
+      } catch {}
+    }
+    return items.sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 30);
+  }
+
+  #sandboxStatus() {
+    const root = this.#sandboxPath();
+    const exists = fs.existsSync(root);
+    const stats = this.#dirStats(root);
+    const trash = this.#sandboxTrashDir();
+    const trashStats = this.#dirStats(trash);
+    let trashCount = 0;
+    try {
+      trashCount = fs.readdirSync(trash, { withFileTypes: true }).filter((e) => e.isDirectory()).length;
+    } catch {}
+    const quota = Math.max(
+      1024 * 1024,
+      Number(this.config?.tools?.maxWorkspaceSize) || 200 * 1024 * 1024,
+    );
+    return {
+      ok: true,
+      path: root,
+      exists,
+      files: stats.files,
+      bytes: stats.bytes,
+      quota,
+      percent: quota ? Math.min(100, Math.round((stats.bytes / quota) * 100)) : 0,
+      trash: { count: trashCount, bytes: trashStats.bytes },
+      audit: this.#sandboxAudit(12),
+    };
+  }
+
+  #sandboxClean(body = {}) {
+    const root = this.#sandboxPath();
+    const remove = (p) => {
+      const st = this.#dirStats(p);
+      try {
+        fs.rmSync(p, { recursive: true, force: true });
+      } catch {}
+      return st;
+    };
+
+    const run = remove(path.join(root, '.run'));
+    const tmp = remove(path.join(root, '.tmp'));
+
+    let trash = { files: 0, bytes: 0, count: 0 };
+    const trashDir = this.#sandboxTrashDir();
+    if (body?.trash === true) {
+      let count = 0;
+      try {
+        count = fs.readdirSync(trashDir, { withFileTypes: true }).filter((e) => e.isDirectory()).length;
+      } catch {}
+      const st = this.#dirStats(trashDir);
+      remove(trashDir);
+      trash = { ...st, count };
+    } else if (fs.existsSync(trashDir)) {
+      const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+      for (const e of fs.readdirSync(trashDir, { withFileTypes: true })) {
+        if (!e.isDirectory()) continue;
+        const d = path.join(trashDir, e.name);
+        try {
+          if (fs.statSync(d).mtimeMs < cutoff) {
+            const st = this.#dirStats(d);
+            remove(d);
+            trash.bytes += st.bytes;
+            trash.files += st.files;
+            trash.count++;
+          }
+        } catch {}
+      }
+    }
+
+    return {
+      ok: true,
+      removed: {
+        runFiles: run.files,
+        runBytes: run.bytes,
+        tmpFiles: tmp.files,
+        tmpBytes: tmp.bytes,
+        trashFiles: trash.files,
+        trashBytes: trash.bytes,
+        trashCount: trash.count,
+      },
+      message: `清理完成：临时 ${run.files + tmp.files} 个，回收站 ${trash.count} 份`,
+    };
+  }
+
+  #sandboxRestore(body = {}) {
+    const id = String(body?.id || '').trim();
+    if (!/^[A-Za-z0-9._-]+$/.test(id)) return { ok: false, error: '备份 id 不合法' };
+    const dir = path.join(this.#sandboxTrashDir(), id);
+    const manifestFile = path.join(dir, 'manifest.json');
+    if (!fs.existsSync(manifestFile)) return { ok: false, error: '找不到这份备份' };
+
+    let m;
+    try {
+      m = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    } catch {
+      return { ok: false, error: '备份清单损坏' };
+    }
+    if (!m?.path) return { ok: false, error: '备份缺少文件路径' };
+
+    const root = this.#sandboxPath();
+    let target;
+    try {
+      target = this.engine?.tools?.resolveSafe
+        ? this.engine.tools.resolveSafe(m.path)
+        : path.resolve(root, m.path);
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+    const rel = path.relative(root, target);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return { ok: false, error: '备份路径越界' };
+
+    try {
+      if (m.action === 'create') {
+        if (fs.existsSync(target)) fs.unlinkSync(target);
+      } else {
+        const backup = path.join(dir, 'file');
+        if (!fs.existsSync(backup)) return { ok: false, error: '备份文件不存在' };
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(backup, target);
+      }
+      return { ok: true, id, path: m.path, action: m.action || 'overwrite' };
+    } catch (e) {
+      return { ok: false, error: `恢复失败：${e.message}` };
+    }
+  }
 
   /**
    * 统一管理收到的图片和表情包。

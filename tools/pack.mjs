@@ -83,6 +83,7 @@ const INCLUDE = [
   '桌面控制台.bat',
   '桌面聊天.bat',
   '安装软件.bat',
+  '初始化沙箱.bat',
   // 这三个是后加的入口，之前漏了 —— 用户找不到备份/恢复/开机自启
   '备份记忆.bat',
   '恢复记忆.bat',
@@ -155,6 +156,9 @@ const TOOLS_ALLOW = new Set([
   'check-desktop.mjs', // 桌面软件化自检（文档里让用户跑的）
   'make-launcher-icon.py', // 重新生成品牌图标
   'build-sticker-index.mjs', // 重建表情包描述索引
+  'sandbox_win.py', // run_code 的 AppContainer 执行器
+  'sandbox_daemon.py', // 提权沙箱 daemon
+  'sandbox_setup.py', // 初始化沙箱
   'to_gbk.ps1', // 编码转换小工具
 ]);
 

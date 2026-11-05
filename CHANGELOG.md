@@ -1,3 +1,32 @@
+## [0.9.30] - 2026-11-05
+
+### 适配器兼容
+
+- `adapter.json` 支持 `runtime` / `command` / `health` / `log` / `features` / `platform`
+- 适配器启动不再写死 Python：支持 Python、Node、`.exe` / `.bat` 和自定义命令
+- 非微信适配器不再被微信锁端口 / PID 逻辑误判；`needsAdmin:false` 不弹 UAC
+- 适配器日志和面板捕获日志分开，修复日志占用导致的 EBUSY
+- 面板 API 返回 `runtime / platform / features`，卡片显示平台和运行时
+- 入口候选补 `adapter.mjs` / `main.mjs` / `bridge.mjs` / `main.js`
+
+### 沙箱
+
+- Windows `run_code` 切换到 **AppContainer + Job Object**：
+  - 工作区可写，runtime 只读
+  - 默认断网
+  - 限制进程数、内存、CPU，超时杀整棵进程树
+  - stdout / stderr 管道捕获
+- 初始化时申请一次管理员权限，启动常驻沙箱 daemon；之后不弹 UAC
+- `初始化沙箱.bat`：创建 runtime capability ACL、跑探针、启动 daemon
+- 没有初始化或 daemon 不可达时直接报错，不降级裸跑
+- 工作区 AppContainer ACL 在任务结束后自动清理
+- 沙箱面板增加用量、临时文件、回收站、审计、恢复入口
+
+### 测试
+
+- 单元测试 620 通过 / 2 跳过
+- 完整功能检查 33 / 33
+
 ## [0.9.29] - 2026-11-05
 
 ### 沙箱加固

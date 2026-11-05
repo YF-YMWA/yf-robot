@@ -1513,6 +1513,33 @@
     </div>
 
     <div class="card">
+      <h2>沙箱 <span class="chip" id="sandboxChip">—</span><span class="sp"></span>
+        <button class="ghost sm" onclick="loadSandbox()">刷新</button>
+      </h2>
+      <div class="hint" style="margin-bottom:10px">
+        工作区用量、最近操作和写入备份。覆盖文件前会自动留一份，可以在下面恢复。
+      </div>
+      <div class="row"><label>占用</label><div class="ctl">
+        <b id="sandboxUsage">—</b>
+        <span class="hint" id="sandboxFiles"></span>
+      </div></div>
+      <div class="row"><label>操作</label><div class="ctl">
+        <button class="ghost sm" onclick="openSandbox()">打开工作目录</button>
+        <button class="ghost sm" onclick="cleanSandbox(false)">清理临时文件</button>
+        <button class="ghost sm" onclick="cleanSandbox(true)">清空回收站</button>
+      </div></div>
+      <div class="hint" id="sandboxMsg" style="margin-top:8px"></div>
+
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;font-weight:600">最近操作</summary>
+        <div id="sandboxAudit" class="hint" style="margin-top:8px;line-height:1.7">—</div>
+      </details>
+
+      <div style="margin-top:14px;font-weight:600;font-size:13px">写入备份</div>
+      <div id="sandboxTrash" class="hint" style="margin-top:6px">—</div>
+    </div>
+
+    <div class="card">
       <h2>单个工具<span class="sp"></span><button class="ghost sm" onclick="loadTools()">刷新</button></h2>
       <div id="toolList">加载中…</div>
       <div class="hint" style="margin-top:12px;line-height:1.7">
@@ -4744,6 +4771,8 @@ async function loadAdapters() {
         ' <span class="hint" style="font-size:11px">' + escapeHtml(a.id) + ' · ' + escapeHtml(a.mode) + '</span></div>' +
         '<div class="hint" style="font-size:11px;margin-top:2px">' +
         (a.description ? escapeHtml(a.description) : '入口 ' + escapeHtml(a.entry)) +
+        (a.platform ? ' · ' + escapeHtml(a.platform) : '') +
+        (a.runtime ? ' · ' + escapeHtml(a.runtime) : '') +
         (a.needsAdmin ? ' · 需管理员' : '') +
         (a.hasGit ? ' · git 副本（更新时跳过）' : '') +
         '</div></div>' +
@@ -4926,6 +4955,104 @@ async function loadTools() {
         : `<div class="hint" style="margin-top:14px">还没有插件提供工具。放一个到 plugins/ 目录，重启后就会出现在这里。</div>`);
   } catch (e) {
     if (hint) hint.textContent = '读取失败：' + e.message;
+  }
+}
+
+function sandboxBytes(n) {
+  n = Number(n) || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+  return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+}
+
+let _sandbox = null;
+
+async function loadSandbox() {
+  try {
+    const j = await api('sandbox');
+    _sandbox = j;
+    if ($('sandboxChip')) $('sandboxChip').textContent = j.exists ? '已启用' : '未创建';
+    if ($('toolSandbox')) $('toolSandbox').textContent = j.path || '（默认）';
+    if ($('sandboxUsage')) {
+      $('sandboxUsage').textContent = `${sandboxBytes(j.bytes)} / ${sandboxBytes(j.quota)}（${j.percent || 0}%）`;
+    }
+    if ($('sandboxFiles')) {
+      $('sandboxFiles').textContent = `${j.files || 0} 个文件 · 回收站 ${j.trash?.count || 0} 份 / ${sandboxBytes(j.trash?.bytes || 0)}`;
+    }
+    const audit = $('sandboxAudit');
+    if (audit) {
+      const items = Array.isArray(j.audit) ? j.audit.slice().reverse() : [];
+      audit.innerHTML = items.length
+        ? items.map((e) => {
+            const what = e.tool || e.path || e.command || e.language || '';
+            const at = e.at ? new Date(e.at).toLocaleString() : '';
+            return `<div>${escapeHtml(at)} · <b>${escapeHtml(e.event || '')}</b>${what ? ' · ' + escapeHtml(String(what).slice(0, 80)) : ''}</div>`;
+          }).join('')
+        : '还没有沙箱操作记录。';
+    }
+    await loadSandboxTrash();
+  } catch (e) {
+    if ($('sandboxMsg')) $('sandboxMsg').textContent = '读取失败：' + e.message;
+  }
+}
+
+async function loadSandboxTrash() {
+  const el = $('sandboxTrash');
+  if (!el) return;
+  try {
+    const j = await api('sandbox/trash');
+    const items = j.items || [];
+    el.innerHTML = items.length
+      ? items.map((x) => {
+          const label = x.action === 'create' ? '撤销新建' : '恢复';
+          return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line)">
+            <span class="chip">${x.action === 'create' ? '新建' : '覆盖'}</span>
+            <code style="font-size:12px">${escapeHtml(x.path)}</code>
+            <span class="sp"></span>
+            <span class="hint">${escapeHtml(String(x.at || '').replace('T', ' ').slice(0, 19))}</span>
+            <button class="ghost sm" onclick="restoreSandbox('${escapeHtml(x.id)}')">${label}</button>
+          </div>`;
+        }).join('')
+      : '还没有写入备份。覆盖文件后会自动出现。';
+  } catch {
+    el.textContent = '读取备份失败。';
+  }
+}
+
+async function openSandbox() {
+  try {
+    const j = await api('sandbox');
+    const r = await api('reveal', { method: 'POST', body: { path: j.path } });
+    if (!r.ok) throw new Error(r.error || '打开失败');
+  } catch (e) {
+    toast('打开失败：' + e.message, 'err');
+  }
+}
+
+async function cleanSandbox(trash) {
+  const text = trash ? '清空回收站里的所有写入备份？' : '清理 .run / .tmp 临时文件？（7 天前的备份也会清）';
+  if (!confirm(text)) return;
+  try {
+    const j = await api('sandbox/clean', { method: 'POST', body: { trash: Boolean(trash) } });
+    if (!j.ok) throw new Error(j.error || '清理失败');
+    if ($('sandboxMsg')) $('sandboxMsg').textContent = j.message || '清理完成';
+    toast('清理完成');
+    loadSandbox();
+  } catch (e) {
+    toast('清理失败：' + e.message, 'err');
+  }
+}
+
+async function restoreSandbox(id) {
+  if (!confirm('恢复这份备份？当前文件会被覆盖。')) return;
+  try {
+    const j = await api('sandbox/restore', { method: 'POST', body: { id } });
+    if (!j.ok) throw new Error(j.error || '恢复失败');
+    toast('已恢复');
+    loadSandbox();
+  } catch (e) {
+    toast('恢复失败：' + e.message, 'err');
   }
 }
 
@@ -7694,6 +7821,7 @@ async function loadAll() {
     loadBackend(),
     loadLogic(),
     loadTools(),
+    loadSandbox(),
   ]);
 }
 

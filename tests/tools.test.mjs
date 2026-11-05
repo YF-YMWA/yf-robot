@@ -14,7 +14,7 @@ const sandbox = fs.mkdtempSync(path.join(_tmpRoot, 'sandbox-'));
 const quiet = { info() {}, warn() {}, error() {} };
 
 function makeKit(over = {}) {
-  return new ToolKit({ sandbox, logger: quiet, ...over });
+  return new ToolKit({ sandbox, logger: quiet, sandboxTask: false, ...over });
 }
 
 // ---------- 路径安全 ----------

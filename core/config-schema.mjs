@@ -53,6 +53,11 @@ export const SECTION_SCHEMA = {
       }),
       sandbox: F('string', '', { label: '工作目录' }),
       maxFileSize: F('number', 524288, { min: 1024, max: 50 * 1024 * 1024, label: '单文件上限' }),
+      maxWorkspaceSize: F('number', 200 * 1024 * 1024, {
+        min: 1024 * 1024,
+        max: 10 * 1024 * 1024 * 1024,
+        label: '工作区总上限',
+      }),
       cmdTimeout: F('number', 30000, { min: 1000, max: 600000, label: '命令超时(ms)' }),
       off: F('array', [], { label: '被关掉的工具' }),
       /** 危险操作（写文件/跑命令/改设置）先微信里问主人 */

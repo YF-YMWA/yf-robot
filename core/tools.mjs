@@ -56,6 +56,15 @@ export class ToolKit {
     this.maxFileSize = opts.maxFileSize || 512 * 1024;
     this.cmdTimeout = opts.cmdTimeout || 30000;
     this.maxOutput = opts.maxOutput || 8000;
+    this.maxWorkspaceSize =
+      Number(opts.maxWorkspaceSize) ||
+      Number(this.config?.tools?.maxWorkspaceSize) ||
+      200 * 1024 * 1024;
+
+    /** run_code 是否走最高权限的计划任务沙箱（测试可显式关掉） */
+    this.sandboxTaskEnabled = opts.sandboxTask !== false;
+    /** 串行化沙箱任务，避免多个 run_code 抢同一个 job/result 文件 */
+    this._sandboxQueue = Promise.resolve();
 
     /** 插件宿主（可选，由外部注入）——插件提供的工具从这里来 */
     this.plugins = opts.plugins || null;
@@ -1002,14 +1011,93 @@ export class ToolKit {
     return buf.toString('utf8').slice(0, this.maxOutput);
   }
 
+  /** 当前工作区占用（不跟随链接，不含 .run/.tmp）。 */
+  #workspaceBytes() {
+    let total = 0;
+    const stack = [this.sandboxReal];
+    while (stack.length) {
+      const dir = stack.pop();
+      let list = [];
+      try {
+        list = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of list) {
+        if (e.name === '.run' || e.name === '.tmp') continue;
+        if (e.isSymbolicLink()) continue;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          stack.push(full);
+        } else {
+          try {
+            total += fs.statSync(full).size;
+          } catch {}
+        }
+      }
+    }
+    return total;
+  }
+
+  /** 写前快照：覆盖旧文件或记录“新建”，供沙箱面板撤销。 */
+  #snapshotWrite(rel, file) {
+    try {
+      const root = this.config?.root || path.join(this.sandboxReal, '..');
+      const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+      const dir = path.join(root, 'data', 'sandbox-trash', id);
+      fs.mkdirSync(dir, { recursive: true });
+
+      let action = 'create';
+      let size = 0;
+      if (fs.existsSync(file)) {
+        const st = fs.lstatSync(file);
+        if (st.isFile()) {
+          fs.copyFileSync(file, path.join(dir, 'file'));
+          action = 'overwrite';
+          size = st.size;
+        }
+      }
+      fs.writeFileSync(
+        path.join(dir, 'manifest.json'),
+        JSON.stringify({ id, at: new Date().toISOString(), action, path: String(rel), size }, null, 2),
+        'utf8',
+      );
+
+      // 只留最近 50 份
+      const trash = path.join(root, 'data', 'sandbox-trash');
+      const dirs = fs
+        .readdirSync(trash, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort();
+      while (dirs.length > 50) {
+        const old = dirs.shift();
+        try {
+          fs.rmSync(path.join(trash, old), { recursive: true, force: true });
+        } catch {}
+      }
+    } catch (e) {
+      this.log.warn?.(`[tool] 写入快照失败（不影响写入）：${e.message}`);
+    }
+  }
+
   /** 写文件。 */
   writeFile(rel, content) {
     const file = this.resolveSafe(rel);
     const text = String(content || '');
+    const bytes = Buffer.byteLength(text, 'utf8');
 
     if (text.length > this.maxFileSize) {
       return `（内容太大：${formatSize(text.length)}）`;
     }
+
+    const oldSize = fs.existsSync(file) && fs.lstatSync(file).isFile() ? fs.statSync(file).size : 0;
+    const used = this.#workspaceBytes();
+    if (used - oldSize + bytes > this.maxWorkspaceSize) {
+      return `（工作区已满：上限 ${formatSize(this.maxWorkspaceSize)}，这次写入会超出）`;
+    }
+
+    this.#snapshotWrite(rel, file);
 
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, text, 'utf8');
@@ -1082,6 +1170,73 @@ export class ToolKit {
   }
 
   /**
+   * 串行执行沙箱任务：同一个 job/result 文件不能被并发覆盖。
+   */
+  #enqueueSandbox(fn) {
+    const run = this._sandboxQueue.then(fn, fn);
+    this._sandboxQueue = run.catch(() => {});
+    return run;
+  }
+
+  /**
+   * 通过最高权限计划任务运行 AppContainer。
+   *
+   * 普通权限服务不能直接 CreateProcess 到 AppContainer（WinError 5），
+   * 但可以触发初始化时创建的计划任务；任务以 HighestAvailable 运行。
+   */
+  async #runCodeTask(argv, timeoutSec, workspace) {
+    const root = this.config?.root || path.resolve(this.sandboxReal, '..');
+    const markerPath = path.join(root, 'data', 'sandbox-setup.json');
+    if (!fs.existsSync(markerPath)) {
+      return { error: '沙箱还没初始化：请先以管理员身份运行 初始化沙箱.bat' };
+    }
+    let marker = {};
+    try {
+      marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+    } catch {
+      return { error: '沙箱初始化记录损坏：请重新运行 初始化沙箱.bat' };
+    }
+    const daemon = marker.daemon || {};
+    if (!daemon.port || !daemon.token) {
+      return { error: '沙箱 daemon 未启动：请重新运行 初始化沙箱.bat' };
+    }
+
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    let res;
+    try {
+      res = await fetch(`http://127.0.0.1:${daemon.port}/run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-sandbox-token': String(daemon.token),
+        },
+        body: JSON.stringify({
+          id,
+          argv,
+          workspace,
+          network: false,
+          timeout: timeoutSec,
+        }),
+        signal: AbortSignal.timeout((timeoutSec + 20) * 1000),
+      });
+    } catch (e) {
+      return { error: '沙箱 daemon 连接失败：' + (e.message || e) };
+    }
+    let r = {};
+    try {
+      r = await res.json();
+    } catch {
+      return { error: '沙箱 daemon 返回了无法解析的结果' };
+    }
+    if (!r.ok) return { error: String(r.error || '沙箱任务失败') };
+    return {
+      code: Number(r.code) || 0,
+      stdout: Buffer.from(String(r.stdout || ''), 'base64').toString('utf8'),
+      stderr: Buffer.from(String(r.stderr || ''), 'base64').toString('utf8'),
+    };
+  }
+
+  /**
    * 高危代码执行：Python / Node。
    *
    * 注意：这不是 OS 级隔离，代码仍拥有当前用户权限；所以只在 full 档、
@@ -1133,15 +1288,34 @@ export class ToolKit {
     this.#audit('run_code', { language, chars: code.length });
 
     try {
-      const { stdout, stderr } = await exec(exe, [file], {
-        cwd: this.sandboxReal,
-        timeout: this.cmdTimeout,
-        maxBuffer: this.maxOutput * 4,
-        windowsHide: true,
-        env,
-      });
-      const out = (stdout || '').slice(0, this.maxOutput);
-      const err = (stderr || '').slice(0, 2000);
+      let result;
+      if (this.sandboxTaskEnabled) {
+        // Node 在 AppContainer 里解析“脚本文件”会去 lstat C:\（EPERM）；
+        // 用 -e 直接执行代码，避免 Node 的 main path 解析。
+        const argv =
+          language === 'node' && code.length <= 30000
+            ? [exe, '-e', code]
+            : [exe, file];
+        const r = await this.#enqueueSandbox(() =>
+          this.#runCodeTask(
+            argv,
+            Math.max(1, Math.ceil(this.cmdTimeout / 1000)),
+            this.sandboxReal,
+          ),
+        );
+        if (r.error) return `（${r.error}）`;
+        result = { stdout: r.stdout, stderr: r.stderr };
+      } else {
+        result = await exec(exe, [file], {
+          cwd: this.sandboxReal,
+          timeout: this.cmdTimeout,
+          maxBuffer: this.maxOutput * 4,
+          windowsHide: true,
+          env,
+        });
+      }
+      const out = (result.stdout || '').slice(0, this.maxOutput);
+      const err = (result.stderr || '').slice(0, 2000);
       return (
         [out && `输出：\n${out}`, err && `错误：\n${err}`].filter(Boolean).join('\n\n') ||
         '（代码执行完成，无输出）'

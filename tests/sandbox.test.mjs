@@ -17,6 +17,7 @@ function makeKit(permission = 'workspace') {
     maxFileSize: 1024 * 1024,
     logger: { info() {}, warn() {} },
     config: { root, tools: { permission, approval: true } },
+    sandboxTask: false,
   });
   return { root, sandbox, kit };
 }
@@ -77,6 +78,34 @@ test('普通文件读写仍在沙箱内', () => {
   const out = kit.writeFile('a/b.txt', 'hello');
   assert.match(out, /已写入/);
   assert.equal(kit.readFile('a/b.txt'), 'hello');
+});
+
+test('writeFile 覆盖前留快照', () => {
+  const { root, kit } = makeKit();
+  kit.writeFile('snap.txt', 'one');
+  kit.writeFile('snap.txt', 'two');
+  const trash = path.join(root, 'data', 'sandbox-trash');
+  const dirs = fs.readdirSync(trash, { withFileTypes: true }).filter((e) => e.isDirectory());
+  assert.ok(dirs.length >= 1);
+  const overwrite = dirs
+    .map((e) => ({ id: e.name, m: JSON.parse(fs.readFileSync(path.join(trash, e.name, 'manifest.json'), 'utf8')) }))
+    .find((x) => x.m.action === 'overwrite');
+  assert.ok(overwrite);
+  assert.equal(overwrite.m.path, 'snap.txt');
+  assert.equal(fs.readFileSync(path.join(trash, overwrite.id, 'file'), 'utf8'), 'one');
+});
+
+test('工作区配额会拒绝超限写入', () => {
+  const { root, sandbox } = makeKit();
+  const kit = new ToolKit({
+    sandbox,
+    maxFileSize: 1024 * 1024,
+    maxWorkspaceSize: 100,
+    logger: { info() {}, warn() {} },
+    config: { root, tools: { permission: 'workspace', approval: true } },
+  });
+  assert.match(kit.writeFile('a.txt', 'x'.repeat(60)), /已写入/);
+  assert.match(kit.writeFile('b.txt', 'x'.repeat(60)), /工作区已满/);
 });
 
 test('run_command 不再直通 Python/Node', async () => {

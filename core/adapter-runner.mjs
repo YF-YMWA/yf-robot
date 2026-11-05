@@ -37,7 +37,7 @@ const LOG_FILE = path.join('data', 'panel-run.log');
 export function findAdapter(root, id) {
   const a = getAdapter(root, id);
   if (!a) return null;
-  return { dir: a.dir, mode: a.mode, id: a.id, entry: a.entry, name: a.name, needsAdmin: a.needsAdmin };
+  return { ...a };
 }
 
 /** 找一个能用的 python（优先用随包的运行时） */
@@ -50,6 +50,53 @@ function findPython(root, adapterDir) {
     if (fs.existsSync(c)) return c;
   }
   return 'python';
+}
+
+/** 适配器入口用哪个运行时。清单没写就按扩展名推断。 */
+function adapterRuntime(a) {
+  const r = String(a.runtime || '').toLowerCase();
+  if (['python', 'node', 'exe', 'command'].includes(r)) return r;
+  const ext = path.extname(a.entry || '').toLowerCase();
+  if (ext === '.py') return 'python';
+  if (ext === '.mjs' || ext === '.js') return 'node';
+  if (ext === '.exe' || ext === '.bat' || ext === '.cmd') return 'exe';
+  return 'python';
+}
+
+/** 生成启动命令行（不带重定向）。 */
+function launchCommand(root, a) {
+  const entry = path.resolve(a.dir, a.entry || '');
+  if (a.command) {
+    const raw = Array.isArray(a.command) ? a.command.map((x) => `"${x}"`).join(' ') : String(a.command);
+    return { kind: 'command', line: raw, display: raw };
+  }
+  const kind = adapterRuntime(a);
+  if (kind === 'node') {
+    const line = `"${process.execPath}" "${entry}"`;
+    return { kind, line, display: line };
+  }
+  if (kind === 'exe') {
+    const line = `"${entry}"`;
+    return { kind, line, display: line };
+  }
+  const py = findPython(root, a.dir);
+  const line = `"${py}" "${entry}"`;
+  return { kind: 'python', line, display: line, python: py };
+}
+
+/** 有 health URL 就探一下；没有返回 null（表示未知，不是失败）。 */
+async function checkHealth(a) {
+  if (!a.health) return null;
+  try {
+    const r = await fetch(a.health, { signal: AbortSignal.timeout(2000) });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+function isWechatAdapter(a) {
+  return a.platform === 'wechat' || /wechatauto/i.test(a.entry || '') || a.id === 'wechat-adapter';
 }
 
 /** 读已记录的 PID */
@@ -184,6 +231,7 @@ export function tailLog(root, lines = 40, id) {
   if (!a) return { ok: false, error: '没找到适配器目录' };
 
   const candidates = [
+    ...(a.log ? [path.isAbsolute(a.log) ? a.log : path.join(a.dir, a.log)] : []),
     path.join(a.dir, 'data', 'wechat-bridge-4x.log'),
     path.join(a.dir, 'data', 'bridge.log'),
     path.join(a.dir, LOG_FILE),
@@ -222,10 +270,14 @@ export async function status(root, id) {
 
   const pid = readPid(root, id);
   const byPid = alive(pid);
-  // 非微信适配器：只看 PID（findBridgePid 是按 wechatauto 的锁端口找的）
-  const found =
-    a.needsAdmin === false ? (byPid ? pid : 0) : byPid ? pid : await findBridgePid();
-  const running = Boolean(found); // -1 也算「有实例」
+  const health = await checkHealth(a);
+  let found = byPid ? pid : 0;
+  if (!found && health === true) found = -1; // health 通，但 PID 不可见
+  // 微信适配器才用锁端口反查；其他适配器只看 PID / health
+  if (!found && health !== true && isWechatAdapter(a) && a.needsAdmin !== false) {
+    found = await findBridgePid();
+  }
+  const running = Boolean(found) || health === true; // -1 也算「有实例」
 
   // 顺手把 PID 文件纠正过来（-1 表示有实例但看不到 PID，就不写）
   if (running && found > 0 && found !== pid) {
@@ -240,7 +292,11 @@ export async function status(root, id) {
     dir: a.dir,
     running,
     pid: running && found > 0 ? found : 0,
-    entry: ENTRY,
+    entry: a.entry || ENTRY,
+    runtime: adapterRuntime(a),
+    platform: a.platform || '',
+    features: a.features || [],
+    health: health,
     // 服务是管理员的话，启动适配器不需要弹 UAC
     elevated: await isElevated(),
     log: tailLog(root, 20, id),
@@ -307,8 +363,14 @@ export function buildStartCommand(root, id) {
   const a = findAdapter(root, id);
   if (!a) return null;
 
-  const py = findPython(root, a.dir);
-  const logPath = path.join(a.dir, LOG_FILE);
+  const launch = launchCommand(root, a);
+  const logPath = a.log
+    ? path.isAbsolute(a.log)
+      ? a.log
+      : path.join(a.dir, a.log)
+    : path.join(a.dir, LOG_FILE);
+  // 适配器自己写的日志 vs 面板捕获的 stdout，必须分开，否则会 EBUSY
+  const capturePath = path.join(a.dir, LOG_FILE);
   // 每个适配器一份启动脚本，别互相覆盖
   const launcher = path.join(a.dir, 'data', 'panel-launch.bat');
 
@@ -329,6 +391,9 @@ export function buildStartCommand(root, id) {
    */
   const entry = a.entry || ENTRY;
   const title = (a.name || '适配器') + '（ENbot）— 关掉窗口即停止';
+  // 微信适配器自己写日志，窗口要保留识别过程；其他适配器把 stdout 收进 panel-run.log
+  const wechat = isWechatAdapter(a);
+  const runLine = wechat ? launch.line : `${launch.line} > "${capturePath}" 2>&1`;
 
   /**
    * 启动脚本，带守护循环。
@@ -355,44 +420,44 @@ export function buildStartCommand(root, id) {
     `cd /d "${a.dir}"`,
     'set TRIES=0',
     ':restart',
-    `"${py}" ${entry}`,
+    runLine,
     'set RC=%errorlevel%',
     'if "%RC%"=="0" goto done',
     'if "%RC%"=="9009" goto noexe',
     'if "%RC%"=="7" goto selfheal',
     'echo.',
     'echo ============================================',
-    'echo   适配器异常退出（代码 %RC%）',
-    'echo   5 秒后自动重启（第 %TRIES%/6 次）',
-    'echo   崩溃现场：data\\bridge-crash.log',
+    'echo   Adapter exited (code %RC%)',
+    'echo   Restarting in 5 seconds (try %TRIES%/6)',
+    'echo   Crash log: data\\bridge-crash.log',
     'echo ============================================',
     'echo.',
     'set /a TRIES+=1',
     'if %TRIES% GEQ 6 goto gaveup',
-    'timeout /t 5 /nobreak >nul',
+    '%SystemRoot%\\System32\\timeout.exe /t 5 /nobreak >nul',
     'goto restart',
     ':selfheal',
     'echo.',
-    'echo [守护] 检测到卡死自愈，立刻重启适配器…',
+    'echo [watchdog] stuck, restarting adapter...',
     'set /a TRIES+=1',
     'if !TRIES! GEQ 6 goto gaveup',
-    'timeout /t 1 /nobreak >nul',
+    '%SystemRoot%\\System32\\timeout.exe /t 1 /nobreak >nul',
     'goto restart',
     ':gaveup',
     'echo.',
-    'echo [守护] 连续异常退出 6 次，停止自动重启。',
-    'echo         请把 data\\bridge-crash.log 最后一段发出来。',
+    'echo [watchdog] adapter crashed 6 times, stopping auto-restart.',
+    'echo          Last crash: data\\bridge-crash.log',
     'pause >nul',
     'goto done',
     ':noexe',
     'echo.',
-    'echo [错误] 找不到 Python（退出码 9009）。',
-    'echo        请改用「启动桥接.bat」，它会自动找可用的 Python。',
+    'echo [error] launcher not found (exit 9009).',
+    'echo         Check adapter.json runtime / command, or use the adapter provided .bat.',
     'pause >nul',
     'goto done',
     ':done',
     'echo.',
-    'echo [适配器已退出] 按任意键关闭窗口',
+    'echo [adapter stopped] press any key to close',
     'pause >nul',
     '',
   ].join('\r\n');
@@ -402,12 +467,14 @@ export function buildStartCommand(root, id) {
 
   return {
     adapterDir: a.dir,
-    python: py,
+    runtime: launch.kind,
+    python: launch.python || '',
     entry,
     logPath,
+    capturePath,
     launcher,
     bat,
-    cmdLine: `"${py}" ${entry} > "${logPath}" 2>&1`,
+    cmdLine: `${launch.line} > "${capturePath}" 2>&1`,
     psArgs: [
       '-NoProfile',
       '-Command',
@@ -429,11 +496,16 @@ export async function start(root, log = () => {}, id) {
   const a = findAdapter(root, id);
   if (!a) return { ok: false, error: '没有适配器目录（这是纯框架包）' };
 
-  // 已经在跑（按 PID 或按进程名找，别重复起）
+  // 已经在跑（按 PID / health 或微信桥接进程判断，别重复起）
   const cur = readPid(root, id);
   if (alive(cur)) return { ok: true, pid: cur, note: '已经在跑了' };
-  const existing = await findBridgePid();
-  if (existing) return { ok: true, pid: existing, note: '已经在跑了（pid ' + existing + '）' };
+  if ((await checkHealth(a)) === true) {
+    return { ok: true, pid: 0, note: '已经在跑了（health 正常）' };
+  }
+  if (isWechatAdapter(a)) {
+    const existing = await findBridgePid();
+    if (existing) return { ok: true, pid: existing, note: '已经在跑了（pid ' + existing + '）' };
+  }
 
   const cmd = buildStartCommand(root, id);
   if (!cmd) return { ok: false, error: '没有适配器目录（这是纯框架包）' };
@@ -477,10 +549,14 @@ export async function start(root, log = () => {}, id) {
      * 其它适配器没有这个约定，就按 spawn 出来的 PID 看它是否还活着。
      */
     let realPid = 0;
-    for (let i = 0; i < 12 && !realPid; i++) {
+    let byHealth = false;
+    for (let i = 0; i < 12 && !realPid && !byHealth; i++) {
       await new Promise((x) => setTimeout(x, 500));
 
-      if (a.needsAdmin !== false) {
+      byHealth = (await checkHealth(a)) === true;
+      if (byHealth) break;
+
+      if (isWechatAdapter(a) && a.needsAdmin !== false) {
         realPid = await findBridgePid();
       } else {
         const childPid = r.pid || 0;
@@ -488,27 +564,31 @@ export async function start(root, log = () => {}, id) {
       }
     }
 
-    if (!realPid) {
+    if (!realPid && !byHealth) {
       return {
         ok: false,
         error:
           '进程起了但没活下来，多半是启动后立刻退出了。点「看日志」看原因' +
-          (a.needsAdmin !== false ? '（微信没开？已有实例？）' : '（脚本报错？）'),
+          (isWechatAdapter(a) ? '（微信没开？已有实例？）' : '（脚本报错？）'),
       };
     }
 
-    try {
-      fs.writeFileSync(path.join(root, pidFile(id)), String(realPid), 'utf8');
-    } catch {}
+    if (realPid > 0) {
+      try {
+        fs.writeFileSync(path.join(root, pidFile(id)), String(realPid), 'utf8');
+      } catch {}
+    }
 
-    log('[adapter] ' + (a.name || id || '适配器') + ' 已启动 pid=' + realPid);
+    log('[adapter] ' + (a.name || id || '适配器') + ' 已启动 pid=' + (realPid || 'health'));
     return {
       ok: true,
-      pid: realPid,
+      pid: realPid > 0 ? realPid : 0,
       elevated,
-      note: elevated
-        ? '已启动（pid ' + realPid + '）。服务本身是管理员，没有弹 UAC。'
-        : '已启动（pid ' + realPid + '）。这个适配器不需要管理员权限。',
+      note: byHealth
+        ? '已启动（health 正常）。'
+        : elevated
+          ? '已启动（pid ' + realPid + '）。服务本身是管理员，没有弹 UAC。'
+          : '已启动（pid ' + realPid + '）。这个适配器不需要管理员权限。',
     };
   }
 
@@ -584,13 +664,14 @@ export async function start(root, log = () => {}, id) {
  */
 export async function stop(root, log = () => {}, id) {
   const pid = readPid(root, id);
+  const a = findAdapter(root, id);
 
   if (pid && alive(pid)) {
     return await killPid(root, pid, log, id);
   }
 
   // 记录里没有，但可能真有实例在跑（提权启动的那种）
-  const found = await findBridgePid();
+  const found = a && isWechatAdapter(a) ? await findBridgePid() : 0;
 
   if (found > 0) return await killPid(root, found, log, id);
 
@@ -622,6 +703,10 @@ function killPid(root, pid, log = () => {}, id) {
         fs.rmSync(path.join(root, pidFile(id)), { force: true });
       } catch {}
       if (err) {
+        if (!alive(pid)) {
+          log('[adapter] 进程已经不在了 pid=' + pid);
+          return resolve({ ok: true, note: '本来就没在跑' });
+        }
         /**
          * 常见情况：适配器是管理员启动的，而面板不是 ——
          * Windows 不允许低权限进程结束高权限进程，taskkill 会报「找不到这个进程」
@@ -630,9 +715,9 @@ function killPid(root, pid, log = () => {}, id) {
         resolve({
           ok: false,
           error:
-            '停止失败：适配器是管理员权限启动的，普通权限的面板结束不了它。' +
-            '三选一：① 关掉那个黑色命令行窗口（桥接会跟着退出）；' +
-            '② 任务管理器 → 详细信息 → 结束 python.exe；' +
+            '停止失败：适配器可能是管理员权限启动的，普通权限的面板结束不了它。' +
+            '三选一：① 关掉那个黑色命令行窗口；' +
+            '② 任务管理器 → 详细信息 → 结束对应的适配器进程；' +
             '③ 用管理员身份运行 桌面控制台.bat，再点停止。',
         });
       } else {

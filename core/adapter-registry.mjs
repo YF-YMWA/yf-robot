@@ -24,7 +24,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /** 常见的入口文件名（没写清单时按这个顺序猜） */
-const ENTRY_CANDIDATES = ['wechatauto_bridge.py', 'adapter.py', 'main.py', 'bridge.py'];
+const ENTRY_CANDIDATES = [
+  'wechatauto_bridge.py',
+  'adapter.py',
+  'main.py',
+  'bridge.py',
+  'adapter.mjs',
+  'main.mjs',
+  'bridge.mjs',
+  'main.js',
+];
 
 /**
  * 列出一个适配器目录的元信息。
@@ -54,12 +63,28 @@ function describe({ dir, id, mode }) {
 
   if (!entry || !fs.existsSync(path.join(dir, entry))) return null;
 
+  const ext = path.extname(entry).toLowerCase();
+  const inferred =
+    ext === '.py'
+      ? 'python'
+      : ext === '.mjs' || ext === '.js'
+        ? 'node'
+        : ext === '.exe' || ext === '.bat' || ext === '.cmd'
+          ? 'exe'
+          : '';
+
   return {
     id,
     name: String(manifest.name || id),
     entry,
     dir,
     mode,
+    platform: String(manifest.platform || (/wechatauto/i.test(entry) ? 'wechat' : '')),
+    runtime: String(manifest.runtime || inferred || ''),
+    command: manifest.command || '',
+    health: String(manifest.health || ''),
+    log: String(manifest.log || ''),
+    features: Array.isArray(manifest.features) ? manifest.features.map(String) : [],
     description: String(manifest.description || ''),
     // 需要管理员权限才能操作别的程序的窗口（微信就是）
     needsAdmin: manifest.needsAdmin !== false,

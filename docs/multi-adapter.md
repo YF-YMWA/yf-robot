@@ -19,8 +19,37 @@
 {
   "name": "微信（UIA）",
   "entry": "wechatauto_bridge.py",
+  "runtime": "python",
   "needsAdmin": true,
-  "description": "操作微信窗口收发消息，需要管理员权限"
+  "description": "操作微信窗口收发消息，需要管理员权限",
+  "platform": "wechat",
+  "features": ["text", "image", "voice", "sticker", "group"]
+}
+```
+
+其他字段都是可选的：
+
+| 字段 | 说明 |
+|---|---|
+| `runtime` | `python` / `node` / `exe` / `command`；不写就按入口扩展名推断 |
+| `command` | 自定义启动命令，优先级高于 `runtime + entry`（例如 `node main.mjs --config x`） |
+| `health` | 健康检查 URL，例如 `http://127.0.0.1:9010/health`；面板启动/状态优先看它 |
+| `log` | 日志路径（相对适配器目录），面板「看日志」优先读它 |
+| `platform` | 平台标识，例如 `telegram`、`qq`；用于显示和身份命名空间 |
+| `features` | 能力列表：`text` / `image` / `voice` / `sticker` / `group` |
+
+Node 适配器示例：
+
+```json
+{
+  "name": "Telegram",
+  "entry": "main.mjs",
+  "runtime": "node",
+  "needsAdmin": false,
+  "platform": "telegram",
+  "health": "http://127.0.0.1:9010/health",
+  "log": "data/adapter.log",
+  "features": ["text", "image", "group"]
 }
 ```
 
@@ -28,6 +57,7 @@
 
 ```
 wechatauto_bridge.py → adapter.py → main.py → bridge.py
+→ adapter.mjs → main.mjs → bridge.mjs → main.js
 ```
 
 猜不到就不算适配器（面板里不会出现）。

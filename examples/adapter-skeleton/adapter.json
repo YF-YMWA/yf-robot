@@ -1,0 +1,10 @@
+{
+  "name": "示例：骨架适配器",
+  "entry": "adapter.mjs",
+  "runtime": "node",
+  "needsAdmin": false,
+  "platform": "demo",
+  "log": "data/adapter.log",
+  "features": ["text", "image"],
+  "description": "不接任何平台的模拟聊天源，用来验证协议"
+}
