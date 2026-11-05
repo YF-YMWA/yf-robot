@@ -40,8 +40,9 @@ const notes = `## E Night Companion（ENC / ENbot）${TAG}
 
 要接微信，请把适配器放到 \`adapters/<名字>/\` 下（见 docs/multi-adapter.md）。
 
-### 本次更新（0.9.30）
+### 本次更新（0.9.31）
 
+- **修复「网页版」点击无反应**：优先显式拉起 Edge；系统默认浏览器关联坏了也能用
 - **适配器兼容**
   - \`adapter.json\` 支持 \`runtime\` / \`command\` / \`health\` / \`log\` / \`features\` / \`platform\`
   - 启动器不再写死 Python：Python、Node、exe/bat、自定义命令都能启动
@@ -110,7 +111,7 @@ const notes = `## E Night Companion（ENC / ENbot）${TAG}
 ### 升级说明
 
 - **0.9.24 及更早的「一键更新」只覆盖代码，不会替换新的启动器 exe 和桌面 UI。**
-  升级到 0.9.30 请手动解压覆盖（\`config.json\`、\`data/\` 会保留）。
+  升级到 0.9.31 请手动解压覆盖（\`config.json\`、\`data/\` 会保留）。
 - 解压后跑一次 \`安装软件.bat\`：会建 \`ENbot\` 快捷方式，并清掉旧的 \`YF-Robot\` 快捷方式/启动项/卸载项。
 - 「一键更新」默认勾选「连适配器一起更新」：
   只更新 \`adapter/\` 下的非 git 副本，保留 \`config.json\` 和 \`data/\`；

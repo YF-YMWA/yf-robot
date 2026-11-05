@@ -416,10 +416,34 @@ namespace YFRobot
         public void OpenConsole() { Program.OpenConsoleWindow("/console", "控制台"); }
         public void OpenChat() { Program.OpenConsoleWindow("/", "聊天"); }
 
-        /// <summary>用系统默认浏览器打开（用户明确要网页版时用）。</summary>
+        /// <summary>用浏览器打开网页版控制台。</summary>
         public void OpenInBrowser()
         {
             var url = BaseUrl() + "/console";
+            if (!IsServiceUp()) EnsureService(true);
+
+            // 系统默认浏览器关联可能坏掉（点了没反应）。
+            // 优先显式拉起 Edge；没有 Edge 再退回默认关联。
+            var edges = new[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                    "Microsoft", "Edge", "Application", "msedge.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                    "Microsoft", "Edge", "Application", "msedge.exe"),
+            };
+            foreach (var edge in edges)
+            {
+                if (!File.Exists(edge)) continue;
+                try
+                {
+                    var psi = new ProcessStartInfo(edge, url);
+                    psi.UseShellExecute = true;
+                    Process.Start(psi);
+                    return;
+                }
+                catch { }
+            }
+
             try
             {
                 var psi = new ProcessStartInfo(url);
