@@ -1,6 +1,6 @@
 {
   "name": "enbot",
-  "version": "0.9.25",
+  "version": "0.9.26",
   "private": false,
   "type": "module",
   "description": "E Night Companion（ENC / ENbot）—— 人设化 AI 助手，支持微信接入、角色卡、长期记忆、看图/画图/语音/联网学习",
@@ -20,12 +20,12 @@
   "author": "ENbot contributors",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YF-YMWA/yf-robot.git"
+    "url": "git+https://github.com/YF-YMWA/e-night-companion.git"
   },
   "bugs": {
-    "url": "https://github.com/YF-YMWA/yf-robot/issues"
+    "url": "https://github.com/YF-YMWA/e-night-companion/issues"
   },
-  "homepage": "https://github.com/YF-YMWA/yf-robot#readme",
+  "homepage": "https://github.com/YF-YMWA/e-night-companion#readme",
   "engines": {
     "node": ">=18"
   },

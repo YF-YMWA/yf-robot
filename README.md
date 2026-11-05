@@ -31,7 +31,7 @@ Node.js 写核心（零第三方依赖），Python 只给适配器用。Windows 
 **方式二：从源码跑**
 
 ```bash
-git clone https://github.com/YF-YMWA/yf-robot.git
+git clone https://github.com/YF-YMWA/e-night-companion.git
 cd yf-robot
 cp config.example.json config.json   # 然后填 Key
 node app.mjs
@@ -194,7 +194,7 @@ node tools/pack.mjs                # 打包
 
 适配器是独立项目，其风险与合规责任由使用者自行承担：
 
-- 微信适配器：<https://github.com/YF-YMWA/yf-robot-wechat-adapter>
+- 微信适配器：<https://github.com/YF-YMWA/e-night-companion-adapter>
   （Windows UI 自动化方案，**违反微信个人账号使用规范，有封号风险**，仅供学习研究）
 - 适配器协议文档：[docs/adapter-protocol.md](docs/adapter-protocol.md) —— 想接其他平台照着实现即可
 

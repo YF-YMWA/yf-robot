@@ -102,5 +102,10 @@ export function killPids(pids, roots) {
 
 /** 本程序相关的目录（用于认领进程） */
 export function ownRoots(root) {
-  return [root, path.join(root, '..', 'yf-robot-wechat-adapter'), path.join(root, 'adapters')];
+  return [
+    root,
+    path.join(root, '..', 'e-night-companion-adapter'),
+    path.join(root, '..', 'yf-robot-wechat-adapter'),
+    path.join(root, 'adapters'),
+  ];
 }

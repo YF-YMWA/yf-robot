@@ -780,12 +780,17 @@ console.log('');
 // 7.5 可选：把微信适配器一起打包
 if (WITH_ADAPTER) {
   console.log('【7.5】打包微信适配器（--with-adapter）…');
-  const adpSrc = path.join(path.dirname(ROOT), 'yf-robot-wechat-adapter');
+  const adpNames = ['e-night-companion-adapter', 'yf-robot-wechat-adapter'];
+  let adpSrc = '';
+  for (const name of adpNames) {
+    const p = path.join(path.dirname(ROOT), name);
+    if (fs.existsSync(p)) { adpSrc = p; break; }
+  }
   const adpDst = path.join(DIST, 'adapter');
 
-  if (!fs.existsSync(adpSrc)) {
-    console.log(`  ✗ 找不到适配器目录：${adpSrc}`);
-    console.log('    先把 yf-robot-wechat-adapter 克隆到这个位置，或者去掉 --with-adapter');
+  if (!adpSrc) {
+    console.log('  ✗ 找不到适配器目录（e-night-companion-adapter / yf-robot-wechat-adapter）');
+    console.log('    把适配器仓库克隆到主目录旁边，或者去掉 --with-adapter');
     process.exit(1);
   }
 

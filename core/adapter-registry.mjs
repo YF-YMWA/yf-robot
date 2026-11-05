@@ -106,10 +106,13 @@ export function listAdapters(root) {
   const bundled = path.join(root, 'adapter');
   if (fs.existsSync(bundled)) push(describe({ dir: bundled, id: 'adapter', mode: 'bundled' }));
 
-  // 3. 隔壁仓库（开发形态）
-  const sibling = path.join(path.dirname(root), 'yf-robot-wechat-adapter');
-  if (fs.existsSync(sibling)) {
-    push(describe({ dir: sibling, id: 'wechat-adapter', mode: 'sibling' }));
+  // 3. 隔壁仓库（开发形态）：新名字优先，旧名字兼容
+  for (const name of ['e-night-companion-adapter', 'yf-robot-wechat-adapter']) {
+    const sibling = path.join(path.dirname(root), name);
+    if (fs.existsSync(sibling)) {
+      push(describe({ dir: sibling, id: 'wechat-adapter', mode: 'sibling' }));
+      break;
+    }
   }
 
   return out;

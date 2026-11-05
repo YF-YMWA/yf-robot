@@ -991,7 +991,7 @@ export class AdminApi {
       // ===== 检查更新 =====
       if (method === 'GET' && pathname === '/api/admin/update/check') {
         const local = this.#version();
-        const repo = this.config.repo || 'YF-YMWA/yf-robot';
+        const repo = this.config.repo || 'YF-YMWA/e-night-companion';
 
         try {
           const { latest, versions } = await this.#latestTag(repo);
@@ -1127,7 +1127,7 @@ export class AdminApi {
       // ===== 一键更新（下载新版本、覆盖代码、保留配置和数据）=====
       if (method === 'POST' && pathname === '/api/admin/update/apply') {
         const local = this.#version();
-        const repo = this.config.repo || 'YF-YMWA/yf-robot';
+        const repo = this.config.repo || 'YF-YMWA/e-night-companion';
 
         // 先查最新版本（复用检查更新的逻辑）
         let latest = '';
@@ -1146,7 +1146,7 @@ export class AdminApi {
           local,
           // 默认连适配器一起更新（没有 adapter/ 目录时会自动跳过）
           includeAdapter: body?.includeAdapter !== false,
-          adapterRepo: this.config.adapterRepo || 'YF-YMWA/yf-robot-wechat-adapter',
+          adapterRepo: this.config.adapterRepo || 'YF-YMWA/e-night-companion-adapter',
           log: (m) => this.log.info?.(m),
         });
         return { code: 200, body: { ...r, local, latest } };
@@ -1576,9 +1576,11 @@ export class AdminApi {
                    */
                   const own = path.join(root, 'adapters');
                   if (fs.existsSync(own)) return { path: own, exists: true, note: '包内形态' };
-                  const sibling = path.join(root, '..', 'yf-robot-wechat-adapter');
-                  if (fs.existsSync(sibling)) {
-                    return { path: sibling, exists: true, note: '开发形态（隔壁仓库）' };
+                  for (const name of ['e-night-companion-adapter', 'yf-robot-wechat-adapter']) {
+                    const sibling = path.join(root, '..', name);
+                    if (fs.existsSync(sibling)) {
+                      return { path: sibling, exists: true, note: '开发形态（隔壁仓库）' };
+                    }
                   }
                   return { path: own, exists: false, note: '把适配器文件夹放到这里' };
                 })(),

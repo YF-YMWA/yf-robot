@@ -153,7 +153,7 @@ export async function applyUpdate({
   latest,
   local,
   includeAdapter = false,
-  adapterRepo = 'YF-YMWA/yf-robot-wechat-adapter',
+  adapterRepo = 'YF-YMWA/e-night-companion-adapter',
   log = () => {},
 }) {
   const steps = [];

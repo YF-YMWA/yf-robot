@@ -18,6 +18,7 @@ const MAX = Number(process.argv[2]) || 3000;
 /** 找适配器日志 */
 function findLog() {
   const candidates = [
+    path.join(process.cwd(), '..', 'e-night-companion-adapter', 'data', 'wechat-bridge-4x.log'),
     path.join(process.cwd(), '..', 'yf-robot-wechat-adapter', 'data', 'wechat-bridge-4x.log'),
     path.join(process.cwd(), 'adapter', 'data', 'wechat-bridge-4x.log'),
   ];

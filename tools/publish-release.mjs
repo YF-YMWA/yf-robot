@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 
 const TOKEN = process.env.GH_TOKEN || '';
-const REPO = 'YF-YMWA/yf-robot';
+const REPO = 'YF-YMWA/e-night-companion';
 const VERSION = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
 const TAG = 'v' + VERSION;
 const FILE = 'ENbot-v' + VERSION + '.zip';
@@ -40,7 +40,15 @@ const notes = `## E Night Companion（ENC / ENbot）${TAG}
 
 要接微信，请把适配器放到 \`adapters/<名字>/\` 下（见 docs/multi-adapter.md）。
 
-### 本次更新（0.9.25）
+### 本次更新（0.9.26）
+
+- **两个 GitHub 仓库更名**
+  - 主仓：\`YF-YMWA/yf-robot\` → \`YF-YMWA/e-night-companion\`
+  - 适配器仓：\`YF-YMWA/yf-robot-wechat-adapter\` → \`YF-YMWA/e-night-companion-adapter\`
+  - 更新检查、发布脚本、README、\`package.json\` 全部指向新地址；旧地址由 GitHub 自动重定向
+  - 适配器发现支持新目录名，旧目录名继续兼容
+
+#### 启动器与改名（0.9.25）
 
 - **更名**：YF-Robot → **E Night Companion（ENbot）**
   - 启动器 exe 改为 \`ENbot.exe\`，快捷方式、托盘、安装器、控制台、文档统一换名
@@ -66,7 +74,7 @@ const notes = `## E Night Companion（ENC / ENbot）${TAG}
 ### 升级说明
 
 - **0.9.24 及更早的「一键更新」只覆盖代码，不会替换新的启动器 exe 和桌面 UI。**
-  升级到 0.9.25 请手动解压覆盖（\`config.json\`、\`data/\` 会保留）。
+  升级到 0.9.26 请手动解压覆盖（\`config.json\`、\`data/\` 会保留）。
 - 解压后跑一次 \`安装软件.bat\`：会建 \`ENbot\` 快捷方式，并清掉旧的 \`YF-Robot\` 快捷方式/启动项/卸载项。
 - 「一键更新」默认勾选「连适配器一起更新」：
   只更新 \`adapter/\` 下的非 git 副本，保留 \`config.json\` 和 \`data/\`；

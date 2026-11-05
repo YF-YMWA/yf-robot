@@ -1155,7 +1155,7 @@ namespace YFRobot
                         _ctx.OpenInBrowser();
                         return "{\"ok\":true}";
                     case "github":
-                        OpenUrl("https://github.com/YF-YMWA/yf-robot");
+                        OpenUrl("https://github.com/YF-YMWA/e-night-companion");
                         return "{\"ok\":true}";
                     case "open":
                         return OpenApp(arg);

@@ -1,3 +1,18 @@
+## [0.9.26] - 2026-11-05
+
+### 仓库更名
+
+- **主仓**：`YF-YMWA/yf-robot` → `YF-YMWA/e-night-companion`
+- **适配器仓**：`YF-YMWA/yf-robot-wechat-adapter` → `YF-YMWA/e-night-companion-adapter`
+- 更新检查、发布脚本、README 克隆地址、`package.json` 仓库字段全部指向新地址
+- 旧 GitHub 地址会自动重定向，已安装的旧版本仍能检查更新
+- 适配器发现：新目录名 `e-night-companion-adapter` 优先，旧 `yf-robot-wechat-adapter` 继续兼容
+- 适配器 README / 诊断报告同步 ENbot 品牌
+
+### 说明
+
+- 代码、配置字段、数据目录结构不变；只改仓库地址和默认值
+
 ## [0.9.25] - 2026-11-05
 
 ### 更名
@@ -15,7 +30,7 @@
 
 ### 说明
 
-- GitHub 仓库地址仍是 `YF-YMWA/yf-robot`（更新检查、Release 不受影响）
+- GitHub 仓库地址在 0.9.26 改为 `YF-YMWA/e-night-companion`（旧地址自动重定向）
 - 数据目录、`config.json`、记忆和会话都不变
 
 ## [0.9.24] - 2026-11-04

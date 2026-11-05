@@ -11,7 +11,7 @@
 |---|---|
 | `<项目>/adapters/<名字>/` | **推荐**。一个适配器一个文件夹 |
 | `<项目>/adapter/` | 打包形态（带适配器的包解压后就这一个） |
-| 隔壁 `../yf-robot-wechat-adapter/` | 开发形态（两个仓库并排） |
+| 隔壁 `../e-night-companion-adapter/`（旧名 `yf-robot-wechat-adapter` 也兼容） | 开发形态（两个仓库并排） |
 
 目录里必须有**入口脚本**；最好再有一份 `adapter.json` 清单：
 
