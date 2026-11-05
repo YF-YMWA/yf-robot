@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 S = 1024
+ART = os.path.join(ROOT, "desktop", "art", "ENbot-moon-girl.png")
 
 C1 = (99, 102, 241)    # indigo
 C2 = (59, 130, 246)    # blue
@@ -118,6 +119,17 @@ def small_face(sz):
     return img.resize((sz, sz), Image.LANCZOS)
 
 
+def small_girl(sz):
+    """16 / 20 / 24 用头部特写，脸更大，不直接缩全身图。"""
+    if not os.path.exists(ART):
+        return small_face(sz)
+    im = Image.open(ART).convert("RGBA")
+    crop = im.crop((240, 40, 800, 600)).resize((sz, sz), Image.LANCZOS)
+    out = Image.new("RGBA", (sz, sz), (0, 0, 0, 0))
+    out.paste(crop, (0, 0), rounded_mask(sz, radius=max(3, int(sz * 0.22))))
+    return out
+
+
 def save_ico(img, path, sizes):
     """手写 ICO：≤128 用 32bpp BMP 帧，256 用 PNG 帧。
 
@@ -127,7 +139,7 @@ def save_ico(img, path, sizes):
     frames = []
     for sz in sizes:
         if sz <= 128:
-            rgba = (small_face(sz) if sz <= 24 else img.resize((sz, sz), Image.LANCZOS)).convert("RGBA")
+            rgba = (small_girl(sz) if sz <= 24 else img.resize((sz, sz), Image.LANCZOS)).convert("RGBA")
             px = rgba.load()
             xor = bytearray()
             for y in range(sz - 1, -1, -1):
@@ -159,8 +171,13 @@ def save_ico(img, path, sizes):
 
 
 def main():
-    img = plate()
-    robot(img)
+    if os.path.exists(ART):
+        # 正式品牌图：已经有圆角、去水印的 1024 母版
+        img = Image.open(ART).convert("RGBA").resize((S, S), Image.LANCZOS)
+    else:
+        # 兼容旧做法：没有母版时画机器人
+        img = plate()
+        robot(img)
 
     ui_dir = os.path.join(ROOT, "desktop", "ui")
     os.makedirs(ui_dir, exist_ok=True)
