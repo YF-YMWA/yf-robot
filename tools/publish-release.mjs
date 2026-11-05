@@ -45,7 +45,7 @@ const notes = `## E Night Companion（ENC / ENbot）${TAG}
 - **沙箱加固**
   - realpath 校验，拒绝 junction/symlink 走出工作目录
   - 拒绝绝对路径、UNC、ADS、Windows 保留设备名和硬链接
-  - `run_command` 移除 Python/Node 直通；新增 `run_code`，仅完全权限 + 每次审批
+  - \`run_command\` 移除 Python/Node 直通；新增 \`run_code\`，仅完全权限 + 每次审批
   - 命令参数拒绝绝对路径/URL；写文件、命令、代码和拒绝都写审计日志
   - 新增 docs/SANDBOX.md 说明边界
 
