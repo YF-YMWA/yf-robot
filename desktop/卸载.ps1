@@ -1,4 +1,4 @@
-﻿# 卸载 E Night Companion（ENbot）（当前用户）
+﻿# 卸载 E Night Companion（ENC / ENbot）（当前用户）
 #
 # 只删快捷方式和注册表项，**不删程序目录和数据**（记忆、素材都留着）。
 # 想彻底删，卸载完自己把文件夹删掉即可。
@@ -10,7 +10,7 @@ $silent = ($env:YF_SILENT -eq '1')
 if (-not $silent) {
     $r = [System.Windows.Forms.MessageBox]::Show(
         "确定卸载 ENbot 吗？`n`n只删快捷方式和开机自启，程序目录和 data（记忆、素材）都会留着。",
-        'E Night Companion（ENbot）卸载', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
+        'E Night Companion（ENC / ENbot）卸载', [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
     if ($r -ne 'Yes') { exit 0 }
 }
 
@@ -43,7 +43,7 @@ Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' 
 if (-not $silent) {
     [System.Windows.Forms.MessageBox]::Show(
         "已卸载。`n`n程序目录和 data 都还在，需要的话可以手动删。",
-        'E Night Companion（ENbot）卸载', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+        'E Night Companion（ENC / ENbot）卸载', [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
 } else {
     Write-Host "已卸载（静默）"
 }

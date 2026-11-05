@@ -26,9 +26,9 @@ const H = {
   'content-type': 'application/json',
 };
 
-const notes = `## E Night Companion（ENbot）${TAG}
+const notes = `## E Night Companion（ENC / ENbot）${TAG}
 
-ENbot 是 **E Night Companion** 的简称。E 可以是 **Eternal（永恒）**，也可以是 **Electronic（电子）**。
+**E Night Companion**，简称 **ENC** 或 **ENbot**。名字不解释，留一点想象空间。
 
 解压到纯英文路径（例如 \`D:\\ENbot\`），双击最外层的 **\`ENbot.exe\`** 启动
 （不想用启动器就双击 \`ENbot.bat\`）。包内自带 Node 和 Python 运行时，不需要另装环境。
@@ -92,7 +92,7 @@ async function main() {
       headers: H,
       body: JSON.stringify({
         tag_name: TAG,
-        name: `E Night Companion（ENbot）${TAG}`,
+        name: `E Night Companion（ENC / ENbot）${TAG}`,
         body: notes,
         draft: false,
         prerelease: false,

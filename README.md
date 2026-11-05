@@ -1,7 +1,9 @@
-# E Night Companion（ENbot）
+# E Night Companion（ENC / ENbot）
 
-**E Night Companion**，简称 **ENbot**。
-E 可以是 **Eternal（永恒）**，也可以是 **Electronic（电子）** —— 名字留一点想象空间。
+**E Night Companion**，简称 **ENC** 或 **ENbot**。
+
+这个仓库是 **E Night Companion（ENC / ENbot）** 的源码与发行版。
+名字不解释，留一点想象空间。
 
 一个能陪聊、能干活、能进微信的人设化 AI 助手。
 

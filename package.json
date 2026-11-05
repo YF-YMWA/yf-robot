@@ -3,8 +3,11 @@
   "version": "0.9.25",
   "private": false,
   "type": "module",
-  "description": "E Night Companion（ENbot）—— 人设化 AI 助手，支持微信接入、角色卡、长期记忆、看图/画图/语音/联网学习",
+  "description": "E Night Companion（ENC / ENbot）—— 人设化 AI 助手，支持微信接入、角色卡、长期记忆、看图/画图/语音/联网学习",
   "keywords": [
+    "enbot",
+    "enc",
+    "e-night-companion",
     "ai",
     "chatbot",
     "wechat",

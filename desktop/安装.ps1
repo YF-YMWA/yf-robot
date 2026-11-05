@@ -1,4 +1,4 @@
-﻿# 安装 E Night Companion（ENbot）（当前用户，不需要管理员）
+﻿# 安装 E Night Companion（ENC / ENbot）（当前用户，不需要管理员）
 #
 # 做三件事：
 #   1. 在桌面和开始菜单建快捷方式（优先指向根目录 ENbot.exe，没有 exe 才回退 vbs）
@@ -70,8 +70,8 @@ $desktop = [Environment]::GetFolderPath('Desktop')
 $startMenu = Join-Path ([Environment]::GetFolderPath('Programs')) 'ENbot'
 
 New-Item -ItemType Directory -Path $startMenu -Force | Out-Null
-New-Shortcut (Join-Path $desktop 'ENbot.lnk') $launchTarget $launchArgs 'E Night Companion（ENbot）启动器'
-New-Shortcut (Join-Path $startMenu 'ENbot.lnk') $launchTarget $launchArgs 'E Night Companion（ENbot）启动器'
+New-Shortcut (Join-Path $desktop 'ENbot.lnk') $launchTarget $launchArgs 'E Night Companion（ENC / ENbot）启动器'
+New-Shortcut (Join-Path $startMenu 'ENbot.lnk') $launchTarget $launchArgs 'E Night Companion（ENC / ENbot）启动器'
 New-Shortcut (Join-Path $startMenu '打开数据目录.lnk') 'explorer.exe' ('"' + (Join-Path $Root 'data') + '"') 'ENbot 数据目录'
 New-Shortcut (Join-Path $startMenu '卸载 ENbot.lnk') 'wscript.exe' ('"' + (Join-Path $Root 'desktop\卸载.vbs') + '"') '卸载 ENbot'
 
@@ -85,7 +85,7 @@ Get-Process -Name 'YF-Robot' -ErrorAction SilentlyContinue | Stop-Process -Force
 # ===== 2. 卸载登记（当前用户）=====
 $uninstKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ENbot'
 New-Item -Path $uninstKey -Force | Out-Null
-Set-ItemProperty -Path $uninstKey -Name 'DisplayName' -Value 'E Night Companion (ENbot)'
+Set-ItemProperty -Path $uninstKey -Name 'DisplayName' -Value 'E Night Companion (ENC / ENbot)'
 Set-ItemProperty -Path $uninstKey -Name 'DisplayVersion' -Value $ver
 Set-ItemProperty -Path $uninstKey -Name 'Publisher' -Value 'YF-YMWA'
 Set-ItemProperty -Path $uninstKey -Name 'InstallLocation' -Value $Root

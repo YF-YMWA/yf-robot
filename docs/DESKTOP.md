@@ -1,6 +1,6 @@
-# E Night Companion（ENbot）桌面版
+# E Night Companion（ENC / ENbot）桌面版
 
-E Night Companion 简称 **ENbot**。E 可以是 **Eternal（永恒）**，也可以是 **Electronic（电子）**。
+E Night Companion 简称 **ENC** 或 **ENbot**。名字不解释，留一点想象空间。
 
 ENbot 现在像正常软件一样用：**双击桌面图标启动，右下角托盘常驻，没有黑窗口**。
 
