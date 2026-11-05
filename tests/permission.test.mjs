@@ -63,13 +63,12 @@ test('full 档：管理动作放行到业务层（不再是权限问题）', asy
 test('危险命令：即使 full 也拒绝', async () => {
   const k = kit('full');
   const cases = [
-    ['python', ['-c', 'import shutil; shutil.rmtree("/")']],
-    ['node', ['-e', 'require("fs").rmSync("data",{recursive:true})']],
     ['ffmpeg', ['-i', 'a', 'format c:']],
+    ['ffmpeg', ['-i', 'a', 'shutdown']],
   ];
   for (const [cmd, args] of cases) {
     const out = await k.run('run_command', { command: cmd, args }, { isOwner: true });
-    assert.match(out, /删东西|改系统|不执行/, `${cmd} 应该被挡，实际：${out}`);
+    assert.match(out, /删东西|改系统|不执行|危险字符/, `${cmd} 应该被挡，实际：${out}`);
   }
 });
 

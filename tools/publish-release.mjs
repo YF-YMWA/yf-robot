@@ -40,7 +40,16 @@ const notes = `## E Night Companion（ENC / ENbot）${TAG}
 
 要接微信，请把适配器放到 \`adapters/<名字>/\` 下（见 docs/multi-adapter.md）。
 
-### 本次更新（0.9.28）
+### 本次更新（0.9.29）
+
+- **沙箱加固**
+  - realpath 校验，拒绝 junction/symlink 走出工作目录
+  - 拒绝绝对路径、UNC、ADS、Windows 保留设备名和硬链接
+  - `run_command` 移除 Python/Node 直通；新增 `run_code`，仅完全权限 + 每次审批
+  - 命令参数拒绝绝对路径/URL；写文件、命令、代码和拒绝都写审计日志
+  - 新增 docs/SANDBOX.md 说明边界
+
+### 0.9.28 动图上传
 
 - **动图上传**
   - GIF / APNG / 动画 WebP 自动带「动图」标签
@@ -89,7 +98,7 @@ const notes = `## E Night Companion（ENC / ENbot）${TAG}
 ### 升级说明
 
 - **0.9.24 及更早的「一键更新」只覆盖代码，不会替换新的启动器 exe 和桌面 UI。**
-  升级到 0.9.28 请手动解压覆盖（\`config.json\`、\`data/\` 会保留）。
+  升级到 0.9.29 请手动解压覆盖（\`config.json\`、\`data/\` 会保留）。
 - 解压后跑一次 \`安装软件.bat\`：会建 \`ENbot\` 快捷方式，并清掉旧的 \`YF-Robot\` 快捷方式/启动项/卸载项。
 - 「一键更新」默认勾选「连适配器一起更新」：
   只更新 \`adapter/\` 下的非 git 副本，保留 \`config.json\` 和 \`data/\`；

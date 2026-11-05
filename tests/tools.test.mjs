@@ -34,9 +34,8 @@ test('resolveSafe 拒绝路径穿越', () => {
 
 test('resolveSafe 拒绝绝对路径逃逸', () => {
   const kit = makeKit();
-  // 绝对路径会被相对化后限制在沙箱内
-  const p = kit.resolveSafe('/etc/passwd');
-  assert.ok(p.startsWith(sandbox), '应被限制在沙箱内');
+  // 绝对路径一律拒绝，不能“相对化后放进来”
+  assert.throws(() => kit.resolveSafe('/etc/passwd'), /越界|相对路径/);
 });
 
 test('resolveSafe 允许子目录', () => {
@@ -123,22 +122,32 @@ test('runCommand 拒绝白名单外的命令', async () => {
 
 test('runCommand 拒绝危险参数', async () => {
   const kit = makeKit();
-  await assert.rejects(() => kit.runCommand('node', ['-e', 'x; rm -rf /']), /危险字符/);
-  await assert.rejects(() => kit.runCommand('node', ['../../etc']), /危险字符/);
+  await assert.rejects(() => kit.runCommand('ffmpeg', ['-i', 'x; rm -rf /']), /危险字符/);
+  await assert.rejects(() => kit.runCommand('ffmpeg', ['-i', '../../etc']), /危险字符/);
+  await assert.rejects(() => kit.runCommand('ffmpeg', ['-i', 'C:\\Windows\\win.ini']), /绝对路径/);
 });
 
-test('runCommand 允许白名单命令（node）', async () => {
-  const kit = makeKit();
-  const r = await kit.runCommand('node', ['-e', 'console.log("OK")']);
+test('run_code 在完全权限 + 审批后执行', async () => {
+  const kit = makeKit({ config: { tools: { permission: 'full', approval: true } } });
+  const r = await kit.run(
+    'run_code',
+    { language: 'node', code: 'console.log("OK")' },
+    { askApproval: async () => ({ approved: true }) },
+  );
   assert.ok(r.includes('OK'));
 });
 
-test('runCommand 超时会被终止', async () => {
-  const kit = makeKit({ cmdTimeout: 1000 });
-  await assert.rejects(
-    () => kit.runCommand('node', ['-e', 'setTimeout(()=>{}, 10000)']),
-    /timed out|timeout/i,
+test('run_code 超时会被终止', async () => {
+  const kit = makeKit({
+    cmdTimeout: 1000,
+    config: { tools: { permission: 'full', approval: true } },
+  });
+  const out = await kit.run(
+    'run_code',
+    { language: 'node', code: 'setTimeout(()=>{}, 10000)' },
+    { askApproval: async () => ({ approved: true }) },
   );
+  assert.match(out, /失败|timed out|超时/i);
 });
 
 // ---------- 工具分发 ----------

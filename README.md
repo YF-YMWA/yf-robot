@@ -86,8 +86,8 @@ node app.mjs
 | **可插拔接入** | 任何平台写成适配器即可接入，核心不含平台代码 |
 | **Key 保护** | 原子写盘、守卫、50 份归档，一键修复能从备份恢复 |
 | **维护** | 一键修复（查 Key / 目录 / 配置）+ 一键更新（只覆盖代码） |
-| **权限分级** | 只读 / 工作区 / 完全 三档；危险命令即使「完全」也拒绝 |
-| **操作审批** | 写文件、跑命令、改设置前在微信里问一句「要我做吗」，回「允许」才执行 |
+| **权限分级** | 只读 / 工作区 / 完全 三档；解释器不再直通，代码执行只给「完全」且每次审批 |
+| **操作审批** | 写文件、跑命令、跑代码前在微信里问一句，展示命令/路径/代码预览，回「允许」才执行 |
 | **后台作业** | 画图这类慢任务先回「画着呢」，画完自动补发，不卡对话 |
 | **定时任务** | 每天 / 每隔 N 分钟 / 指定时刻；内容可让模型现写 |
 | **读网页** | 给个链接就能读正文（去脚本去标签），不是只看标题 |
@@ -148,6 +148,7 @@ node app.mjs
 | [docs/conventions.md](docs/conventions.md) | 开发约定（每项功能都要有面板入口…） |
 | [docs/adapter-protocol.md](docs/adapter-protocol.md) | 适配器 HTTP 协议 |
 | [docs/plugin-api.md](docs/plugin-api.md) | 插件开发 |
+| [docs/SANDBOX.md](docs/SANDBOX.md) | 沙箱边界、命令白名单、run_code 与审计 |
 | [docs/logic-library.md](docs/logic-library.md) | 逻辑库怎么用、安全边界 |
 | [docs/content-model.md](docs/content-model.md) | 三种库各管什么、为什么不合并 |
 | [docs/data-scoping.md](docs/data-scoping.md) | 按角色卡隔离的目录结构 |

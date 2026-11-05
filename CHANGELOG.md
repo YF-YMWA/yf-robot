@@ -1,3 +1,18 @@
+## [0.9.29] - 2026-11-05
+
+### 沙箱加固
+
+- `resolveSafe` 增加 realpath 校验：拒绝 junction/symlink 走出工作目录
+- 拒绝绝对路径、UNC、盘符、ADS（`file:stream`）、Windows 保留设备名、尾随点/空格
+- 不操作硬链接文件，避免同卷外文件被读写
+- `run_command` 白名单移除 Python / Node；新增高危 `run_code`
+  - 只在「完全」权限开放
+  - 每次都必须审批，展示代码预览和工作目录
+  - 没有审批通道的入口直接拒绝
+- 命令参数拒绝绝对路径、URL/协议和响应文件；文件类命令参数再做一次沙箱校验
+- 写文件、执行命令/代码、权限拒绝写入 `data/sandbox-audit.log`
+- 新增 [docs/SANDBOX.md](docs/SANDBOX.md)
+
 ## [0.9.28] - 2026-11-05
 
 ### 素材上传

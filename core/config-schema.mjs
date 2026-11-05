@@ -43,7 +43,8 @@ export const SECTION_SCHEMA = {
       enabled: F('boolean', true, { label: '启用工具' }),
       /**
        * 权限档位：
-       *   read-only 只能读；workspace 能写沙箱内的文件；full 额外放开管理类工具
+       *   read-only 只能读；workspace 能写沙箱内的文件；
+       *   full 额外放开管理类工具与 run_code（每次仍需审批）
        * 默认 workspace —— 聊天场景够用，又不会让陌生人的一句话删掉真实文件。
        */
       permission: F('string', 'workspace', {

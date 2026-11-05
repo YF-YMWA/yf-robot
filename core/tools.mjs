@@ -17,19 +17,21 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 
-/** 命令白名单：只允许这些程序 */
+/** 命令白名单：只允许这些程序（解释器不再直通，走 run_code 高危工具） */
 const ALLOWED_COMMANDS = new Set([
   'ffmpeg', 'ffprobe',  // 音视频处理
-  'python', 'python3', 'py',  // 脚本
-  'node',               // 本项目的 node
   'dir', 'ls',          // 列目录
   'type', 'cat',        // 看文件
 ]);
 
+/** Windows 保留设备名：即使在沙箱里也不能创建 */
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+const IS_WINDOWS = process.platform === 'win32';
+
 /** 危险参数模式：即使命令在白名单，这些参数也拒绝 */
 const DANGEROUS_ARGS = [
   /[;&|`$]/,        // shell 注入
-  /\.\.\//,         // 路径穿越
+  /\.\.[\\/]/,      // 路径穿越（Windows 反斜杠也要挡）
   /^-rf?,?\s*\//,   // rm -rf /
   /format\s+[a-z]:/i, // 格式化磁盘
   /del\s+\/[sq]/i,
@@ -103,24 +105,108 @@ export class ToolKit {
     this.imagegen = opts.imagegen || null;
 
     fs.mkdirSync(this.sandbox, { recursive: true });
+    // 沙箱根也可能是 junction/symlink；用真实路径做边界比较
+    try {
+      this.sandboxReal = fs.realpathSync.native(this.sandbox);
+    } catch {
+      this.sandboxReal = this.sandbox;
+    }
   }
 
   /**
    * 把相对路径解析成沙箱内的绝对路径，越界则抛错。
+   *
+   * 注意：不能只做字符串比较。沙箱里放一个 junction/symlink 指向外面，
+   * `path.resolve` 仍然会放行；所以这里同时做：
+   *   1. 拒绝绝对路径、UNC、盘符、ADS、保留设备名、尾随点/空格
+   *   2. 拒绝任何 `..` 段
+   *   3. 对已存在目标 / 最近已存在父目录做 realpath，再比较是否在沙箱内
+   *   4. 目标本身是 symlink 时直接拒绝
+   *
    * @param {string} rel
    * @returns {string}
    */
   resolveSafe(rel) {
-    const cleaned = String(rel || '').replace(/^[/\\]+/, '');
-    const abs = path.resolve(this.sandbox, cleaned);
+    const raw = String(rel ?? '');
+    if (raw.includes('\0')) throw new Error('路径里含非法字符');
 
-    // 必须在沙箱内
-    const relative = path.relative(this.sandbox, abs);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    if (raw === '' || raw === '.') return this.sandboxReal;
+
+    // 绝对路径 / UNC / 盘符 / 盘符相对路径，一律拒绝
+    if (path.isAbsolute(raw) || /^[a-zA-Z]:/.test(raw) || /^[\\/]/.test(raw)) {
+      throw new Error('路径越界：只能使用工作目录内的相对路径');
+    }
+    if (IS_WINDOWS && raw.includes(':')) {
+      throw new Error('路径里不能带冒号（可能是 NTFS 数据流或盘符）');
+    }
+
+    const parts = raw.split(/[\\/]+/).filter((p) => p && p !== '.');
+    for (const part of parts) {
+      if (part === '..') throw new Error('路径越界：不能使用 ..');
+      if (IS_WINDOWS && /[. ]$/.test(part)) {
+        throw new Error(`文件名不能以点或空格结尾：${part}`);
+      }
+      if (IS_WINDOWS && WINDOWS_RESERVED.test(part)) {
+        throw new Error(`不能使用 Windows 保留设备名：${part}`);
+      }
+    }
+
+    const abs = path.resolve(this.sandboxReal, ...parts);
+    const lexical = path.relative(this.sandboxReal, abs);
+    if (lexical.startsWith('..') || path.isAbsolute(lexical)) {
       throw new Error('路径越界：只能操作工作目录内的文件');
     }
 
+    // 目标本身是 symlink/junction → 拒绝（即使它指向沙箱内部，也不跟）
+    try {
+      const st = fs.lstatSync(abs);
+      if (st.isSymbolicLink()) throw new Error('不跟随工作目录里的符号链接/目录联接');
+      // 硬链接可以绕过路径边界（同卷外文件），不操作
+      if (st.isFile() && st.nlink > 1) throw new Error('不操作硬链接文件');
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+
+    // 找到最近的已存在路径，做 realpath 校验
+    let probe = abs;
+    while (probe !== this.sandboxReal) {
+      try {
+        fs.lstatSync(probe);
+        break;
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+        const parent = path.dirname(probe);
+        if (parent === probe) break;
+        probe = parent;
+      }
+    }
+
+    let real;
+    try {
+      real = fs.realpathSync.native(probe);
+    } catch {
+      real = probe;
+    }
+    const realRel = path.relative(this.sandboxReal, real);
+    if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
+      throw new Error('路径越界：工作目录里有链接指向外面');
+    }
+
     return abs;
+  }
+
+  /** 沙箱操作审计（不记录代码正文，避免把密钥写进日志）。 */
+  #audit(event, extra = {}) {
+    try {
+      const root = this.config?.root || path.join(this.sandbox, '..');
+      const file = path.join(root, 'data', 'sandbox-audit.log');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.appendFileSync(
+        file,
+        JSON.stringify({ at: new Date().toISOString(), event, ...extra }) + '\n',
+        'utf8',
+      );
+    } catch {}
   }
 
   /**
@@ -268,6 +354,23 @@ export class ToolKit {
               },
             },
             required: ['command'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'run_code',
+          description:
+            '在沙箱工作目录执行一段 Python 或 Node 代码。高危：需要「完全」权限，且每次都要主人审批。' +
+            '代码拥有当前用户权限，只运行可信代码。',
+          parameters: {
+            type: 'object',
+            properties: {
+              language: { type: 'string', enum: ['python', 'node'] },
+              code: { type: 'string', description: '完整代码' },
+            },
+            required: ['language', 'code'],
           },
         },
       },
@@ -538,6 +641,12 @@ export class ToolKit {
    * @returns {string} 需要审批时返回一句理由；空字符串表示直接做
    */
   needsApproval(name, args = {}) {
+    // 高危代码执行：不受 tools.approval=false 影响，必须每次点头
+    if (name === 'run_code') {
+      const code = String(args.code || '');
+      return `要执行 ${args.language || '代码'}（工作目录：${this.sandbox}）：${code.slice(0, 120)}`;
+    }
+
     // 开关：tools.approval 默认开（关掉就回到「按档位直接执行」）
     if (this.config?.tools?.approval === false) return '';
 
@@ -556,6 +665,13 @@ export class ToolKit {
       const cmd = String(args.command || '').toLowerCase();
       const READONLY = ['ffprobe', 'ffmpeg -version', 'node -v', 'python -v'];
       if (READONLY.some((x) => cmd.includes(x))) return '';
+      const joined = [args.command, ...(Array.isArray(args.args) ? args.args : [])]
+        .map(String)
+        .join(' ');
+      return `要执行命令：${joined.slice(0, 200)}（工作目录：${this.sandbox}）`;
+    }
+    if (name === 'write_file') {
+      return `要写文件：${String(args.path || '').slice(0, 120)}（工作目录：${this.sandbox}）`;
     }
 
     return reason;
@@ -593,6 +709,7 @@ export class ToolKit {
     const WRITE = new Set([
       'write_file',
       'run_command',
+      'run_code',
       'save_sticker',
       'send_image',
       'draw_image',
@@ -601,8 +718,8 @@ export class ToolKit {
       'admin_media',
     ]);
 
-    /** 只有 full 档才给的管理动作 */
-    const ADMIN = new Set(['admin_config', 'admin_media']);
+    /** 只有 full 档才给的管理/高危动作 */
+    const ADMIN = new Set(['admin_config', 'admin_media', 'run_code']);
 
     if (mode === 'read-only' && WRITE.has(name)) {
       return `（现在是「只读」模式，不能${name}。要让主人把权限调高才行）`;
@@ -652,6 +769,7 @@ export class ToolKit {
       const deny = this.#checkPermission(name, args);
       if (deny) {
         this.log.info?.(`[tool] ${name} 被权限挡住（${this.#permissionMode()}）`);
+        this.#audit('deny', { tool: name, reason: deny });
         return deny;
       }
 
@@ -662,6 +780,9 @@ export class ToolKit {
        * 她突然要写文件、跑命令。这里登记一条待审批，
        * 由通道去问主人；主人回「允许」才真的执行。
        */
+      if (name === 'run_code' && !ctx?.askApproval) {
+        return '（run_code 需要人工审批，当前通道不支持审批，已拒绝）';
+      }
       const need = this.needsApproval(name, args);
       if (need && ctx?.askApproval) {
         const req = await ctx.askApproval({ tool: name, args, reason: need });
@@ -685,6 +806,8 @@ export class ToolKit {
           return this.writeFile(args.path, args.content);
         case 'run_command':
           return await this.runCommand(args.command, args.args || []);
+        case 'run_code':
+          return await this.#runCode(args);
         case 'search_web':
           if (!ctx.search) return '（搜索功能未启用）';
           {
@@ -892,7 +1015,21 @@ export class ToolKit {
     fs.writeFileSync(file, text, 'utf8');
 
     this.log.info?.(`[tool] 写入 ${rel}: ${formatSize(text.length)}`);
+    this.#audit('write', { path: String(rel), size: text.length });
     return `（已写入 ${rel}，${formatSize(text.length)}）`;
+  }
+
+  /** 参数里不允许出现绝对路径、协议、响应文件。 */
+  #checkCommandArg(a) {
+    const s = String(a);
+    if (s.includes('\0')) throw new Error('参数里含非法字符');
+    if (/^(https?|ftp|file|concat|subfile):/i.test(s)) {
+      throw new Error('命令参数里不能带外部协议/URL');
+    }
+    if (s.startsWith('@')) throw new Error('命令参数里不能使用响应文件');
+    if (/^[a-zA-Z]:/.test(s) || path.isAbsolute(s) || /^[\\/]/.test(s)) {
+      throw new Error(`命令参数里不能使用绝对路径：${s}`);
+    }
   }
 
   /** 执行命令（白名单 + 参数检查）。 */
@@ -909,15 +1046,25 @@ export class ToolKit {
       for (const re of DANGEROUS_ARGS) {
         if (re.test(a)) throw new Error(`参数含危险字符：${a}`);
       }
+      this.#checkCommandArg(a);
+    }
+
+    // 文件读取类命令：参数必须仍解析在沙箱内，防止用链接/相对路径绕出去
+    if (['dir', 'ls', 'type', 'cat'].includes(name)) {
+      for (const a of argList) {
+        if (a.startsWith('-')) continue;
+        this.resolveSafe(a);
+      }
     }
 
     // node 用当前进程的可执行文件，避免 PATH 里找不到
     const exe = name === 'node' ? process.execPath : name;
 
     this.log.info?.(`[tool] 执行 ${name} ${argList.join(' ')}`);
+    this.#audit('command', { command: name, args: argList.join(' ').slice(0, 300), cwd: this.sandboxReal });
 
     const { stdout, stderr } = await exec(exe, argList, {
-      cwd: this.sandbox,
+      cwd: this.sandboxReal,
       timeout: this.cmdTimeout,
       maxBuffer: this.maxOutput * 4,
       windowsHide: true,
@@ -932,6 +1079,78 @@ export class ToolKit {
     ]
       .filter(Boolean)
       .join('\n\n') || '（命令执行完成，无输出）';
+  }
+
+  /**
+   * 高危代码执行：Python / Node。
+   *
+   * 注意：这不是 OS 级隔离，代码仍拥有当前用户权限；所以只在 full 档、
+   * 且每次人工审批后运行，并且只接受可信代码。
+   */
+  async #runCode(args = {}) {
+    const language = String(args.language || '').toLowerCase();
+    const code = String(args.code || '');
+    if (!['python', 'node'].includes(language)) {
+      return '（run_code 只支持 python 或 node）';
+    }
+    if (!code.trim()) return '（代码为空）';
+    if (code.length > this.maxFileSize) {
+      return `（代码太大：${formatSize(code.length)}，上限 ${formatSize(this.maxFileSize)}）`;
+    }
+
+    const root = this.config?.root || path.join(this.sandboxReal, '..');
+    const runDir = path.join(this.sandboxReal, '.run');
+    fs.mkdirSync(runDir, { recursive: true });
+    const ext = language === 'python' ? 'py' : 'js';
+    const file = path.join(runDir, `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`);
+    fs.writeFileSync(file, code, 'utf8');
+
+    const py = path.join(root, 'runtime', 'python', 'python.exe');
+    const pyFallback = path.join(root, 'runtime', 'python', 'python');
+    const exe =
+      language === 'python'
+        ? fs.existsSync(py)
+          ? py
+          : fs.existsSync(pyFallback)
+            ? pyFallback
+            : 'python'
+        : process.execPath;
+
+    const tmp = path.join(this.sandboxReal, '.tmp');
+    fs.mkdirSync(tmp, { recursive: true });
+    const env = {
+      PATH: process.env.PATH || '',
+      SystemRoot: process.env.SystemRoot || '',
+      WINDIR: process.env.WINDIR || '',
+      TEMP: tmp,
+      TMP: tmp,
+      HOME: this.sandboxReal,
+      USERPROFILE: this.sandboxReal,
+      PYTHONIOENCODING: 'utf-8',
+    };
+
+    this.log.info?.(`[tool] run_code ${language} (${code.length} chars)`);
+    this.#audit('run_code', { language, chars: code.length });
+
+    try {
+      const { stdout, stderr } = await exec(exe, [file], {
+        cwd: this.sandboxReal,
+        timeout: this.cmdTimeout,
+        maxBuffer: this.maxOutput * 4,
+        windowsHide: true,
+        env,
+      });
+      const out = (stdout || '').slice(0, this.maxOutput);
+      const err = (stderr || '').slice(0, 2000);
+      return (
+        [out && `输出：\n${out}`, err && `错误：\n${err}`].filter(Boolean).join('\n\n') ||
+        '（代码执行完成，无输出）'
+      );
+    } finally {
+      try {
+        fs.unlinkSync(file);
+      } catch {}
+    }
   }
 
   /**
